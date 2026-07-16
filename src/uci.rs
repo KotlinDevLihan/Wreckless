@@ -1,0 +1,615 @@
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::sync::Arc;
+
+use crate::{
+    board::{Board, NullBoardObserver},
+    search::Report,
+    thread::{SharedContext, Status, ThreadData},
+    threadpool::ThreadPool,
+    time::{Limits, TimeManager},
+    tools,
+    transposition::DEFAULT_TT_SIZE,
+    types::{Color, MAX_MOVES, Move, Piece, Score, Square, is_decisive, is_loss, is_win},
+};
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Mode {
+    Cli,
+    Uci,
+}
+
+struct Settings {
+    frc: bool,
+    multi_pv: usize,
+    move_overhead: u64,
+    report: Report,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            frc: false,
+            multi_pv: 1,
+            move_overhead: 100,
+            report: Report::Full,
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn message_loop(mut buffer: VecDeque<String>) {
+    let shared = Arc::new(SharedContext::default());
+    let mut settings = Settings::default();
+    let mut threads = ThreadPool::new(shared.clone());
+    let mut board = Board::starting_position();
+
+    let rx = spawn_listener(shared.clone());
+
+    let mut mode = if buffer.is_empty() { Mode::Uci } else { Mode::Cli };
+
+    loop {
+        let message = if let Some(cmd) = buffer.pop_front() {
+            cmd
+        } else if mode == Mode::Uci {
+            match rx.recv() {
+                Ok(cmd) => cmd,
+                Err(_) => break,
+            }
+        } else {
+            break;
+        };
+
+        let tokens = message.split_whitespace().collect::<Vec<_>>();
+        match tokens.as_slice() {
+            ["uci"] => {
+                uci();
+                mode = Mode::Uci;
+            }
+
+            ["isready"] => println!("readyok"),
+
+            ["go", tokens @ ..] => go(&mut threads, &settings, &board, &shared, tokens),
+            ["position", tokens @ ..] => position(&mut board, &settings, tokens),
+            ["setoption", tokens @ ..] => set_option(&mut threads, &mut settings, &shared, tokens),
+            ["ucinewgame"] => reset(&mut threads, &shared),
+
+            ["stop"] => {
+                shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                shared.status.set(Status::STOPPED);
+            }
+            ["ponderhit"] => (),
+            ["quit"] => {
+                drop(threads);
+                break;
+            }
+
+            // Non-UCI commands
+            ["compiler"] => compiler(),
+            ["eval"] => eval(threads.main_thread(), &board),
+            ["d"] => println!("{board}"),
+            ["bench", args @ ..] => match mode {
+                Mode::Uci => tools::bench::<true>(args),
+                Mode::Cli => tools::bench::<false>(args),
+            },
+            ["speedtest", args @ ..] => tools::speedtest(args),
+            ["perft", depth] => tools::perft(depth.parse().unwrap(), &mut board),
+            ["perft"] => eprintln!("Usage: perft <depth>"),
+            ["simpleperft", depth] => tools::simple_perft(depth.parse().unwrap(), &mut board),
+            ["simpleperft"] => eprintln!("Usage: simpleperft <depth>"),
+            ["islegalperft", depth] => tools::is_legal_perft(depth.parse().unwrap(), &mut board),
+            ["islegalperft"] => eprintln!("Usage: islegalperft <depth>"),
+
+            // Ignore empty lines
+            [] => (),
+
+            _ => eprintln!("Unknown command: '{}'", message.trim_end()),
+        }
+
+        // Auto-exit after last CLI command
+        if matches!(mode, Mode::Cli) && buffer.is_empty() {
+            drop(threads);
+            break;
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        loop {
+            let mut message = String::new();
+
+            if std::io::stdin().read_line(&mut message).unwrap() == 0 {
+                // EOF received
+                if shared.status.get() != Status::RUNNING {
+                    let _ = tx.send("quit".to_string());
+                }
+            }
+
+            match message.trim_end() {
+                "isready" => println!("readyok"),
+                "stop" => {
+                    shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                    shared.status.set(Status::STOPPED);
+                }
+                "ponderhit" => {
+                    *shared.ponderhit_time.lock().unwrap() = Some(std::time::Instant::now());
+                    shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                }
+                "quit" => {
+                    shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                    shared.status.set(Status::STOPPED);
+                    let _ = tx.send("quit".to_string());
+                    break;
+                }
+                _ => {
+                    // According to the UCI specs, commands that are unexpected
+                    // in the current state should be ignored silently.
+                    // (https://backscattering.de/chess/uci/#unexpected)
+                    if shared.status.get() != Status::RUNNING {
+                        let _ = tx.send(message);
+                    }
+                }
+            }
+        }
+    });
+
+    rx
+}
+
+fn uci() {
+    println!("id name Wreckless {}", env!("ENGINE_VERSION"));
+    println!("id author Arseniy Surkov, Shahin M. Shahin, and Styx");
+    println!("option name Hash type spin default {DEFAULT_TT_SIZE} min 1 max 262144");
+    println!("option name Threads type spin default 1 min 1 max {}", ThreadPool::available_threads());
+    println!("option name MoveOverhead type spin default 100 min 0 max 2000");
+    println!("option name Minimal type check default false");
+    println!("option name Clear Hash type button");
+    println!("option name UCI_Chess960 type check default false");
+    println!("option name UCI_ShowWDL type check default false");
+    println!("option name Ponder type check default false");
+    println!("option name MultiPV type spin default 1 min 1 max {MAX_MOVES}");
+
+    #[cfg(feature = "syzygy")]
+    println!("option name SyzygyPath type string default");
+
+    #[cfg(feature = "spsa")]
+    crate::parameters::print_options();
+
+    println!("uciok");
+}
+
+fn compiler() {
+    println!("Compiler Version: {}", env!("COMPILER_VERSION"));
+    println!("Compiler Target: {}", env!("COMPILER_TARGET"));
+    println!("Compiler Features: {}", env!("COMPILER_FEATURES"));
+}
+
+fn reset(threads: &mut ThreadPool, shared: &Arc<SharedContext>) {
+    threads.clear();
+    shared.tt.clear(threads.len());
+
+    for corrhist in shared.history.all() {
+        corrhist.pawn.clear();
+        corrhist.non_pawn[Color::White].clear();
+        corrhist.non_pawn[Color::Black].clear();
+        corrhist.material.clear();
+    }
+}
+
+fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc<SharedContext>, tokens: &[&str]) {
+    let mut ponder = false;
+    let mut search_moves = Vec::new();
+    let mut limit_tokens = Vec::new();
+
+    let legal_moves = board.generate_all_moves();
+    let find_move = |uci: &str| legal_moves.iter().map(|entry| entry.mv).find(|mv| mv.to_uci(board) == uci);
+
+    let mut index = 0;
+    while index < tokens.len() {
+        match tokens[index] {
+            "ponder" => ponder = true,
+            "searchmoves" => {
+                while index + 1 < tokens.len() {
+                    match find_move(tokens[index + 1]) {
+                        Some(mv) => {
+                            search_moves.push(mv);
+                            index += 1;
+                        }
+                        None => break,
+                    }
+                }
+            }
+            token => limit_tokens.push(token),
+        }
+        index += 1;
+    }
+
+    let limits = parse_limits(board.side_to_move(), &limit_tokens);
+    let time_manager = TimeManager::new(limits, board.fullmove_number(), settings.move_overhead);
+
+    *shared.ponderhit_time.lock().unwrap() = None;
+    shared.ponder.store(ponder, std::sync::atomic::Ordering::Release);
+
+    threads.execute_searches_filtered(time_manager, settings.report, settings.multi_pv, board, shared, &search_moves);
+
+    // If the search ended while still pondering, the UCI protocol requires
+    // waiting for `ponderhit` or `stop` before announcing the best move.
+    while shared.ponder.load(std::sync::atomic::Ordering::Acquire) {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    if threads[0].root_moves.is_empty() {
+        println!("bestmove (none)");
+        return;
+    }
+
+    let min_score = threads.iter().map(|v| v.root_moves[0].score).min().unwrap();
+    let vote_value = |td: &ThreadData| (td.root_moves[0].score - min_score + 10) * td.completed_depth;
+
+    let mut votes: HashMap<&Move, i32> = HashMap::new();
+    for result in threads.iter() {
+        *votes.entry(&result.root_moves[0].mv).or_default() += vote_value(result);
+    }
+
+    let mut best = 0;
+
+    if !matches!(threads[best].time_manager.limits(), Limits::Depth(_)) && threads[0].multi_pv == 1 {
+        for current in 1..threads.len() {
+            let is_better_candidate = || -> bool {
+                let best = &threads[best];
+                let current = &threads[current];
+
+                if is_win(best.root_moves[0].score) {
+                    return current.root_moves[0].score > best.root_moves[0].score;
+                }
+
+                if current.root_moves[0].score != -Score::INFINITE
+                    && best.root_moves[0].score != -Score::INFINITE
+                    && is_loss(best.root_moves[0].score)
+                {
+                    return current.root_moves[0].score < best.root_moves[0].score;
+                }
+
+                if current.root_moves[0].score != -Score::INFINITE && is_decisive(current.root_moves[0].score) {
+                    return true;
+                }
+
+                let best_vote = votes[&best.root_moves[0].mv];
+                let current_vote = votes[&current.root_moves[0].mv];
+
+                !is_loss(current.root_moves[0].score)
+                    && (current_vote > best_vote
+                        || (current_vote == best_vote && vote_value(current) > vote_value(best)))
+            };
+
+            if is_better_candidate() {
+                best = current;
+            }
+        }
+    }
+
+    if best != 0 {
+        let depth = threads[best].completed_depth;
+        threads[best].print_uci_info(depth);
+    }
+
+    let best_root_move = &threads[best].root_moves[0];
+    let mut line = format!("bestmove {}", best_root_move.mv.to_uci(board));
+
+    if let Some(&ponder_move) = best_root_move.pv.line().first() {
+        let mut after_best = board.clone();
+        after_best.make_move(best_root_move.mv, &mut NullBoardObserver);
+        line.push_str(&format!(" ponder {}", ponder_move.to_uci(&after_best)));
+    }
+
+    println!("{line}");
+    crate::misc::dbg_print();
+}
+
+fn position(board: &mut Board, settings: &Settings, mut tokens: &[&str]) {
+    while !tokens.is_empty() {
+        match tokens {
+            ["startpos", rest @ ..] => {
+                *board = Board::starting_position();
+                tokens = rest;
+            }
+            ["fen", rest @ ..] => {
+                match Board::from_fen(&rest.join(" ")) {
+                    Ok(b) => *board = b,
+                    Err(e) => eprintln!("Invalid FEN: {e:?}"),
+                }
+                board.set_frc(settings.frc);
+                tokens = rest;
+            }
+            ["moves", rest @ ..] => {
+                for uci_move in rest {
+                    make_uci_move(board, uci_move);
+                }
+                break;
+            }
+            _ => tokens = &tokens[1..],
+        }
+    }
+}
+
+fn make_uci_move(board: &mut Board, uci_move: &str) {
+    let moves = board.generate_all_moves();
+    if let Some(mv) = moves.iter().map(|entry| entry.mv).find(|mv| mv.to_uci(board) == uci_move) {
+        board.make_move(mv, &mut NullBoardObserver);
+    }
+}
+
+fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<SharedContext>, tokens: &[&str]) {
+    match tokens {
+        ["name", "Minimal", "value", v] => match *v {
+            "true" => settings.report = Report::Minimal,
+            "false" => settings.report = Report::Full,
+            _ => eprintln!("Invalid value: '{v}'"),
+        },
+        ["name", "Clear", "Hash"] => {
+            shared.tt.clear(threads.len());
+            println!("info string Hash cleared");
+        }
+        ["name", "Hash", "value", v] => {
+            shared.tt.resize(threads.len(), v.parse().unwrap());
+            println!("info string set Hash to {v} MB");
+        }
+        ["name", "Threads", "value", v] => {
+            threads.set_count(v.parse().unwrap_or(1));
+            println!("info string set Threads to {}", threads.len());
+        }
+        ["name", "MoveOverhead", "value", v] => {
+            settings.move_overhead = v.parse().unwrap();
+            println!("info string set MoveOverhead to {v} ms");
+        }
+        #[cfg(feature = "syzygy")]
+        ["name", "SyzygyPath", "value", v] => match crate::tb::initialize(v) {
+            Some(size) => println!("info string Loaded Syzygy tablebases with {size} pieces"),
+            None => eprintln!("Failed to load Syzygy tablebases"),
+        },
+        ["name", "UCI_Chess960", "value", v] => {
+            settings.frc = v.parse().unwrap_or_default();
+            println!("info string set UCI_Chess960 to {v}");
+        }
+        ["name", "UCI_ShowWDL", "value", v] => {
+            shared.show_wdl.store(v.parse().unwrap_or_default(), std::sync::atomic::Ordering::Release);
+            println!("info string set UCI_ShowWDL to {v}");
+        }
+        ["name", "Ponder", "value", _] => {
+            // The GUI only announces that it may send `go ponder`; nothing to configure.
+        }
+        ["name", "MultiPV", "value", v] => {
+            settings.multi_pv = v.parse().unwrap_or_default();
+            println!("info string set MultiPV to {v}");
+        }
+        #[cfg(feature = "spsa")]
+        ["name", name, "value", v] => {
+            crate::parameters::set_parameter(name, v);
+            println!("info string set {name} to {v}");
+        }
+        _ => eprintln!("Unknown option: '{}'", tokens.join(" ").trim_end()),
+    }
+}
+
+fn eval(td: &mut ThreadData, board: &Board) {
+    td.nnue.full_refresh(board);
+    td.nnue.evaluate(board);
+
+    let side = board.side_to_move();
+
+    println!("NNUE derived piece values");
+    println!("+-------+-------+-------+-------+-------+-------+-------+-------+");
+    for rank in (0..8).rev() {
+        print!("|");
+        for file in 0..8 {
+            let sq = Square::from_rank_file(rank, file);
+            let piece = board.piece_on(sq);
+            let piece_str = if piece == Piece::None { " ".to_string() } else { piece.to_string() };
+            print!("  {piece_str:^3}  |");
+        }
+        println!();
+
+        print!("|");
+        for file in 0..8 {
+            let sq = Square::from_rank_file(rank, file);
+            match td.nnue.piece_contribution(board, sq) {
+                None => print!("       |"),
+                Some(v) => {
+                    let val = v as f32 / 100.0;
+                    print!("{val:+6.2} |");
+                }
+            }
+        }
+        println!();
+        println!("+-------+-------+-------+-------+-------+-------+-------+-------+");
+    }
+
+    let used_bucket = crate::nnue::OUTPUT_BUCKETS_LAYOUT[board.occupancies().popcount()];
+
+    println!("\nNNUE output buckets (White side)");
+    println!("+------------+------------+");
+    println!("|   Bucket   |   Total    |");
+    println!("+------------+------------+");
+
+    for bucket in 0..8 {
+        let raw_score = td.nnue.eval_with_bucket(board, bucket);
+        let white_score = if side == Color::White { raw_score } else { -raw_score };
+        let total = white_score as f32 / 100.0;
+
+        if bucket == used_bucket {
+            println!("|  {bucket:<2}        | {total:+7.2}    | <-- this bucket is used");
+        } else {
+            println!("|  {bucket:<2}        | {total:+7.2}    |");
+        }
+    }
+    println!("+------------+------------+");
+
+    let final_eval = td.nnue.evaluate(board);
+    let final_total = (if side == Color::White { final_eval } else { -final_eval }) as f32 / 100.0;
+    println!("\nNNUE evaluation        {final_total:+.2} (White side)");
+}
+
+fn parse_limits(color: Color, tokens: &[&str]) -> Limits {
+    if let ["infinite"] = tokens {
+        return Limits::Infinite;
+    }
+
+    let mut main = None;
+    let mut inc = None;
+    let mut moves = None;
+
+    for chunk in tokens.chunks(2) {
+        if let [name, value] = *chunk {
+            let Ok(value) = value.parse::<u64>() else {
+                continue;
+            };
+
+            match name {
+                "depth" if value > 0 => return Limits::Depth(value as i32),
+                "movetime" if value > 0 => return Limits::Time(value),
+                "nodes" if value > 0 => return Limits::Nodes(value),
+                "mate" if value > 0 => return Limits::Mate(value),
+
+                "wtime" if Color::White == color => main = Some(value),
+                "btime" if Color::Black == color => main = Some(value),
+                "winc" if Color::White == color => inc = Some(value),
+                "binc" if Color::Black == color => inc = Some(value),
+                "movestogo" => moves = Some(value),
+
+                _ => continue,
+            }
+        }
+    }
+
+    if main.is_none() && inc.is_none() {
+        return Limits::Infinite;
+    }
+
+    let main = main.unwrap_or_default();
+    let inc = inc.unwrap_or_default();
+
+    match moves {
+        Some(moves) => Limits::Cyclic(main, inc, moves),
+        None => Limits::Fischer(main, inc),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_position_helper(tokens: &[&str]) -> Board {
+        let settings = Settings::default();
+        let mut board = Board::starting_position();
+
+        position(&mut board, &settings, tokens);
+        board.clone()
+    }
+
+    #[test]
+    fn test_position_startpos() {
+        let board = test_position_helper(&["startpos"]);
+        assert_eq!(board.to_fen(), "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        let board = test_position_helper(&[]);
+        assert_eq!(board.to_fen(), "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    }
+
+    #[test]
+    fn test_position_startpos_multiple_moves() {
+        let board = test_position_helper(&["moves", "e2e4", "e7e5", "g1f3"]);
+        assert_eq!(board.side_to_move(), Color::Black);
+        let fen = board.to_fen();
+        let fen_position = fen.split_whitespace().next().unwrap();
+        assert!(fen_position.contains("5N2"));
+    }
+
+    #[test]
+    fn test_position_fen_with_moves() {
+        let board = test_position_helper(&[
+            "fen",
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR",
+            "b",
+            "KQkq",
+            "e3",
+            "0",
+            "1",
+            "moves",
+            "e7e5",
+        ]);
+        assert_eq!(board.side_to_move(), Color::White);
+    }
+
+    #[test]
+    fn test_position_empty_moves_list() {
+        let board = test_position_helper(&["moves"]);
+        assert_eq!(board.to_fen(), "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    }
+
+    #[test]
+    fn test_position_invalid_move_ignored() {
+        let board = test_position_helper(&["moves", "e2e4", "invalid", "e7e5"]);
+        assert_eq!(board.side_to_move(), Color::White);
+    }
+
+    #[test]
+    fn test_position_long_move_sequence() {
+        let board = test_position_helper(&["moves", "e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6"]);
+        assert_eq!(board.side_to_move(), Color::White);
+    }
+
+    #[test]
+    fn test_position_castling() {
+        let board = test_position_helper(&[
+            "fen",
+            "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R",
+            "w",
+            "KQkq",
+            "-",
+            "0",
+            "1",
+            "moves",
+            "e1g1",
+        ]);
+        assert_eq!(board.side_to_move(), Color::Black);
+    }
+
+    #[test]
+    fn test_position_en_passant() {
+        let board = test_position_helper(&[
+            "fen",
+            "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR",
+            "w",
+            "KQkq",
+            "f6",
+            "0",
+            "1",
+            "moves",
+            "e5f6",
+        ]);
+        assert_eq!(board.side_to_move(), Color::Black);
+    }
+
+    #[test]
+    fn test_position_promotion() {
+        let board = test_position_helper(&["fen", "8/P7/8/8/8/8/8/4K2k", "w", "-", "-", "0", "1", "moves", "a7a8q"]);
+        assert_eq!(board.side_to_move(), Color::Black);
+    }
+
+    #[test]
+    fn test_make_uci_move_invalid() {
+        let mut board = Board::starting_position();
+        let fen_before = board.to_fen();
+        make_uci_move(&mut board, "invalid_move");
+        assert_eq!(board.to_fen(), fen_before);
+    }
+
+    #[test]
+    fn test_position_moves_without_startpos_ignored() {
+        let board = test_position_helper(&["moves", "e2e4", "e7e5"]);
+        assert_eq!(board.to_fen(), "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2");
+    }
+}

@@ -256,6 +256,13 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             break;
         }
 
+        // Forced move: with a single legal reply there is nothing to decide, so
+        // spend only a token amount of time confirming the score for the PV.
+        if td.id == 0 && depth >= 8 && td.root_moves.len() == 1 && td.time_manager.use_time_management() {
+            td.shared.status.set(Status::STOPPED);
+            break;
+        }
+
         let multiplier = || {
             let nodes = {
                 let fraction = td.root_moves[0].nodes as f32 / td.nodes() as f32;
@@ -716,7 +723,9 @@ fn search<NODE: NodeType>(
     let mut extension = 0;
     let mut singular_score = Score::NONE;
 
-    if !NODE::ROOT && !excluded && potential_singularity {
+    // The `ply < root_depth * 2` guard bounds chains of (double/triple) extensions,
+    // preventing search explosion in highly tactical positions.
+    if !NODE::ROOT && !excluded && potential_singularity && (ply as i32) < td.root_depth * 2 {
         debug_assert!(is_valid(tt_score));
 
         let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
@@ -1367,6 +1376,16 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
                 break;
             }
 
+            // Futility Pruning: skip captures that cannot raise alpha even if
+            // they win the captured piece outright.
+            if is_valid(eval) && !mv.is_quiet() && !mv.is_promotion() && !td.board.is_direct_check(mv) {
+                let futility = eval + td.board.type_on(mv.capture_sq()).value() + p::qs_futility_margin();
+                if futility <= alpha {
+                    best_score = best_score.max(futility);
+                    continue;
+                }
+            }
+
             // Static Exchange Evaluation Pruning (SEE Pruning)
             if is_valid(eval) && !td.board.see(mv, (alpha - eval) / 8 - correction_value.abs().min(68) - 74) {
                 continue;
@@ -1439,6 +1458,7 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
         + corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
         + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
         + corrhist.material.get(stm, td.board.material_key(), bucket)
+        + corrhist.minor.get(stm, td.board.minor_key(), bucket)
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
@@ -1464,6 +1484,8 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
     corrhist.non_pawn[Color::Black].update(stm, td.board.non_pawn_key(Color::Black), bucket, bonus);
 
     corrhist.material.update(stm, td.board.material_key(), bucket, bonus);
+
+    corrhist.minor.update(stm, td.board.minor_key(), bucket, bonus);
 
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 2].mv.is_present() {
         td.continuation_corrhist.update(

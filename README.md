@@ -16,10 +16,18 @@ performs among the top engines in major tournaments including the
 
 Search (each pending SPRT verification — treat as experimental until tested):
 
-- **Material-key correction history**: a fourth shared correction-history table keyed by a
+- **Material-key correction history**: a shared correction-history table keyed by a
   piece-count-only Zobrist key, alongside the existing pawn/non-pawn/continuation tables
+- **Minor-piece correction history**: a shared correction-history table keyed by the placement of
+  knights, bishops, and kings (as in Stockfish)
 - **Low-ply history**: a root-relative `[ply][from][to]` history for plies 0–4, weighted into quiet
   move ordering and carried over between searches (shifted down 2 plies per move)
+- **Singular extension limit**: singular (double/triple) extensions are disabled beyond
+  `2 × root depth` plies, bounding extension chains that can explode the search in tactical positions
+- **Quiescence futility pruning**: captures that cannot raise alpha even when winning the captured
+  piece outright are skipped in quiescence search
+- **Forced move detection**: with a single legal move, the search stops after a token depth instead
+  of consuming the full time allocation
 - **Killer moves**: two killer-move slots per ply; quiet moves that cause a beta cutoff are stored
   and scored highly in move ordering (+31 000 / +22 000) at the same ply in future iterations
 - **Countermove heuristic**: a `[piece][to]` table records the quiet refutation of the opponent's
@@ -39,6 +47,9 @@ Speed:
 - **PEXT bitboards**: sliding-piece attacks are indexed with the BMI2 `pext` instruction when the
   target supports it (with the classical magic-multiplication path as fallback). Disabled
   automatically on AMD Zen 1/2, where `pext` is microcoded; override with `WRECKLESS_PEXT=0|1`
+- **Windows large pages**: the transposition table is allocated with 2 MB pages via
+  `VirtualAlloc(MEM_LARGE_PAGES)` when the "Lock pages in memory" privilege is held, reducing TLB
+  misses on TT probes (falls back to regular pages otherwise; Linux already used `MADV_HUGEPAGE`)
 
 Protocol / usability:
 

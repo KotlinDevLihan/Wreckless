@@ -197,6 +197,7 @@ fn reset(threads: &mut ThreadPool, shared: &Arc<SharedContext>) {
         corrhist.non_pawn[Color::White].clear();
         corrhist.non_pawn[Color::Black].clear();
         corrhist.material.clear();
+        corrhist.minor.clear();
     }
 }
 

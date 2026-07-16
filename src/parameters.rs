@@ -148,4 +148,7 @@ define! {
     i32 corr_bonus_min: 4678;
     i32 corr_bonus_max: 2496;
     i32 corr_weight_div: 64;
+
+    // Quiescence search
+    i32 qs_futility_margin: 128;
 }

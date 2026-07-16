@@ -225,7 +225,13 @@ impl MovePicker {
                 - 8875 * threatened[pt].contains(mv.to()) as i32
                 + 3446 * offense[pt].contains(mv.to()) as i32
                 - 4494 * wall_pawns.contains(mv.from()) as i32
-                + if mv == td.killers[ply][0] { 31000 } else if mv == td.killers[ply][1] { 22000 } else { 0 }
+                + if mv == td.killers[ply][0] {
+                    31000
+                } else if mv == td.killers[ply][1] {
+                    22000
+                } else {
+                    0
+                }
                 + if mv == counter_mv { 13000 } else { 0 };
         }
     }

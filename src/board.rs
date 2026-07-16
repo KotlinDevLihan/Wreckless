@@ -117,6 +117,10 @@ impl Board {
         self.state.keys.material()
     }
 
+    pub const fn minor_key(&self) -> u64 {
+        self.state.keys.minor()
+    }
+
     pub const fn pinned(&self, color: Color) -> Bitboard {
         self.state.pinned[color as usize]
     }

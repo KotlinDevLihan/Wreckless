@@ -253,6 +253,8 @@ pub struct ThreadData {
     pub pv_end: usize,
     pub cutoff_count: PlyArray<i32, { MAX_PLY + 16 }>,
     pub excluded: PlyArray<Move, { MAX_PLY + 16 }>,
+    pub killers: PlyArray<[Move; 2], { MAX_PLY + 16 }>,
+    pub counter_moves: [[Move; 64]; 13],
     pub writer: Box<dyn UciWriter>,
 }
 
@@ -291,6 +293,8 @@ impl ThreadData {
             pv_end: 0,
             cutoff_count: PlyArray::default(),
             excluded: PlyArray::default(),
+            killers: PlyArray::default(),
+            counter_moves: [[Move::NULL; 64]; 13],
             #[cfg(not(target_arch = "wasm32"))]
             writer: Box::new(StdoutWriter),
             #[cfg(target_arch = "wasm32")]

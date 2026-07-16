@@ -57,6 +57,14 @@ impl NodeType for NonPV {
 pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     td.completed_depth = 0;
     td.low_ply_history.shift();
+    td.killers = PlyArray::default();
+    td.counter_moves = [[Move::NULL; 64]; 13];
+
+    // History decay: halve all history tables so stale data from the previous
+    // position doesn't unduly bias move ordering in the current search.
+    td.quiet_history.halve();
+    td.noisy_history.halve();
+    td.pawn_history.halve();
 
     td.pv_table.clear(0);
     td.nnue.full_refresh(&td.board);
@@ -98,7 +106,10 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             rm.previous_score = rm.score;
         }
 
-        let mut delta = 23 - eval_stability.min(pv_stability).min(7);
+        // Aspiration delta: start from a stability-adjusted value but keep a
+        // minimum of 10cp so very stable positions still search wide enough to
+        // catch sudden tactical shifts.
+        let mut delta = (23 - eval_stability.min(pv_stability).min(7)).max(10);
         let mut reduction = 0;
 
         for index in 0..td.multi_pv {
@@ -407,6 +418,14 @@ fn search<NODE: NodeType>(
                 return tt_score;
             }
         }
+    }
+
+    // Internal Iterative Reductions (IIR)
+    // When there is no TT move to guide move ordering, reduce depth by 1 ply.
+    // This avoids an expensive search with poor ordering; the reduced search will
+    // quickly populate the TT, making the re-search much more efficient.
+    if !NODE::ROOT && !excluded && tt_move.is_null() && depth >= 3 {
+        depth -= 1;
     }
 
     // Tablebases Probe
@@ -855,6 +874,15 @@ fn search<NODE: NodeType>(
         make_move(td, ply, mv);
 
         let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 };
+
+        // Check Extension: if a move delivers check and would immediately fall
+        // into qsearch (new_depth == 0), extend by 1 ply so the engine has a
+        // full search ply to find the best evasion rather than relying on qsearch
+        // which may not search enough evasion moves.
+        if is_direct_check && !in_check && new_depth == 0 {
+            new_depth = 1;
+        }
+
         let mut score = Score::ZERO;
 
         // Late Move Reductions (LMR)
@@ -1080,6 +1108,19 @@ fn search<NODE: NodeType>(
     }
 
     if best_move.is_present() {
+        if best_score >= beta && best_move.is_quiet() {
+            if td.killers[ply][0] != best_move {
+                td.killers[ply][1] = td.killers[ply][0];
+                td.killers[ply][0] = best_move;
+            }
+
+            let prev_move = td.stack[ply - 1].mv;
+            if prev_move.is_present() {
+                let prev_piece = td.stack[ply - 1].piece;
+                td.counter_moves[prev_piece][prev_move.to()] = best_move;
+            }
+        }
+
         let noisy_bonus = (96 * depth).min(885) - 43 - 87 * cut_node as i32;
         let noisy_malus = (175 * depth).min(1252) - 58 - 16 * noisy_moves.len() as i32;
 

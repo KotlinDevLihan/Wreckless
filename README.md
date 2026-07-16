@@ -20,6 +20,19 @@ Search (each pending SPRT verification — treat as experimental until tested):
   piece-count-only Zobrist key, alongside the existing pawn/non-pawn/continuation tables
 - **Low-ply history**: a root-relative `[ply][from][to]` history for plies 0–4, weighted into quiet
   move ordering and carried over between searches (shifted down 2 plies per move)
+- **Killer moves**: two killer-move slots per ply; quiet moves that cause a beta cutoff are stored
+  and scored highly in move ordering (+31 000 / +22 000) at the same ply in future iterations
+- **Countermove heuristic**: a `[piece][to]` table records the quiet refutation of the opponent's
+  last move; matched moves receive a +13 000 ordering bonus
+- **Internal Iterative Reductions (IIR)**: when a node at depth ≥ 3 has no TT move to anchor
+  ordering, depth is reduced by 1 to quickly populate the TT before the full re-search
+- **Check extension**: a move that delivers a direct check at the leaf (new\_depth == 0) is
+  extended to depth 1 rather than falling immediately into qsearch, preventing horizon-effect
+  oversights in forced tactical sequences
+- **History decay**: quiet, noisy, and pawn history tables are halved at the start of each new
+  search so stale ordering data from previous positions does not bias the current search
+- **Aspiration window floor**: the initial aspiration delta is clamped to a minimum of 10 cp,
+  preventing hairline windows in very stable positions that cause excessive re-searches
 
 Speed:
 

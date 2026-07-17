@@ -197,14 +197,6 @@ impl MovePicker {
             Bitboard(0)
         };
 
-        let prev_move = td.stack[ply - 1].mv;
-        let counter_mv = if prev_move.is_present() {
-            let prev_piece = td.stack[ply - 1].piece;
-            td.counter_moves[prev_piece][prev_move.to()]
-        } else {
-            Move::NULL
-        };
-
         for entry in self.list.iter_mut() {
             let mv = entry.mv;
             let pt = td.board.type_on(mv.from());
@@ -224,15 +216,7 @@ impl MovePicker {
                 + 10723 * td.board.checking_squares(pt).contains(mv.to()) as i32
                 - 8875 * threatened[pt].contains(mv.to()) as i32
                 + 3446 * offense[pt].contains(mv.to()) as i32
-                - 4494 * wall_pawns.contains(mv.from()) as i32
-                + if mv == td.killers[ply][0] {
-                    31000
-                } else if mv == td.killers[ply][1] {
-                    22000
-                } else {
-                    0
-                }
-                + if mv == counter_mv { 13000 } else { 0 };
+                - 4494 * wall_pawns.contains(mv.from()) as i32;
         }
     }
 }

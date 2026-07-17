@@ -44,7 +44,6 @@ define! {
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
-    i32 rfp_volatility: 24;
     i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
 
@@ -149,7 +148,4 @@ define! {
     i32 corr_bonus_min: 4678;
     i32 corr_bonus_max: 2496;
     i32 corr_weight_div: 64;
-
-    // Quiescence search
-    i32 qs_futility_margin: 128;
 }

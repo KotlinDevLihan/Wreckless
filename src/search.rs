@@ -57,14 +57,6 @@ impl NodeType for NonPV {
 pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     td.completed_depth = 0;
     td.low_ply_history.shift();
-    td.killers = PlyArray::default();
-    td.counter_moves = [[Move::NULL; 64]; 13];
-
-    // History decay: halve all history tables so stale data from the previous
-    // position doesn't unduly bias move ordering in the current search.
-    td.quiet_history.halve();
-    td.noisy_history.halve();
-    td.pawn_history.halve();
 
     td.pv_table.clear(0);
     td.nnue.full_refresh(&td.board);
@@ -106,10 +98,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             rm.previous_score = rm.score;
         }
 
-        // Aspiration delta: start from a stability-adjusted value but keep a
-        // minimum of 10cp so very stable positions still search wide enough to
-        // catch sudden tactical shifts.
-        let mut delta = (23 - eval_stability.min(pv_stability).min(7)).max(10);
+        let mut delta = 23 - eval_stability.min(pv_stability).min(7);
         let mut reduction = 0;
 
         for index in 0..td.multi_pv {
@@ -256,13 +245,6 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             break;
         }
 
-        // Forced move: with a single legal reply there is nothing to decide, so
-        // spend only a token amount of time confirming the score for the PV.
-        if td.id == 0 && depth >= 8 && td.root_moves.len() == 1 && td.time_manager.use_time_management() {
-            td.shared.status.set(Status::STOPPED);
-            break;
-        }
-
         let multiplier = || {
             let nodes = {
                 let fraction = td.root_moves[0].nodes as f32 / td.nodes() as f32;
@@ -280,15 +262,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
             let best_move_stability = 1.1500 + (0.2526 * td.best_move_changes as f32).ln_1p();
 
-            // Root candidate entropy: when several root moves score close to the
-            // best one, the choice is genuinely uncertain and deserves more time.
-            let entropy = {
-                let best = td.root_moves[0].score;
-                let near = td.root_moves.iter().filter(|rm| is_valid(rm.score) && best - rm.score <= 20).count();
-                1.0 + 0.06 * (near.min(5) as f32 - 1.0)
-            };
-
-            nodes * pv_stability * eval_stability * score_trend * best_move_stability * entropy
+            nodes * pv_stability * eval_stability * score_trend * best_move_stability
         };
 
         if td.time_manager.use_time_management() {
@@ -336,10 +310,6 @@ fn search<NODE: NodeType>(
     let stm = td.board.side_to_move();
     let in_check = td.board.in_check();
     let excluded = td.excluded[ply].is_present();
-
-    // Keep killers local to the current subtree: clear the grandchild slot so
-    // stale killers from sibling subtrees don't pollute move ordering below.
-    td.killers[ply + 2] = [Move::NULL; 2];
 
     if !NODE::ROOT && NODE::PV {
         td.pv_table.clear(ply as usize);
@@ -437,14 +407,6 @@ fn search<NODE: NodeType>(
                 return tt_score;
             }
         }
-    }
-
-    // Internal Iterative Reductions (IIR)
-    // When there is no TT move to guide move ordering, reduce depth by 1 ply.
-    // This avoids an expensive search with poor ordering; the reduced search will
-    // quickly populate the TT, making the re-search much more efficient.
-    if !NODE::ROOT && !excluded && tt_move.is_null() && depth >= 3 {
-        depth -= 1;
     }
 
     // Tablebases Probe
@@ -585,11 +547,6 @@ fn search<NODE: NodeType>(
         return qsearch::<NonPV>(td, alpha, beta, ply);
     }
 
-    // Volatility of the static evaluation over the last two plies: a large swing
-    // suggests a tactical position where pruning by margin is less trustworthy.
-    let eval_volatility =
-        if !in_check && is_valid(td.stack[ply - 2].eval) { (eval - td.stack[ply - 2].eval).abs().min(256) } else { 0 };
-
     // Reverse Futility Pruning (RFP)
     if !tt_pv
         && !in_check
@@ -599,7 +556,6 @@ fn search<NODE: NodeType>(
                 + (p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
-                    + p::rfp_volatility() * eval_volatility / 128
                     - p::rfp_no_threats() * (td.board.all_threats() & td.board.colors(stm)).is_empty() as i32
                     - p::rfp_base())
                 .max(2)
@@ -741,9 +697,7 @@ fn search<NODE: NodeType>(
     let mut extension = 0;
     let mut singular_score = Score::NONE;
 
-    // The `ply < root_depth * 2` guard bounds chains of (double/triple) extensions,
-    // preventing search explosion in highly tactical positions.
-    if !NODE::ROOT && !excluded && potential_singularity && (ply as i32) < td.root_depth * 2 {
+    if !NODE::ROOT && !excluded && potential_singularity {
         debug_assert!(is_valid(tt_score));
 
         let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
@@ -788,12 +742,6 @@ fn search<NODE: NodeType>(
     // Low Depth Singular Extensions (LDSE)
     else if depth <= 7 && !in_check && cut_node && estimated_score <= alpha - 25 {
         extension = 1;
-    }
-
-    // One-reply extension: the only legal evasion is forced, so searching it
-    // deeper is nearly free (the subtree has a branching factor of one here).
-    if in_check && depth >= 2 && td.board.generate_all_moves().len() == 1 {
-        extension = extension.max(1);
     }
 
     let mut best_move = Move::NULL;
@@ -907,15 +855,6 @@ fn search<NODE: NodeType>(
         make_move(td, ply, mv);
 
         let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 };
-
-        // Check Extension: if a move delivers check and would immediately fall
-        // into qsearch (new_depth == 0), extend by 1 ply so the engine has a
-        // full search ply to find the best evasion rather than relying on qsearch
-        // which may not search enough evasion moves.
-        if is_direct_check && !in_check && new_depth == 0 {
-            new_depth = 1;
-        }
-
         let mut score = Score::ZERO;
 
         // Late Move Reductions (LMR)
@@ -990,22 +929,6 @@ fn search<NODE: NodeType>(
                 if new_depth > reduced_depth {
                     score = -search::<NonPV>(td, -alpha - 1, -alpha, new_depth, !cut_node, ply + 1);
                     current_search_count += 1;
-
-                    // Post-LMR continuation history update: reward or punish the
-                    // move based on how the full-depth verification turned out.
-                    if is_quiet {
-                        let bonus = if score >= beta {
-                            (97 * new_depth).min(1098) - 74
-                        } else if score <= alpha {
-                            -((414 * new_depth).min(949) - 49)
-                        } else {
-                            0
-                        };
-
-                        if bonus != 0 {
-                            update_continuation_histories(td, ply, td.stack[ply].piece, mv.to(), bonus);
-                        }
-                    }
                 }
             }
         }
@@ -1157,19 +1080,6 @@ fn search<NODE: NodeType>(
     }
 
     if best_move.is_present() {
-        if best_score >= beta && best_move.is_quiet() {
-            if td.killers[ply][0] != best_move {
-                td.killers[ply][1] = td.killers[ply][0];
-                td.killers[ply][0] = best_move;
-            }
-
-            let prev_move = td.stack[ply - 1].mv;
-            if prev_move.is_present() {
-                let prev_piece = td.stack[ply - 1].piece;
-                td.counter_moves[prev_piece][prev_move.to()] = best_move;
-            }
-        }
-
         let noisy_bonus = (96 * depth).min(885) - 43 - 87 * cut_node as i32;
         let noisy_malus = (175 * depth).min(1252) - 58 - 16 * noisy_moves.len() as i32;
 
@@ -1411,21 +1321,9 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
         move_count += 1;
 
         if !is_loss(best_score) {
-            let gives_check = td.board.is_direct_check(mv);
-
             // Late Move Pruning (LMP)
-            if move_count >= 3 && !gives_check {
+            if move_count >= 3 && !td.board.is_direct_check(mv) {
                 break;
-            }
-
-            // Futility Pruning: skip captures that cannot raise alpha even if
-            // they win the captured piece outright.
-            if is_valid(eval) && !mv.is_quiet() && !mv.is_promotion() && !gives_check {
-                let futility = eval + td.board.type_on(mv.capture_sq()).value() + p::qs_futility_margin();
-                if futility <= alpha {
-                    best_score = best_score.max(futility);
-                    continue;
-                }
             }
 
             // Static Exchange Evaluation Pruning (SEE Pruning)
@@ -1500,7 +1398,6 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
         + corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
         + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
         + corrhist.material.get(stm, td.board.material_key(), bucket)
-        + corrhist.minor.get(stm, td.board.minor_key(), bucket)
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
@@ -1526,8 +1423,6 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
     corrhist.non_pawn[Color::Black].update(stm, td.board.non_pawn_key(Color::Black), bucket, bonus);
 
     corrhist.material.update(stm, td.board.material_key(), bucket, bonus);
-
-    corrhist.minor.update(stm, td.board.minor_key(), bucket, bonus);
 
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 2].mv.is_present() {
         td.continuation_corrhist.update(

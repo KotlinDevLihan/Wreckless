@@ -44,6 +44,7 @@ define! {
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
+    i32 rfp_worsening: 20;
     i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
 
@@ -60,6 +61,7 @@ define! {
     i32 nmp_r_beta_max: 1187;
 
     // ProbCut
+    i32 probcut_tt_margin: 580;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
     i32 probcut_score_div: 319;

@@ -14,7 +14,8 @@ performs among the top engines in major tournaments including the
 
 ## Changes relative to upstream Reckless
 
-Search (each pending SPRT verification — treat as experimental until tested):
+Search — Stockfish-verified techniques ported per a source-level gap analysis (each pending SPRT
+verification):
 
 - **Material-key correction history**: a shared correction-history table keyed by a
   piece-count-only Zobrist key, alongside the existing pawn/non-pawn/continuation tables
@@ -22,36 +23,22 @@ Search (each pending SPRT verification — treat as experimental until tested):
   knights, bishops, and kings (as in Stockfish)
 - **Low-ply history**: a root-relative `[ply][from][to]` history for plies 0–4, weighted into quiet
   move ordering and carried over between searches (shifted down 2 plies per move)
-- **Singular extension limit**: singular (double/triple) extensions are disabled beyond
-  `2 × root depth` plies, bounding extension chains that can explode the search in tactical positions
-- **Quiescence futility pruning**: captures that cannot raise alpha even when winning the captured
-  piece outright are skipped in quiescence search
-- **Forced move detection**: with a single legal move, the search stops after a token depth instead
-  of consuming the full time allocation
-- **Killer moves**: two killer-move slots per ply; quiet moves that cause a beta cutoff are stored
-  and scored highly in move ordering (+31 000 / +22 000) at the same ply in future iterations
-- **Countermove heuristic**: a `[piece][to]` table records the quiet refutation of the opponent's
-  last move; matched moves receive a +13 000 ordering bonus
-- **Internal Iterative Reductions (IIR)**: when a node at depth ≥ 3 has no TT move to anchor
-  ordering, depth is reduced by 1 to quickly populate the TT before the full re-search
-- **Check extension**: a move that delivers a direct check at the leaf (new\_depth == 0) is
-  extended to depth 1 rather than falling immediately into qsearch, preventing horizon-effect
-  oversights in forced tactical sequences
-- **History decay**: quiet, noisy, and pawn history tables are halved at the start of each new
-  search so stale ordering data from previous positions does not bias the current search
-- **Aspiration window floor**: the initial aspiration delta is clamped to a minimum of 10 cp,
-  preventing hairline windows in very stable positions that cause excessive re-searches
-- **Post-LMR continuation history updates**: after a reduced move is verified at full depth, its
-  continuation history receives a bonus (beat beta) or malus (fell back below alpha), sharpening
-  future reduction decisions (as in Stockfish)
-- **One-reply extension**: when in check with exactly one legal evasion, the forced move is
-  extended by a ply — the subtree has a branching factor of one, so the depth is nearly free
-- **Volatility-adaptive RFP**: the reverse futility margin grows with the absolute swing of the
-  static evaluation over the last two plies, suppressing margin-based pruning in tactical positions
-- **Root candidate entropy time scaling**: when several root moves score within 20 cp of the best,
-  the soft time limit stretches (up to +24%), giving genuinely contested decisions more time
-- **Killer subtree locality**: each node clears its grandchild killer slot so stale killers from
-  sibling subtrees do not pollute move ordering below
+- **TT-only ProbCut check**: a lower-bound TT entry from a near-full-depth search whose score
+  comfortably exceeds beta is trusted as a cutoff without any search (Stockfish's "small ProbCut idea")
+- **TT-move reliability history**: a gravity-updated statistic of how often the TT move turns out
+  best; feeds back into the singular double-extension margin (Stockfish's `ttMoveHistory`)
+- **Shuffling guard on singular extensions**: repetitive piece shuffling near the 50-move rule
+  disables singular extensions to prevent search explosions (Stockfish #6447)
+- **Improving-by-beta term**: a node also counts as "improving" when its static evaluation already
+  clears beta
+- **Opponent-worsening term in RFP**: the reverse futility margin shrinks when the evaluation swung
+  further in our favor than the opponent's null-move expectation
+- **Continuation-history consistency multiplier**: continuation-history updates are scaled up when
+  multiple lags already agree (are positive) for the move
+
+An earlier, larger set of speculative search additions (killers, countermoves, one-reply extension,
+qsearch futility, volatility-based pruning, entropy time scaling, and others) was removed after SPRT
+measured the combined stack at **−69 Elo ± 39** against the baseline.
 
 Speed:
 
@@ -67,10 +54,11 @@ Protocol / usability:
 - **Pondering**: `go ponder` / `ponderhit` support and `bestmove ... ponder ...` output
 - **`searchmoves`**: root move filtering on the `go` command
 - **`UCI_ShowWDL`**: win/draw/loss estimates in `info` lines
-- **SPSA tunables**: 92 search constants (LMR, LMP, FP, RFP, NMP, ProbCut, SEE, correction history,
-  quiescence futility) exposed as UCI options under the `spsa` cargo feature for OpenBench SPSA
-  tuning; identical compiled code in default builds. A ready-to-use OpenBench SPSA input file is
-  provided in [`spsa.config`](spsa.config)
+- **`SyzygyProbeDepth` / `SyzygyProbeLimit`**: user-tunable tablebase engagement
+- **SPSA tunables**: 92 search constants (LMR, LMP, FP, RFP, NMP, ProbCut, SEE, correction history)
+  exposed as UCI options under the `spsa` cargo feature for OpenBench SPSA tuning; identical
+  compiled code in default builds. A ready-to-use OpenBench SPSA input file is provided in
+  [`spsa.config`](spsa.config)
 
 ## Getting started
 
@@ -143,6 +131,8 @@ Wreckless supports the following UCI options:
 | MoveOverhead | 100     | Time in milliseconds reserved for overhead during each move [0–2000]  |
 | Clear Hash   | —       | Clear the transposition table                                         |
 | SyzygyPath   | —       | Path to Syzygy endgame tablebases                                     |
+| SyzygyProbeDepth | 1   | Minimum depth to probe tablebases at the piece-count boundary [1–100] |
+| SyzygyProbeLimit | 7   | Maximum number of pieces for tablebase probes [0–7]                   |
 
 ### Custom commands
 

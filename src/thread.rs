@@ -2,7 +2,7 @@ use std::{
     ops::{Index, IndexMut},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     },
 };
 
@@ -152,6 +152,7 @@ pub struct SharedCorrectionHistory {
     pub pawn: CorrectionHistory,
     pub non_pawn: [CorrectionHistory; 2],
     pub material: CorrectionHistory,
+    pub minor: CorrectionHistory,
 }
 
 impl NumaReplicable for SharedCorrectionHistory {
@@ -167,6 +168,8 @@ pub struct SharedContext {
     pub tb_hits: Counter,
     pub stop_probing_tb: AtomicBool,
     pub root_in_tb: AtomicBool,
+    pub syzygy_probe_depth: AtomicI32,
+    pub syzygy_probe_limit: AtomicUsize,
     pub ponder: AtomicBool,
     pub ponderhit_time: Mutex<Option<Instant>>,
     pub show_wdl: AtomicBool,
@@ -188,6 +191,8 @@ impl Default for SharedContext {
             tb_hits: Counter::default(),
             stop_probing_tb: AtomicBool::new(false),
             root_in_tb: AtomicBool::new(false),
+            syzygy_probe_depth: AtomicI32::new(1),
+            syzygy_probe_limit: AtomicUsize::new(7),
             ponder: AtomicBool::new(false),
             ponderhit_time: Mutex::new(None),
             show_wdl: AtomicBool::new(false),
@@ -241,6 +246,7 @@ pub struct ThreadData {
     pub continuation_corrhist: ContinuationCorrectionHistory,
     pub best_move_changes: usize,
     pub optimism: [i32; 2],
+    pub tt_move_history: i32,
     pub root_depth: i32,
     pub root_delta: i32,
     pub sel_depth: i32,
@@ -279,6 +285,7 @@ impl ThreadData {
             continuation_corrhist: ContinuationCorrectionHistory::default(),
             best_move_changes: 0,
             optimism: [0; 2],
+            tt_move_history: 0,
             root_depth: 0,
             root_delta: 0,
             sel_depth: 0,

@@ -175,6 +175,10 @@ fn uci() {
 
     #[cfg(feature = "syzygy")]
     println!("option name SyzygyPath type string default");
+    #[cfg(feature = "syzygy")]
+    println!("option name SyzygyProbeDepth type spin default 1 min 1 max 100");
+    #[cfg(feature = "syzygy")]
+    println!("option name SyzygyProbeLimit type spin default 7 min 0 max 7");
 
     #[cfg(feature = "spsa")]
     crate::parameters::print_options();
@@ -372,6 +376,16 @@ fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<Sh
             Some(size) => println!("info string Loaded Syzygy tablebases with {size} pieces"),
             None => eprintln!("Failed to load Syzygy tablebases"),
         },
+        #[cfg(feature = "syzygy")]
+        ["name", "SyzygyProbeDepth", "value", v] => {
+            shared.syzygy_probe_depth.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed);
+            println!("info string set SyzygyProbeDepth to {v}");
+        }
+        #[cfg(feature = "syzygy")]
+        ["name", "SyzygyProbeLimit", "value", v] => {
+            shared.syzygy_probe_limit.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed);
+            println!("info string set SyzygyProbeLimit to {v}");
+        }
         ["name", "UCI_Chess960", "value", v] => {
             settings.frc = v.parse().unwrap_or_default();
             println!("info string set UCI_Chess960 to {v}");

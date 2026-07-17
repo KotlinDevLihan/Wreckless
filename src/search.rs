@@ -400,7 +400,14 @@ fn search<NODE: NodeType>(
                 let cont_bonus = (96 * depth - 73).min(1206);
 
                 td.quiet_history.update(td.board.all_threats(), stm, tt_move, quiet_bonus);
-                update_continuation_histories(td, ply, td.board.moved_piece(tt_move), tt_move.to(), cont_bonus);
+                update_continuation_histories_in_check(
+                    td,
+                    ply,
+                    td.board.moved_piece(tt_move),
+                    tt_move.to(),
+                    cont_bonus,
+                    in_check,
+                );
             }
 
             if td.board.fiftymove_clock() < 90 {
@@ -416,7 +423,14 @@ fn search<NODE: NodeType>(
         && !td.shared.stop_probing_tb.load(Ordering::Relaxed)
         && td.board.fiftymove_clock() == 0
         && td.board.castling().raw() == 0
-        && td.board.occupancies().popcount() <= tb::size()
+        && {
+            // Engage tablebases per SyzygyProbeLimit/SyzygyProbeDepth: probe at
+            // the piece-count boundary only from the configured depth onwards.
+            let cardinality = tb::size().min(td.shared.syzygy_probe_limit.load(Ordering::Relaxed));
+            let pieces = td.board.occupancies().popcount();
+            pieces <= cardinality
+                && (pieces < cardinality || depth >= td.shared.syzygy_probe_depth.load(Ordering::Relaxed))
+        }
         && let Some(outcome) = tb::probe(&td.board)
     {
         td.shared.tb_hits.increment(td.id);
@@ -536,6 +550,10 @@ fn search<NODE: NodeType>(
 
     let improving = improvement > 0;
 
+    // True when our static evaluation swung further in our favor than the
+    // opponent's symmetric expectation from one ply ago (as in Stockfish).
+    let opponent_worsening = !in_check && is_valid(td.stack[ply - 1].eval) && eval > -td.stack[ply - 1].eval;
+
     // Razoring
     if !NODE::PV
         && !in_check
@@ -557,6 +575,7 @@ fn search<NODE: NodeType>(
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
                     - p::rfp_no_threats() * (td.board.all_threats() & td.board.colors(stm)).is_empty() as i32
+                    - p::rfp_worsening() * opponent_worsening as i32
                     - p::rfp_base())
                 .max(2)
         && !is_loss(beta)
@@ -636,6 +655,10 @@ fn search<NODE: NodeType>(
         }
     }
 
+    // Also treat the node as improving when the static evaluation already
+    // clears beta (as in Stockfish); affects heuristics from here on.
+    let improving = improving || (!in_check && is_valid(eval) && eval >= beta);
+
     // ProbCut
     let mut probcut_beta = beta + p::probcut_base() - p::probcut_improving() * improving as i32;
 
@@ -693,11 +716,25 @@ fn search<NODE: NodeType>(
         }
     }
 
+    // A small ProbCut idea (as in Stockfish): a lower-bound TT entry from a
+    // near-full-depth search whose score comfortably exceeds beta is trusted
+    // as a cutoff without any search.
+    let probcut_beta_tt = beta + p::probcut_tt_margin();
+    if matches!(tt_bound, Bound::Lower | Bound::Exact)
+        && tt_depth >= depth - 4
+        && is_valid(tt_score)
+        && tt_score >= probcut_beta_tt
+        && !is_decisive(beta)
+        && !is_decisive(tt_score)
+    {
+        return probcut_beta_tt;
+    }
+
     // Singular Extensions (SE)
     let mut extension = 0;
     let mut singular_score = Score::NONE;
 
-    if !NODE::ROOT && !excluded && potential_singularity {
+    if !NODE::ROOT && !excluded && potential_singularity && !is_shuffling(td, tt_move, ply) {
         debug_assert!(is_valid(tt_score));
 
         let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
@@ -718,7 +755,8 @@ fn search<NODE: NodeType>(
         if singular_score < singular_beta {
             let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
                 - 16 * tt_move.is_quiet() as i32
-                - 16 * correction_value.abs() / 128;
+                - 16 * correction_value.abs() / 128
+                - 1175 * td.tt_move_history / 114178;
             let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
                 - 19 * tt_move.is_quiet() as i32
                 - 15 * correction_value.abs() / 128
@@ -730,6 +768,7 @@ fn search<NODE: NodeType>(
         }
         // Multi-Cut
         else if singular_score >= beta && !is_decisive(singular_score) {
+            update_tt_move_history(td, -421 - 110 * depth);
             return lerp(singular_score, beta, 0.4027);
         } else if singular_score > tt_score && td.stack[ply].mv != Move::NULL {
             tt_move = Move::NULL;
@@ -780,6 +819,13 @@ fn search<NODE: NodeType>(
             td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), captured_type)
         };
 
+        // Depth-indexed divisor for history contributions to quiet pruning
+        // (Stockfish's lmrDivisor table, renormalized around a 1024 base) so
+        // history weighs in non-uniformly per depth.
+        const HISTORY_DIVISORS: [i32; 16] =
+            [1221, 936, 927, 987, 1065, 1124, 1057, 927, 931, 1043, 1043, 1027, 1045, 1004, 1037, 1189];
+        let history_divisor = HISTORY_DIVISORS[(depth.min(16) - 1) as usize];
+
         if !NODE::ROOT && !is_loss(best_score) {
             // Late Move Pruning (LMP)
             if !in_check
@@ -790,7 +836,7 @@ fn search<NODE: NodeType>(
                     >= (p::lmp_base()
                         + p::lmp_improvement() * improvement / 16
                         + p::lmp_quad() * depth * depth
-                        + p::lmp_history() * history / 1024)
+                        + p::lmp_history() * history / history_divisor)
                         / 1024
             {
                 skip_quiets = true;
@@ -800,7 +846,7 @@ fn search<NODE: NodeType>(
             // Futility Pruning (FP)
             let futility_value = eval
                 + p::fp_depth() * depth
-                + p::fp_history() * history / 1024
+                + p::fp_history() * history / history_divisor
                 + p::fp_beta_bonus() * (eval >= beta) as i32
                 + p::fp_corr() * correction_value.abs() / 1024
                 - p::fp_base();
@@ -1100,7 +1146,14 @@ fn search<NODE: NodeType>(
         } else {
             td.quiet_history.update(td.board.all_threats(), stm, best_move, quiet_bonus);
             td.pawn_history.update(td.board.pawn_key(), td.board.moved_piece(best_move), best_move.to(), quiet_bonus);
-            update_continuation_histories(td, ply, td.board.moved_piece(best_move), best_move.to(), cont_bonus);
+            update_continuation_histories_in_check(
+                td,
+                ply,
+                td.board.moved_piece(best_move),
+                best_move.to(),
+                cont_bonus,
+                in_check,
+            );
 
             if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
                 td.low_ply_history.update(ply as usize, best_move, quiet_bonus);
@@ -1120,7 +1173,14 @@ fn search<NODE: NodeType>(
                     mv.to(),
                     -quiet_malus * scale / 1024,
                 );
-                update_continuation_histories(td, ply, td.board.moved_piece(mv), mv.to(), -cont_malus * scale / 1024);
+                update_continuation_histories_in_check(
+                    td,
+                    ply,
+                    td.board.moved_piece(mv),
+                    mv.to(),
+                    -cont_malus * scale / 1024,
+                    in_check,
+                );
             }
         }
 
@@ -1135,6 +1195,12 @@ fn search<NODE: NodeType>(
             );
         }
 
+        // Track how often the TT move turns out to be the best move; feeds back
+        // into the singular double-extension margin (as in Stockfish).
+        if !NODE::PV && tt_move.is_present() {
+            update_tt_move_history(td, if best_move == tt_move { 918 } else { -747 });
+        }
+
         if !NODE::ROOT && td.stack[ply - 1].mv.is_quiet() && td.stack[ply - 1].move_count < 2 {
             let malus = (93 * depth - 52).min(935);
             update_continuation_histories(td, ply - 1, td.stack[ply - 1].piece, td.stack[ply - 1].mv.to(), -malus);
@@ -1142,7 +1208,7 @@ fn search<NODE: NodeType>(
 
         if current_search_count > 1 && best_move.is_quiet() && best_score >= beta {
             let bonus = (233 * depth - 86).min(1550);
-            update_continuation_histories(td, ply, td.stack[ply].piece, best_move.to(), bonus);
+            update_continuation_histories_in_check(td, ply, td.stack[ply].piece, best_move.to(), bonus, in_check);
         }
     }
 
@@ -1398,6 +1464,7 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
         + corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
         + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
         + corrhist.material.get(stm, td.board.material_key(), bucket)
+        + corrhist.minor.get(stm, td.board.minor_key(), bucket)
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
@@ -1424,6 +1491,8 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
 
     corrhist.material.update(stm, td.board.material_key(), bucket, bonus);
 
+    corrhist.minor.update(stm, td.board.minor_key(), bucket, bonus);
+
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 2].mv.is_present() {
         td.continuation_corrhist.update(
             td.stack[ply - 2].contcorrhist,
@@ -1444,12 +1513,56 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
 }
 
 fn update_continuation_histories(td: &mut ThreadData, ply: isize, piece: Piece, sq: Square, bonus: i32) {
-    for offset in [1, 2, 4, 6] {
+    update_continuation_histories_in_check(td, ply, piece, sq, bonus, false);
+}
+
+fn update_continuation_histories_in_check(
+    td: &mut ThreadData, ply: isize, piece: Piece, sq: Square, bonus: i32, in_check: bool,
+) {
+    // Per-lag weights and positive-consistency multipliers, as in Stockfish:
+    // all six lags are updated, and the more continuation entries for this
+    // move are already positive, the stronger the update.
+    const CONTHIST_BONUSES: [(isize, i32); 6] = [(1, 1040), (2, 780), (3, 290), (4, 502), (5, 132), (6, 418)];
+    const MULTIPLIERS: [i32; 7] = [94, 103, 110, 106, 119, 126, 121];
+
+    let mut positive_count = 0;
+
+    for (offset, weight) in CONTHIST_BONUSES {
+        // Only update the nearest two continuation histories when in check.
+        if in_check && offset > 2 {
+            break;
+        }
+
         let entry = &td.stack[ply - offset];
         if entry.mv.is_present() {
-            td.continuation_history.update(entry.conthist, piece, sq, bonus);
+            if td.continuation_history.get(entry.conthist, piece, sq) > 0 {
+                positive_count += 1;
+            }
+
+            let scaled = bonus * weight * MULTIPLIERS[positive_count] / 131072 + 73 * (offset < 2) as i32;
+            td.continuation_history.update(entry.conthist, piece, sq, scaled);
         }
     }
+}
+
+/// Gravity-style update of the global TT-move reliability statistic, bounded
+/// to roughly [-8192, 8192] like Stockfish's `TTMoveHistory`.
+fn update_tt_move_history(td: &mut ThreadData, bonus: i32) {
+    let entry = td.tt_move_history;
+    td.tt_move_history = entry + bonus - entry * bonus.abs() / 8192;
+}
+
+/// Detects repetitive piece shuffling near the 50-move rule so that singular
+/// extensions can be disabled there, limiting search explosions (Stockfish #6447).
+fn is_shuffling(td: &ThreadData, tt_move: Move, ply: isize) -> bool {
+    if !tt_move.is_quiet() || td.board.fiftymove_clock() < 10 || ply < 20 {
+        return false;
+    }
+
+    let prev2 = td.stack[ply - 2].mv;
+    let prev4 = td.stack[ply - 4].mv;
+
+    prev2.is_present() && prev4.is_present() && tt_move.from() == prev2.to() && prev2.from() == prev4.to()
 }
 
 fn make_move(td: &mut ThreadData, ply: isize, mv: Move) {

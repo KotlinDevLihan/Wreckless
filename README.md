@@ -41,6 +41,17 @@ Search (each pending SPRT verification — treat as experimental until tested):
   search so stale ordering data from previous positions does not bias the current search
 - **Aspiration window floor**: the initial aspiration delta is clamped to a minimum of 10 cp,
   preventing hairline windows in very stable positions that cause excessive re-searches
+- **Post-LMR continuation history updates**: after a reduced move is verified at full depth, its
+  continuation history receives a bonus (beat beta) or malus (fell back below alpha), sharpening
+  future reduction decisions (as in Stockfish)
+- **One-reply extension**: when in check with exactly one legal evasion, the forced move is
+  extended by a ply — the subtree has a branching factor of one, so the depth is nearly free
+- **Volatility-adaptive RFP**: the reverse futility margin grows with the absolute swing of the
+  static evaluation over the last two plies, suppressing margin-based pruning in tactical positions
+- **Root candidate entropy time scaling**: when several root moves score within 20 cp of the best,
+  the soft time limit stretches (up to +24%), giving genuinely contested decisions more time
+- **Killer subtree locality**: each node clears its grandchild killer slot so stale killers from
+  sibling subtrees do not pollute move ordering below
 
 Speed:
 
@@ -56,9 +67,10 @@ Protocol / usability:
 - **Pondering**: `go ponder` / `ponderhit` support and `bestmove ... ponder ...` output
 - **`searchmoves`**: root move filtering on the `go` command
 - **`UCI_ShowWDL`**: win/draw/loss estimates in `info` lines
-- **SPSA tunables**: ~90 search constants (LMR, LMP, FP, RFP, NMP, ProbCut, SEE, correction history)
-  exposed as UCI options under the `spsa` cargo feature for OpenBench SPSA tuning; identical
-  compiled code in default builds
+- **SPSA tunables**: 92 search constants (LMR, LMP, FP, RFP, NMP, ProbCut, SEE, correction history,
+  quiescence futility) exposed as UCI options under the `spsa` cargo feature for OpenBench SPSA
+  tuning; identical compiled code in default builds. A ready-to-use OpenBench SPSA input file is
+  provided in [`spsa.config`](spsa.config)
 
 ## Getting started
 
@@ -147,6 +159,36 @@ Along with the standard UCI commands, Wreckless supports additional commands for
 
 [perft]: https://www.chessprogramming.org/Perft
 [bench]: /src/tools/bench.rs
+
+## Testing
+
+All search changes listed above are unverified until they pass game testing. The expected workflow:
+
+### SPRT (patch verification)
+
+Build the test and base binaries (e.g. via `git worktree add ../wreckless-base <commit> && make` in
+each), then run a sequential probability ratio test with [fastchess](https://github.com/Disservin/fastchess)
+and a standard opening book such as `UHO_Lichess_4852_v1.epd`:
+
+```bash
+fastchess -engine cmd=wreckless name=test -engine cmd=wreckless-base name=base \
+  -each tc=10+0.1 option.Hash=16 option.Threads=1 proto=uci \
+  -openings file=UHO_Lichess_4852_v1.epd format=epd order=random \
+  -repeat -games 2 -rounds 30000 -concurrency 8 -recover \
+  -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05 -ratinginterval 200
+```
+
+The run stops on its own: H1 accepted means the patch gains Elo; H0 accepted means it does not.
+Test one patch per branch. Always run games with the default build — the `spsa` feature build is
+slightly slower and only meant for tuning.
+
+### SPSA (parameter tuning)
+
+Build with `cargo rustc --release --bin wreckless --features spsa` to expose all 92 tunables as UCI
+options, then feed [`spsa.config`](spsa.config) to an [OpenBench](https://github.com/AndyGrant/OpenBench)
+SPSA test (preferred, needs distributed workers), or tune one parameter group at a time locally with
+a cutechess-based SPSA driver. Paste tuned values back into `src/parameters.rs` and SPRT the result
+before keeping it.
 
 ## Acknowledgements
 

@@ -44,6 +44,7 @@ define! {
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
+    i32 rfp_volatility: 24;
     i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
 

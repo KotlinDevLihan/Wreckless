@@ -14,7 +14,12 @@ pub enum Stage {
     GoodNoisy,
     Quiet,
     BadNoisy,
+    BadQuiet,
 }
+
+/// Quiets scoring at or below this are deferred until after the bad noisy
+/// moves (as in Stockfish's GOOD_QUIET / BAD_QUIET split).
+const GOOD_QUIET_THRESHOLD: i32 = -14000;
 
 pub struct MovePicker {
     list: MoveList,
@@ -24,6 +29,7 @@ pub struct MovePicker {
     bad_noisy: ArrayVec<Move, MAX_MOVES>,
     bad_noisy_idx: usize,
     noisy_count: usize,
+    first_bad_quiet: Move,
 }
 
 impl MovePicker {
@@ -36,7 +42,13 @@ impl MovePicker {
             bad_noisy: ArrayVec::new(),
             bad_noisy_idx: 0,
             noisy_count: 0,
+            first_bad_quiet: Move::NULL,
         }
+    }
+
+    /// Skips the remaining bad noisy moves, continuing with deferred bad quiets.
+    pub fn skip_bad_noisy(&mut self) {
+        self.bad_noisy_idx = self.bad_noisy.len();
     }
 
     pub const fn stage(&self) -> Stage {
@@ -93,17 +105,41 @@ impl MovePicker {
                 if NODE::ROOT {
                     self.score_quiet(td, ply);
                 }
-                return Some(self.get_best_entry().mv);
+
+                let entry = self.get_best_entry();
+                if entry.score > GOOD_QUIET_THRESHOLD {
+                    return Some(entry.mv);
+                }
+
+                // Every remaining quiet scores at or below the threshold:
+                // defer them all until after the bad noisy moves.
+                self.first_bad_quiet = entry.mv;
             }
 
             self.stage = Stage::BadNoisy;
         }
 
-        // Stage::BadNoisy
-        if self.bad_noisy_idx < self.bad_noisy.len() {
-            let mv = self.bad_noisy[self.bad_noisy_idx];
-            self.bad_noisy_idx += 1;
-            return Some(mv);
+        if self.stage == Stage::BadNoisy {
+            if self.bad_noisy_idx < self.bad_noisy.len() {
+                let mv = self.bad_noisy[self.bad_noisy_idx];
+                self.bad_noisy_idx += 1;
+                return Some(mv);
+            }
+
+            self.stage = Stage::BadQuiet;
+        }
+
+        // Stage::BadQuiet
+        if !skip_quiets {
+            if self.first_bad_quiet.is_present() {
+                let mv = self.first_bad_quiet;
+                self.first_bad_quiet = Move::NULL;
+                return Some(mv);
+            }
+
+            if !self.list.is_empty() {
+                return Some(self.get_best_entry().mv);
+            }
         }
 
         None

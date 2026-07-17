@@ -872,7 +872,10 @@ fn search<NODE: NodeType>(
                 if !is_decisive(best_score) && best_score < noisy_futility_value {
                     best_score = noisy_futility_value;
                 }
-                break;
+                // Prune the remaining bad noisy moves, but still allow any
+                // deferred bad quiets to be searched.
+                move_picker.skip_bad_noisy();
+                continue;
             }
 
             // History Pruning (HP)

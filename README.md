@@ -34,7 +34,22 @@ verification):
 - **Opponent-worsening term in RFP**: the reverse futility margin shrinks when the evaluation swung
   further in our favor than the opponent's null-move expectation
 - **Continuation-history consistency multiplier**: continuation-history updates are scaled up when
-  multiple lags already agree (are positive) for the move
+  multiple lags already agree (are positive) for the move, with per-lag weights over all six lags
+  and near-lag limiting when in check
+- **Depth-indexed history divisors**: history contributions to late-move and futility pruning are
+  scaled through Stockfish's 16-entry per-depth divisor table instead of a flat divisor
+- **Good/bad quiet split**: quiets with strongly negative history are deferred until after the bad
+  noisy moves (Stockfish's GOOD_QUIET / BAD_QUIET move-picker ordering)
+- **Major-piece correction history**: a seventh correction table keyed by rook/queen/king placement
+  (as in Stormphrax)
+- **Fishtest-verified micro-patches**: far-from-root singular margins, lag-6 continuation history in
+  move-loop pruning, capture-refutation futility bonus, cutoff-count-adaptive razoring, RFP skipped
+  under a bad-history TT move, correction-history updates on null-move fail-highs, and a pre-qsearch
+  TT-move extension at PV nodes
+- **Internal Iterative Reductions**: restored in Stockfish's current form — PV and expected-cut
+  nodes without a TT move are reduced by one ply from depth 6
+- **Aspiration fail-low rebound**: on a fail-low, beta collapses to the failed window's floor before
+  alpha drops, keeping the re-search window narrow (as in Stockfish)
 
 An earlier, larger set of speculative search additions (killers, countermoves, one-reply extension,
 qsearch futility, volatility-based pruning, entropy time scaling, and others) was removed after SPRT

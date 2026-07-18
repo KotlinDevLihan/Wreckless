@@ -143,8 +143,10 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
                 match score {
                     s if s <= alpha => {
+                        // Collapse beta to the failed window's floor (as in
+                        // Stockfish) so the re-search stays narrow.
+                        beta = alpha;
                         alpha = (score - delta).max(-Score::INFINITE);
-                        beta = (alpha + delta).min(beta);
                         delta += 26 * delta / 128;
                     }
                     s if s >= beta => {
@@ -665,6 +667,12 @@ fn search<NODE: NodeType>(
     // Also treat the node as improving when the static evaluation already
     // clears beta (as in Stockfish); affects heuristics from here on.
     let improving = improving || (!in_check && is_valid(eval) && eval >= beta);
+
+    // Internal Iterative Reductions (IIR): at sufficient depth, reduce PV and
+    // expected cut nodes that have no TT move to anchor move ordering.
+    if !NODE::ROOT && (NODE::PV || cut_node) && depth >= 6 && tt_move.is_null() {
+        depth -= 1;
+    }
 
     // ProbCut
     let mut probcut_beta = beta + p::probcut_base() - p::probcut_improving() * improving as i32;

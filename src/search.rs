@@ -843,6 +843,10 @@ fn search<NODE: NodeType>(
         let is_quiet = mv.is_quiet();
         let is_direct_check = td.board.is_direct_check(mv);
 
+        // For noisy moves, reductions additionally credit the captured piece's
+        // value (as in Stockfish's statScore for captures).
+        let mut capture_stat = 0;
+
         let history = if is_quiet {
             td.quiet_history.get(td.board.all_threats(), stm, mv)
                 + td.conthist(ply, 1, mv)
@@ -850,6 +854,7 @@ fn search<NODE: NodeType>(
                 + td.conthist(ply, 6, mv) / 2
         } else {
             let captured_type = td.board.type_on(mv.to());
+            capture_stat = 873 * captured_type.value() / 128;
             td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), captured_type)
         };
 
@@ -970,7 +975,7 @@ fn search<NODE: NodeType>(
                 reduction += p::lmr_quiet_alpha() * ((alpha - estimated_score).clamp(-65, 91)) / 128;
             } else {
                 reduction += p::lmr_noisy_base();
-                reduction -= p::lmr_noisy_hist() * history / 1024;
+                reduction -= p::lmr_noisy_hist() * (history + capture_stat) / 1024;
             }
 
             if NODE::PV {
@@ -1038,7 +1043,7 @@ fn search<NODE: NodeType>(
                 reduction -= p::fds_quiet_hist() * history / 1024;
             } else {
                 reduction += p::fds_noisy_base();
-                reduction -= p::fds_noisy_hist() * history / 1024;
+                reduction -= p::fds_noisy_hist() * (history + capture_stat) / 1024;
             }
 
             if tt_pv {
@@ -1517,8 +1522,12 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
         + corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
         + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
         + corrhist.material.get(stm, td.board.material_key(), bucket)
-        + corrhist.minor.get(stm, td.board.minor_key(), bucket)
-        + corrhist.major.get(stm, td.board.major_key(), bucket)
+        // The minor/major tables were added on top of the tuned baseline blend:
+        // half weight keeps the total correction magnitude near what the
+        // corr-based margins and corr_weight_div were tuned for.
+        + (corrhist.minor.get(stm, td.board.minor_key(), bucket)
+            + corrhist.major.get(stm, td.board.major_key(), bucket))
+            / 2
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,

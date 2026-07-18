@@ -108,6 +108,7 @@ define! {
     i32 lmr_quiet_base: 2171;
     i32 lmr_quiet_hist: 179;
     i32 lmr_quiet_alpha: 418;
+    i32 lmr_capture_stat: 437;
     i32 lmr_noisy_base: 1426;
     i32 lmr_noisy_hist: 130;
     i32 lmr_pv_base: 519;
@@ -150,4 +151,5 @@ define! {
     i32 corr_bonus_min: 4678;
     i32 corr_bonus_max: 2496;
     i32 corr_weight_div: 64;
+    i32 corr_minor_major: 128;
 }

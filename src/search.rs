@@ -854,7 +854,7 @@ fn search<NODE: NodeType>(
                 + td.conthist(ply, 6, mv) / 2
         } else {
             let captured_type = td.board.type_on(mv.to());
-            capture_stat = 873 * captured_type.value() / 128;
+            capture_stat = p::lmr_capture_stat() * captured_type.value() / 64;
             td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), captured_type)
         };
 
@@ -1201,7 +1201,12 @@ fn search<NODE: NodeType>(
             );
         } else {
             td.quiet_history.update(td.board.all_threats(), stm, best_move, quiet_bonus);
-            td.pawn_history.update(td.board.pawn_key(), td.board.moved_piece(best_move), best_move.to(), quiet_bonus);
+            td.corrhist().pawn_history.update(
+                td.board.pawn_key(),
+                td.board.moved_piece(best_move),
+                best_move.to(),
+                quiet_bonus,
+            );
             update_continuation_histories_in_check(
                 td,
                 ply,
@@ -1223,7 +1228,7 @@ fn search<NODE: NodeType>(
                 if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
                     td.low_ply_history.update(ply as usize, mv, -quiet_malus * scale / 1024);
                 }
-                td.pawn_history.update(
+                td.corrhist().pawn_history.update(
                     td.board.pawn_key(),
                     td.board.moved_piece(mv),
                     mv.to(),
@@ -1522,12 +1527,12 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
         + corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
         + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
         + corrhist.material.get(stm, td.board.material_key(), bucket)
-        // The minor/major tables were added on top of the tuned baseline blend:
-        // half weight keeps the total correction magnitude near what the
-        // corr-based margins and corr_weight_div were tuned for.
+        // Weight of the minor/major tables relative to the baseline blend is
+        // tunable; full weight (128) matched the best-measured build.
         + (corrhist.minor.get(stm, td.board.minor_key(), bucket)
             + corrhist.major.get(stm, td.board.major_key(), bucket))
-            / 2
+            * p::corr_minor_major()
+            / 128
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,

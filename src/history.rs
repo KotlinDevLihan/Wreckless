@@ -154,7 +154,9 @@ impl Default for LowPlyHistory {
 
 pub struct PawnHistory {
     // [pawn_key_bucket][piece][to]
-    entries: Box<[PieceToHistory<i16>; Self::SIZE]>,
+    // Atomic so the table can be shared across search threads (racy-lossy
+    // updates are fine for history data, as with the correction histories).
+    entries: Box<[PieceToHistory<AtomicI16>; Self::SIZE]>,
 }
 
 impl PawnHistory {
@@ -164,12 +166,24 @@ impl PawnHistory {
     const MASK: usize = Self::SIZE - 1;
 
     pub fn get(&self, pawn_key: u64, piece: Piece, to: Square) -> i32 {
-        self.entries[pawn_key as usize & Self::MASK][piece][to] as i32
+        self.entries[pawn_key as usize & Self::MASK][piece][to].load(Ordering::Relaxed) as i32
     }
 
-    pub fn update(&mut self, pawn_key: u64, piece: Piece, to: Square, bonus: i32) {
-        let entry = &mut self.entries[pawn_key as usize & Self::MASK][piece][to];
-        apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
+    pub fn update(&self, pawn_key: u64, piece: Piece, to: Square, bonus: i32) {
+        let entry = &self.entries[pawn_key as usize & Self::MASK][piece][to];
+        let bonus = bonus.clamp(-Self::MAX_HISTORY, Self::MAX_HISTORY);
+        let current = entry.load(Ordering::Relaxed) as i32;
+        entry.store((current + bonus - bonus.abs() * current / Self::MAX_HISTORY) as i16, Ordering::Relaxed);
+    }
+
+    pub fn clear(&self) {
+        for bucket in self.entries.iter() {
+            for entries in bucket.iter() {
+                for entry in entries {
+                    entry.store(0, Ordering::Relaxed);
+                }
+            }
+        }
     }
 }
 

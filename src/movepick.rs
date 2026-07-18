@@ -238,7 +238,7 @@ impl MovePicker {
             let pt = td.board.type_on(mv.from());
 
             entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
-                + 1024 * td.pawn_history.get(pawn_key, td.board.moved_piece(mv), mv.to()) / 1024
+                + 1024 * td.corrhist().pawn_history.get(pawn_key, td.board.moved_piece(mv), mv.to()) / 1024
                 + if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
                     7052 * td.low_ply_history.get(ply as usize, mv) / (1024 * (1 + 2 * ply as i32))
                 } else {

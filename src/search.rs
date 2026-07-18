@@ -945,7 +945,8 @@ fn search<NODE: NodeType>(
 
         // Pre-qsearch TT-move extension: at PV nodes, give a well-established
         // TT move one full ply instead of dropping it straight into qsearch.
-        if NODE::PV && mv == tt_move && new_depth <= 0 && tt_depth >= depth {
+        // Never override a negative (singular) extension decision.
+        if NODE::PV && mv == tt_move && new_depth == 0 && extension >= 0 && tt_depth >= depth {
             new_depth = 1;
         }
         let mut score = Score::ZERO;
@@ -1594,7 +1595,9 @@ fn update_continuation_histories_in_check(
                 positive_count += 1;
             }
 
-            let scaled = bonus * weight * MULTIPLIERS[positive_count] / 131072 + 73 * (offset < 2) as i32;
+            // Divisor renormalized (Stockfish uses 131072) so the lag-1 update
+            // keeps the magnitude the rest of the engine was tuned around.
+            let scaled = bonus * weight * MULTIPLIERS[positive_count] / 98304 + 73 * (offset < 2) as i32;
             td.continuation_history.update(entry.conthist, piece, sq, scaled);
         }
     }

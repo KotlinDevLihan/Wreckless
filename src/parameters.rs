@@ -61,7 +61,7 @@ define! {
     i32 nmp_r_beta_max: 1187;
 
     // ProbCut
-    i32 probcut_tt_margin: 580;
+    i32 probcut_tt_margin: 450;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
     i32 probcut_score_div: 319;

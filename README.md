@@ -50,6 +50,9 @@ verification):
   nodes without a TT move are reduced by one ply from depth 6
 - **Aspiration fail-low rebound**: on a fail-low, beta collapses to the failed window's floor before
   alpha drops, keeping the re-search window narrow (as in Stockfish)
+- **Two-horizon falling-eval time scaling**: the time manager's score-trend factor now also compares
+  against the best score from four iterations ago (as in Stockfish's `fallingEval`), extending time
+  when the evaluation is sliding across recent iterations
 
 An earlier, larger set of speculative search additions (killers, countermoves, one-reply extension,
 qsearch futility, volatility-based pruning, entropy time scaling, and others) was removed after SPRT
@@ -60,9 +63,10 @@ Speed:
 - **PEXT bitboards**: sliding-piece attacks are indexed with the BMI2 `pext` instruction when the
   target supports it (with the classical magic-multiplication path as fallback). Disabled
   automatically on AMD Zen 1/2, where `pext` is microcoded; override with `WRECKLESS_PEXT=0|1`
-- **Windows large pages**: the transposition table is allocated with 2 MB pages via
-  `VirtualAlloc(MEM_LARGE_PAGES)` when the "Lock pages in memory" privilege is held, reducing TLB
-  misses on TT probes (falls back to regular pages otherwise; Linux already used `MADV_HUGEPAGE`)
+- **Windows large pages**: the transposition table and the continuation-history tables are
+  allocated with 2 MB pages via `VirtualAlloc(MEM_LARGE_PAGES)` when the "Lock pages in memory"
+  privilege is held, reducing TLB misses on the hottest randomly-accessed memory (falls back to
+  regular pages otherwise; Linux already used `MADV_HUGEPAGE`)
 
 Protocol / usability:
 

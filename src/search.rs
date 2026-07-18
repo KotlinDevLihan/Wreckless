@@ -70,6 +70,10 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     let mut pv_stability = 0;
     let mut soft_stop_voted = false;
 
+    // Ring buffer of best scores from recent iterations, so the time manager
+    // can compare against the score four iterations ago (as in Stockfish).
+    let mut iter_values = [td.previous_best_score; 4];
+
     if td.root_moves.is_empty() {
         if report == Report::Full {
             td.print_uci_info(0);
@@ -247,6 +251,9 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             break;
         }
 
+        let iter_value = iter_values[(depth % 4) as usize];
+        iter_values[(depth % 4) as usize] = td.root_moves[0].score;
+
         let multiplier = || {
             let nodes = {
                 let fraction = td.root_moves[0].nodes as f32 / td.nodes() as f32;
@@ -255,7 +262,8 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
             let score_trend = {
                 let difference = (td.previous_best_score - td.root_moves[0].score) as f32;
-                (0.7426 + 0.0480 * difference).clamp(0.7214, 1.4031)
+                let recent = (iter_value - td.root_moves[0].score) as f32;
+                (0.7426 + 0.0480 * difference + 0.0230 * recent).clamp(0.7214, 1.4031)
             };
 
             let pv_stability = (1.2881 - 0.0440 * pv_stability as f32).max(0.7160);

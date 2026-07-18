@@ -376,7 +376,7 @@ unsafe fn allocate(threads: usize, size_mb: usize) -> (*mut Cluster, usize) {
     };
 
     #[cfg(target_os = "windows")]
-    let ptr = windows::allocate(size);
+    let ptr = windows::allocate(size).cast();
 
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let ptr = {
@@ -412,9 +412,7 @@ unsafe fn deallocate(ptr: *mut Cluster, len: usize) {
 /// misses on probes. Falls back to a regular `VirtualAlloc` when the privilege is not
 /// held (it requires "Lock pages in memory" rights or an elevated prompt).
 #[cfg(target_os = "windows")]
-mod windows {
-    use super::Cluster;
-
+pub(crate) mod windows {
     type Handle = *mut std::ffi::c_void;
 
     const MEM_COMMIT: u32 = 0x1000;
@@ -459,21 +457,21 @@ mod windows {
         ) -> i32;
     }
 
-    pub fn allocate(size: usize) -> *mut Cluster {
+    pub fn allocate(size: usize) -> *mut std::ffi::c_void {
         if let Some(ptr) = allocate_large_pages(size) {
             return ptr;
         }
 
         let ptr = unsafe { VirtualAlloc(std::ptr::null_mut(), size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE) };
-        assert!(!ptr.is_null(), "Failed to allocate the transposition table");
-        ptr.cast()
+        assert!(!ptr.is_null(), "Failed to allocate table memory");
+        ptr
     }
 
     pub fn deallocate(ptr: *mut std::ffi::c_void) {
         unsafe { VirtualFree(ptr, 0, MEM_RELEASE) };
     }
 
-    fn allocate_large_pages(size: usize) -> Option<*mut Cluster> {
+    fn allocate_large_pages(size: usize) -> Option<*mut std::ffi::c_void> {
         unsafe {
             let page = GetLargePageMinimum();
             if page == 0 || !enable_lock_memory_privilege() {
@@ -483,7 +481,7 @@ mod windows {
             let size = size.div_ceil(page) * page;
             let flags = MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES;
             let ptr = VirtualAlloc(std::ptr::null_mut(), size, flags, PAGE_READWRITE);
-            (!ptr.is_null()).then_some(ptr.cast())
+            (!ptr.is_null()).then_some(ptr)
         }
     }
 

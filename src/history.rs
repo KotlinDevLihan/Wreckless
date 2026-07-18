@@ -28,7 +28,16 @@ impl<T> HugeBox<T> {
             std::ptr::NonNull::new_unchecked(p.cast::<T>())
         };
 
-        #[cfg(not(target_os = "linux"))]
+        // Windows: VirtualAlloc with 2 MB pages when the privilege allows it
+        // (falls back to regular pages); memory is zeroed by the OS.
+        #[cfg(target_os = "windows")]
+        let ptr = unsafe {
+            let size = std::mem::size_of::<T>();
+            assert!(size > 0, "HugeBox requires a non-zero-sized type");
+            std::ptr::NonNull::new_unchecked(crate::transposition::windows::allocate(size).cast::<T>())
+        };
+
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         let ptr = unsafe {
             let layout = std::alloc::Layout::new::<T>();
             let p = std::alloc::alloc_zeroed(layout);
@@ -66,7 +75,10 @@ impl<T> Drop for HugeBox<T> {
             }
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "windows")]
+        crate::transposition::windows::deallocate(self.ptr.as_ptr().cast());
+
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         unsafe {
             let layout = std::alloc::Layout::new::<T>();
             std::alloc::dealloc(self.ptr.as_ptr().cast(), layout);

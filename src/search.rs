@@ -132,6 +132,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
             loop {
                 td.stack = Stack::new();
+                td.stack[0].follow_pv = true;
                 td.cutoff_count = PlyArray::default();
                 td.excluded = PlyArray::default();
                 td.root_delta = beta - alpha;
@@ -189,6 +190,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
         if td.shared.status.get() != Status::STOPPED {
             td.completed_depth = depth;
+            td.previous_pv = td.pv_table.line().to_vec();
         }
 
         if (td.root_moves[0].score - average[0]).abs() < 12 {
@@ -376,6 +378,10 @@ fn search<NODE: NodeType>(
 
     let mut depth = depth.min(MAX_PLY as i32 - 1);
 
+    // Computed before the TT probe so the work overlaps the prefetched cache
+    // line's arrival instead of serializing after the lookup.
+    let correction_value = eval_correction(td, ply);
+
     let hash = td.board.hash();
     let entry = td.shared.tt.read(hash, td.board.fiftymove_clock(), ply);
 
@@ -469,8 +475,6 @@ fn search<NODE: NodeType>(
             }
         }
     }
-
-    let correction_value = eval_correction(td, ply);
 
     let raw_eval;
     let eval;
@@ -628,6 +632,7 @@ fn search<NODE: NodeType>(
         td.stack[ply].contcorrhist = td.stack.sentinel().contcorrhist;
         td.stack[ply].piece = Piece::None;
         td.stack[ply].mv = Move::NULL;
+        td.stack[ply + 1].follow_pv = false;
 
         td.board.make_null_move();
         td.shared.tt.prefetch(td.board.hash());
@@ -677,8 +682,9 @@ fn search<NODE: NodeType>(
     let improving = improving || (!in_check && is_valid(eval) && eval >= beta);
 
     // Internal Iterative Reductions (IIR): at sufficient depth, reduce PV and
-    // expected cut nodes that have no TT move to anchor move ordering.
-    if !NODE::ROOT && (NODE::PV || cut_node) && depth >= 6 && tt_move.is_null() {
+    // expected cut nodes that have no TT move to anchor move ordering. Nodes
+    // on the previous iteration's PV are exempt (as in Stockfish).
+    if !NODE::ROOT && !td.stack[ply].follow_pv && (NODE::PV || cut_node) && depth >= 6 && tt_move.is_null() {
         depth -= 1;
     }
 
@@ -1170,7 +1176,10 @@ fn search<NODE: NodeType>(
         let noisy_bonus = (96 * depth).min(885) - 43 - 87 * cut_node as i32;
         let noisy_malus = (175 * depth).min(1252) - 58 - 16 * noisy_moves.len() as i32;
 
-        let quiet_bonus = (184 * depth).min(1742) - 72 - 42 * cut_node as i32;
+        // At non-PV nodes, scale the bonus up by how many other moves were
+        // searched before this one proved best (as in Stockfish).
+        let quiet_bonus = (184 * depth).min(1742) - 72 - 42 * cut_node as i32
+            + (18 * (move_count as i32 - 1)).min(180) * !NODE::PV as i32;
         let quiet_malus = (171 * depth).min(1099) - 46 - 31 * quiet_moves.len() as i32;
 
         let cont_bonus = (97 * depth).min(1098) - 74 - 48 * cut_node as i32;
@@ -1344,6 +1353,10 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
         return if in_check { draw(td) } else { td.nnue.evaluate(&td.board) };
     }
 
+    // Computed before the TT probe so the work overlaps the prefetched cache
+    // line's arrival instead of serializing after the lookup.
+    let correction_value = eval_correction(td, ply);
+
     let hash = td.board.hash();
     let entry = td.shared.tt.read(hash, td.board.fiftymove_clock(), ply);
 
@@ -1368,8 +1381,6 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             return tt_score;
         }
     }
-
-    let correction_value = eval_correction(td, ply);
 
     let raw_eval;
     let eval;
@@ -1611,6 +1622,7 @@ fn is_shuffling(td: &ThreadData, tt_move: Move, ply: isize) -> bool {
 
 fn make_move(td: &mut ThreadData, ply: isize, mv: Move) {
     td.shared.tt.prefetch(td.board.key_after(mv));
+    td.stack[ply + 1].follow_pv = td.stack[ply].follow_pv && td.previous_pv.get(ply as usize) == Some(&mv);
     td.stack[ply].mv = mv;
     td.stack[ply].piece = td.board.moved_piece(mv);
     td.stack[ply].conthist =

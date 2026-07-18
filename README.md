@@ -44,8 +44,10 @@ verification):
   (as in Stormphrax)
 - **Fishtest-verified micro-patches**: far-from-root singular margins, lag-6 continuation history in
   move-loop pruning, capture-refutation futility bonus, cutoff-count-adaptive razoring, RFP skipped
-  under a bad-history TT move, correction-history updates on null-move fail-highs, and a pre-qsearch
-  TT-move extension at PV nodes
+  under a bad-history TT move, correction-history updates on null-move fail-highs, a pre-qsearch
+  TT-move extension at PV nodes, correction values computed before the TT probe (latency hiding),
+  IIR exempted on nodes following the previous iteration's PV, and best-move history bonuses scaled
+  by the number of moves searched at non-PV nodes
 - **Internal Iterative Reductions**: restored in Stockfish's current form — PV and expected-cut
   nodes without a TT move are reduced by one ply from depth 6
 - **Aspiration fail-low rebound**: on a fail-low, beta collapses to the failed window's floor before

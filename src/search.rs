@@ -557,7 +557,8 @@ fn search<NODE: NodeType>(
     // Razoring
     if !NODE::PV
         && !in_check
-        && estimated_score < alpha - p::razor_base() - p::razor_quad() * depth * depth
+        && estimated_score
+            < alpha - p::razor_base() - p::razor_quad() * depth * depth + 65 * (td.cutoff_count[ply + 1] > 3) as i32
         && alpha < 2048
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
@@ -569,6 +570,7 @@ fn search<NODE: NodeType>(
     if !tt_pv
         && !in_check
         && !excluded
+        && (!tt_move.is_quiet() || td.quiet_history.get(td.board.all_threats(), stm, tt_move) >= -2048)
         && estimated_score
             >= beta
                 + (p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
@@ -636,6 +638,11 @@ fn search<NODE: NodeType>(
 
         if score >= bound && !is_win(score) {
             if (td.nmp_min_ply > 0 || depth < 16) && score >= beta {
+                // A confirmed null-move fail high is evidence the static eval
+                // undershoots this position: feed it to the correction histories.
+                if score > eval {
+                    update_correction_histories(td, depth, score - eval, ply);
+                }
                 return score;
             }
 
@@ -756,10 +763,12 @@ fn search<NODE: NodeType>(
             let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
                 - 16 * tt_move.is_quiet() as i32
                 - 16 * correction_value.abs() / 128
-                - 1175 * td.tt_move_history / 114178;
+                - 1175 * td.tt_move_history / 114178
+                - 38 * (ply as i32 > td.root_depth) as i32;
             let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
                 - 19 * tt_move.is_quiet() as i32
                 - 15 * correction_value.abs() / 128
+                - 43 * (ply as i32 > td.root_depth) as i32
                 + 36;
 
             extension = 1;
@@ -813,7 +822,10 @@ fn search<NODE: NodeType>(
         let is_direct_check = td.board.is_direct_check(mv);
 
         let history = if is_quiet {
-            td.quiet_history.get(td.board.all_threats(), stm, mv) + td.conthist(ply, 1, mv) + td.conthist(ply, 2, mv)
+            td.quiet_history.get(td.board.all_threats(), stm, mv)
+                + td.conthist(ply, 1, mv)
+                + td.conthist(ply, 2, mv)
+                + td.conthist(ply, 6, mv) / 2
         } else {
             let captured_type = td.board.type_on(mv.to());
             td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), captured_type)
@@ -860,8 +872,12 @@ fn search<NODE: NodeType>(
             }
 
             // Bad Noisy Futility Pruning (BNFP)
-            let noisy_futility_value =
-                eval + p::bnfp_depth() * depth + p::bnfp_history() * history / 1024 + p::bnfp_base();
+            let noisy_futility_value = eval
+                + p::bnfp_depth() * depth
+                + p::bnfp_history() * history / 1024
+                + p::bnfp_base()
+                + 96 * (!NODE::ROOT && td.stack[ply - 1].mv.is_present() && mv.to() == td.stack[ply - 1].mv.to())
+                    as i32;
 
             if !in_check
                 && !is_direct_check
@@ -904,6 +920,12 @@ fn search<NODE: NodeType>(
         make_move(td, ply, mv);
 
         let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 };
+
+        // Pre-qsearch TT-move extension: at PV nodes, give a well-established
+        // TT move one full ply instead of dropping it straight into qsearch.
+        if NODE::PV && mv == tt_move && new_depth <= 0 && tt_depth >= depth {
+            new_depth = 1;
+        }
         let mut score = Score::ZERO;
 
         // Late Move Reductions (LMR)
@@ -1468,6 +1490,7 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
         + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
         + corrhist.material.get(stm, td.board.material_key(), bucket)
         + corrhist.minor.get(stm, td.board.minor_key(), bucket)
+        + corrhist.major.get(stm, td.board.major_key(), bucket)
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
@@ -1495,6 +1518,8 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
     corrhist.material.update(stm, td.board.material_key(), bucket, bonus);
 
     corrhist.minor.update(stm, td.board.minor_key(), bucket, bonus);
+
+    corrhist.major.update(stm, td.board.major_key(), bucket, bonus);
 
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 2].mv.is_present() {
         td.continuation_corrhist.update(

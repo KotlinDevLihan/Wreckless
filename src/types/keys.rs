@@ -7,6 +7,7 @@ pub struct Keys {
     pub non_pawn: [u64; Color::NUM],
     pub material: u64,
     pub minor: u64,
+    pub major: u64,
 }
 
 impl Keys {
@@ -30,6 +31,10 @@ impl Keys {
         self.minor
     }
 
+    pub const fn major(&self) -> u64 {
+        self.major
+    }
+
     /// Keyed by piece counts only: adding the `count`-th piece of a kind and
     /// removing it toggle the same value, so the key is order-independent.
     pub fn toggle_material(&mut self, piece: Piece, count: usize) {
@@ -48,6 +53,10 @@ impl Keys {
 
         if matches!(piece.piece_type(), PieceType::Knight | PieceType::Bishop | PieceType::King) {
             self.minor ^= piece_key;
+        }
+
+        if matches!(piece.piece_type(), PieceType::Rook | PieceType::Queen | PieceType::King) {
+            self.major ^= piece_key;
         }
     }
 

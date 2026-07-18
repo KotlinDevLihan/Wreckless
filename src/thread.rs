@@ -153,6 +153,7 @@ pub struct SharedCorrectionHistory {
     pub non_pawn: [CorrectionHistory; 2],
     pub material: CorrectionHistory,
     pub minor: CorrectionHistory,
+    pub major: CorrectionHistory,
 }
 
 impl NumaReplicable for SharedCorrectionHistory {

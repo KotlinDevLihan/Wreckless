@@ -1,6 +1,7 @@
 use crate::{
     history::LowPlyHistory,
     lookup::king_attacks,
+    parameters as p,
     search::NodeType,
     setwise::{bishop_attacks_setwise, knight_attacks_setwise, pawn_attacks_setwise, rook_attacks_setwise},
     thread::ThreadData,
@@ -16,10 +17,6 @@ pub enum Stage {
     BadNoisy,
     BadQuiet,
 }
-
-/// Quiets scoring at or below this are deferred until after the bad noisy
-/// moves (as in Stockfish's GOOD_QUIET / BAD_QUIET split).
-const GOOD_QUIET_THRESHOLD: i32 = -14000;
 
 pub struct MovePicker {
     list: MoveList,
@@ -107,7 +104,7 @@ impl MovePicker {
                 }
 
                 let entry = self.get_best_entry();
-                if entry.score > GOOD_QUIET_THRESHOLD {
+                if entry.score > p::good_quiet_threshold() {
                     return Some(entry.mv);
                 }
 

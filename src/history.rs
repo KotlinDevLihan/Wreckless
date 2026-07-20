@@ -109,20 +109,6 @@ impl QuietHistory {
             [mv.from()][mv.to()];
         apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
     }
-
-    pub fn halve(&mut self) {
-        for a in self.entries.iter_mut() {
-            for b in a.iter_mut() {
-                for c in b.iter_mut() {
-                    for row in c.iter_mut() {
-                        for entry in row.iter_mut() {
-                            *entry /= 2;
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 impl Default for QuietHistory {
@@ -199,17 +185,6 @@ impl PawnHistory {
             }
         }
     }
-
-    pub fn halve(&self) {
-        for bucket in self.entries.iter() {
-            for entries in bucket.iter() {
-                for entry in entries {
-                    let v = entry.load(Ordering::Relaxed);
-                    entry.store(v / 2, Ordering::Relaxed);
-                }
-            }
-        }
-    }
 }
 
 impl Default for PawnHistory {
@@ -233,18 +208,6 @@ impl NoisyHistory {
     pub fn update(&mut self, threats: Bitboard, piece: Piece, sq: Square, captured: PieceType, bonus: i32) {
         let entry = &mut self.entries[piece][sq][captured][threats.contains(sq) as usize];
         apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
-    }
-
-    pub fn halve(&mut self) {
-        for a in self.entries.iter_mut() {
-            for b in a.iter_mut() {
-                for row in b.iter_mut() {
-                    for entry in row.iter_mut() {
-                        *entry /= 2;
-                    }
-                }
-            }
-        }
     }
 }
 

@@ -773,7 +773,7 @@ fn search<NODE: NodeType>(
         // against runaway extension chains far from the root. This is an inner
         // guard (not part of the outer condition) so hitting the cap leaves
         // `extension` at 0 without falling through to the LDSE branch below.
-        if (ply as i32) < td.root_depth * 2 {
+        if (ply as i32) < td.root_depth * p::singular_recursion_mult() {
             let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
                 + depth * (tt_pv && !NODE::PV) as i32;
             let singular_beta = tt_score - singular_margin;
@@ -1400,17 +1400,18 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut tt_bound = Bound::None;
     let mut tt_pv = NODE::PV;
 
+    // Depth this call requires of a stored entry to trust it for an early
+    // cutoff: checks-considering calls need an entry that also considered
+    // checks (or better); a captures-only call can reuse either.
+    let required_tt_depth = if allow_checks && !in_check { TtDepth::QS_CHECKS } else { TtDepth::SOME };
+
     // QS early TT cutoff
     if let Some(entry) = &entry {
         tt_score = entry.score;
         tt_bound = entry.bound;
         tt_pv |= entry.tt_pv;
 
-        // Skip the early cutoff when this call wants checks considered: a
-        // stored entry may come from a captures-only qsearch pass (TT depth
-        // doesn't distinguish the two), and reusing it here would silently
-        // skip the checks search this call exists to do.
-        if (!allow_checks || in_check)
+        if entry.depth >= required_tt_depth
             && is_valid(tt_score)
             && (!NODE::PV || !is_decisive(tt_score))
             && match tt_bound {
@@ -1552,7 +1553,12 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
 
     let bound = if best_score >= beta { Bound::Lower } else { Bound::Upper };
 
-    td.shared.tt.write(hash, TtDepth::SOME, raw_eval, best_score, bound, best_move, ply, tt_pv, false);
+    // Mark the entry as checks-considering when this call actually searched
+    // quiet checks, so a future checks-wanting call can trust it, and a
+    // future captures-only call can too (a more thorough result is always
+    // safe to reuse in a less demanding context).
+    let write_depth = if generate_checks { TtDepth::QS_CHECKS } else { TtDepth::SOME };
+    td.shared.tt.write(hash, write_depth, raw_eval, best_score, bound, best_move, ply, tt_pv, false);
 
     debug_assert!(alpha < beta);
     debug_assert!(-Score::INFINITE < best_score && best_score < Score::INFINITE);

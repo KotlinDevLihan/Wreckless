@@ -152,4 +152,7 @@ define! {
     i32 corr_bonus_max: 2496;
     i32 corr_weight_div: 64;
     i32 corr_minor_major: 128;
+
+    // Continuation history
+    i32 conthist_div: 70000;
 }

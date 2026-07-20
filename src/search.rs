@@ -1633,8 +1633,11 @@ fn update_continuation_histories_in_check(
 ) {
     // Per-lag weights and positive-consistency multipliers, as in Stockfish:
     // all six lags are updated, and the more continuation entries for this
-    // move are already positive, the stronger the update.
-    const CONTHIST_BONUSES: [(isize, i32); 6] = [(1, 1040), (2, 780), (3, 290), (4, 502), (5, 132), (6, 418)];
+    // move are already positive, the stronger the update. Lags 1/2/4/6 are
+    // weighted equally (matching the original, already-tuned baseline, which
+    // treated those four lags at full and equal strength); lags 3/5 are new
+    // additions kept at Stockfish's relative ratio to the primary weight.
+    const CONTHIST_BONUSES: [(isize, i32); 6] = [(1, 700), (2, 700), (3, 195), (4, 700), (5, 89), (6, 700)];
     const MULTIPLIERS: [i32; 7] = [94, 103, 110, 106, 119, 126, 121];
 
     let mut positive_count = 0;
@@ -1651,9 +1654,10 @@ fn update_continuation_histories_in_check(
                 positive_count += 1;
             }
 
-            // Divisor renormalized (Stockfish uses 131072) so the lag-1 update
-            // keeps the magnitude the rest of the engine was tuned around.
-            let scaled = bonus * weight * MULTIPLIERS[positive_count] / 98304 + 73 * (offset < 2) as i32;
+            // Overall scale is SPSA-tunable since the right magnitude for this
+            // 6-lag scheme relative to the original 4-lag baseline is an
+            // empirical question, not one to guess at.
+            let scaled = bonus * weight * MULTIPLIERS[positive_count] / p::conthist_div() + 73 * (offset < 2) as i32;
             td.corrhist().continuation_history.update(entry.conthist, piece, sq, scaled);
         }
     }

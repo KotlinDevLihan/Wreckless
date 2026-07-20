@@ -58,15 +58,6 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     td.completed_depth = 0;
     td.low_ply_history.shift();
 
-    // History decay: halve quiet/noisy (per-thread) and pawn (shared, main
-    // thread only) history tables so stale ordering data from the previous
-    // position doesn't unduly bias the current search.
-    td.quiet_history.halve();
-    td.noisy_history.halve();
-    if td.id == 0 {
-        td.corrhist().pawn_history.halve();
-    }
-
     td.pv_table.clear(0);
     td.nnue.full_refresh(&td.board);
 
@@ -817,13 +808,6 @@ fn search<NODE: NodeType>(
             // Multi-Cut
             else if singular_score >= beta && !is_decisive(singular_score) {
                 update_tt_move_history(td, -421 - 110 * depth);
-
-                // A confirmed multicut means the static eval likely mis-assessed
-                // this position; feed the gap to the correction histories.
-                if is_valid(eval) {
-                    update_correction_histories(td, depth, singular_score - eval, ply);
-                }
-
                 return lerp(singular_score, beta, 0.4027);
             } else if singular_score > tt_score && td.stack[ply].mv != Move::NULL {
                 tt_move = Move::NULL;
@@ -1422,7 +1406,12 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
         tt_bound = entry.bound;
         tt_pv |= entry.tt_pv;
 
-        if is_valid(tt_score)
+        // Skip the early cutoff when this call wants checks considered: a
+        // stored entry may come from a captures-only qsearch pass (TT depth
+        // doesn't distinguish the two), and reusing it here would silently
+        // skip the checks search this call exists to do.
+        if (!allow_checks || in_check)
+            && is_valid(tt_score)
             && (!NODE::PV || !is_decisive(tt_score))
             && match tt_bound {
                 Bound::Upper => tt_score <= alpha,
@@ -1501,8 +1490,10 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
         move_count += 1;
 
         if !is_loss(best_score) {
-            // Late Move Pruning (LMP)
-            if move_count >= 3 && !td.board.is_direct_check(mv) {
+            // Late Move Pruning (LMP): skipped while generating checks, since
+            // breaking here would exit before the move picker ever reaches
+            // the checking quiets this call exists to search.
+            if move_count >= 3 && !td.board.is_direct_check(mv) && !generate_checks {
                 break;
             }
 

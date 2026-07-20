@@ -65,8 +65,6 @@ verification):
 - **Shared continuation history**: the move-ordering continuation-history table is atomic and shared
   across all search threads (matching the shared pawn history), all six lags are updated with
   per-lag weights and positive-consistency multipliers, and near lags are limited when in check
-- **Correction-history update on singular multicut**: a confirmed multicut feeds the gap between the
-  singular search's value and the static eval to the correction histories (PlentyChess)
 - **Bounded singular-extension recursion**: singular search is skipped beyond `2 × root depth` plies,
   guarding against runaway extension chains deep in a single line, without altering which branch
   (singular vs. low-depth singular) is taken at the node
@@ -85,6 +83,14 @@ was the leading suspect behind an earlier bisected regression during this fork's
 An earlier, larger set of speculative search additions (killers, countermoves, one-reply extension,
 qsearch futility, volatility-based pruning, entropy time scaling, and others) was removed after SPRT
 measured the combined stack at **−69 Elo ± 39** against the baseline.
+
+A correction-history update on singular multicut (feeding the gap between the singular search's
+value and the static eval, as described for PlentyChess) was implemented and then removed again
+after code review: the singular sub-search excludes the TT move and runs at reduced depth, so its
+result isn't statistically comparable to the genuine `(full search result − static eval)` samples
+correction history relies on elsewhere. Since correction history feeds every RFP/FP/LMR/NMP margin,
+this had unusually high leverage as a source of the regression this batch initially measured under
+SPRT (bisected to roughly −40 to −65 Elo against the baseline before removal).
 
 Speed:
 

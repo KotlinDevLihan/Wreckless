@@ -1,10 +1,13 @@
-use std::ops::{Index, IndexMut};
+use std::{
+    ops::{Index, IndexMut},
+    sync::atomic::AtomicI16,
+};
 
 use crate::types::{MAX_PLY, Move, Piece, Score};
 
 pub struct Stack {
     data: [StackEntry; MAX_PLY + 16],
-    sentinel: [[i16; 64]; 13],
+    sentinel: [[AtomicI16; 64]; 13],
 }
 
 impl Stack {
@@ -27,7 +30,7 @@ impl Default for Stack {
     fn default() -> Self {
         Self {
             data: [StackEntry::default(); MAX_PLY + 16],
-            sentinel: [[0; 64]; 13],
+            sentinel: std::array::from_fn(|_| std::array::from_fn(|_| AtomicI16::new(0))),
         }
     }
 }
@@ -42,8 +45,8 @@ pub struct StackEntry {
     pub move_count: u16,
     pub reduction: i32,
     pub follow_pv: bool,
-    pub conthist: *mut [[i16; 64]; 13],
-    pub contcorrhist: *mut [[i16; 64]; 13],
+    pub conthist: *mut [[AtomicI16; 64]; 13],
+    pub contcorrhist: *mut [[AtomicI16; 64]; 13],
 }
 
 unsafe impl Send for StackEntry {}
@@ -70,13 +73,15 @@ impl Index<isize> for Stack {
 
     fn index(&self, index: isize) -> &Self::Output {
         debug_assert!(index + 8 >= 0 && index < MAX_PLY as isize + 16);
-        &self.data[(index + 8) as usize]
+        // SAFETY: the debug_assert above proves the index is in bounds.
+        unsafe { self.data.get_unchecked((index + 8) as usize) }
     }
 }
 
 impl IndexMut<isize> for Stack {
     fn index_mut(&mut self, index: isize) -> &mut Self::Output {
         debug_assert!(index + 8 >= 0 && index < MAX_PLY as isize + 16);
-        &mut self.data[(index + 8) as usize]
+        // SAFETY: see Index::index above.
+        unsafe { self.data.get_unchecked_mut((index + 8) as usize) }
     }
 }

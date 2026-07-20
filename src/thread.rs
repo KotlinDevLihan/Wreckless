@@ -155,6 +155,8 @@ pub struct SharedCorrectionHistory {
     pub minor: CorrectionHistory,
     pub major: CorrectionHistory,
     pub pawn_history: PawnHistory,
+    pub continuation_history: ContinuationHistory,
+    pub continuation_corrhist: ContinuationCorrectionHistory,
 }
 
 impl NumaReplicable for SharedCorrectionHistory {
@@ -214,13 +216,19 @@ pub struct PlyArray<T, const N: usize> {
 impl<T, const N: usize> Index<isize> for PlyArray<T, N> {
     type Output = T;
     fn index(&self, index: isize) -> &T {
-        &self.data[(index + 8) as usize]
+        debug_assert!(index + 8 >= 0 && ((index + 8) as usize) < N);
+        // SAFETY: the debug_assert above proves the index is in bounds; every
+        // caller in this codebase respects the same ply bound already relied
+        // upon by MAX_PLY-based recursion limits.
+        unsafe { self.data.get_unchecked((index + 8) as usize) }
     }
 }
 
 impl<T, const N: usize> IndexMut<isize> for PlyArray<T, N> {
     fn index_mut(&mut self, index: isize) -> &mut T {
-        &mut self.data[(index + 8) as usize]
+        debug_assert!(index + 8 >= 0 && ((index + 8) as usize) < N);
+        // SAFETY: see Index::index above.
+        unsafe { self.data.get_unchecked_mut((index + 8) as usize) }
     }
 }
 
@@ -243,8 +251,6 @@ pub struct ThreadData {
     pub noisy_history: NoisyHistory,
     pub quiet_history: QuietHistory,
     pub low_ply_history: LowPlyHistory,
-    pub continuation_history: ContinuationHistory,
-    pub continuation_corrhist: ContinuationCorrectionHistory,
     pub best_move_changes: usize,
     pub optimism: [i32; 2],
     pub tt_move_history: i32,
@@ -282,8 +288,6 @@ impl ThreadData {
             noisy_history: NoisyHistory::default(),
             quiet_history: QuietHistory::default(),
             low_ply_history: LowPlyHistory::default(),
-            continuation_history: ContinuationHistory::default(),
-            continuation_corrhist: ContinuationCorrectionHistory::default(),
             best_move_changes: 0,
             optimism: [0; 2],
             tt_move_history: 0,
@@ -316,7 +320,11 @@ impl ThreadData {
     }
 
     pub fn conthist(&self, ply: isize, index: isize, mv: Move) -> i32 {
-        self.continuation_history.get(self.stack[ply - index].conthist, self.board.piece_on(mv.from()), mv.to())
+        self.corrhist().continuation_history.get(
+            self.stack[ply - index].conthist,
+            self.board.piece_on(mv.from()),
+            mv.to(),
+        )
     }
 
     pub fn print_uci_info(&mut self, depth: i32) {

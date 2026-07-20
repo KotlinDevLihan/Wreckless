@@ -59,6 +59,28 @@ verification):
 - **Two-horizon falling-eval time scaling**: the time manager's score-trend factor now also compares
   against the best score from four iterations ago (as in Stockfish's `fallingEval`), extending time
   when the evaluation is sliding across recent iterations
+- **Qsearch checks**: at the first quiescence ply outside of check (not on deeper qsearch recursion
+  or ProbCut's probe), quiet moves that give check are additionally searched, catching forcing
+  resources at the horizon that a captures-only quiescence search would miss
+- **Shared continuation history**: the move-ordering continuation-history table is atomic and shared
+  across all search threads (matching the shared pawn history), all six lags are updated with
+  per-lag weights and positive-consistency multipliers, and near lags are limited when in check
+- **Correction-history update on singular multicut**: a confirmed multicut feeds the gap between the
+  singular search's value and the static eval to the correction histories (PlentyChess)
+- **Bounded singular-extension recursion**: singular search is skipped beyond `2 × root depth` plies,
+  guarding against runaway extension chains deep in a single line, without altering which branch
+  (singular vs. low-depth singular) is taken at the node
+- **Check extension**: a move giving direct check that would otherwise fall straight into
+  quiescence search is extended a full ply
+- **History decay**: quiet, noisy, and (main-thread only, since it is now shared) pawn history
+  tables are halved at the start of each search, so stale ordering data from the previous position
+  doesn't unduly bias the current one
+
+Killer moves, countermoves, and a broader (all-node, depth ≥ 3) Internal Iterative Reductions variant
+were deliberately not (re-)added: the first two duplicate what the continuation-history tables above
+already do more precisely (context-conditioned rather than ply-indexed), and IIR is already present
+in its narrower, Stockfish-validated form. Layering the weaker mechanism on top of the stronger one
+was the leading suspect behind an earlier bisected regression during this fork's development.
 
 An earlier, larger set of speculative search additions (killers, countermoves, one-reply extension,
 qsearch futility, volatility-based pruning, entropy time scaling, and others) was removed after SPRT
@@ -73,6 +95,10 @@ Speed:
   allocated with 2 MB pages via `VirtualAlloc(MEM_LARGE_PAGES)` when the "Lock pages in memory"
   privilege is held, reducing TLB misses on the hottest randomly-accessed memory (falls back to
   regular pages otherwise; Linux already used `MADV_HUGEPAGE`)
+- **Unchecked hot-path indexing**: the per-ply search stack and ply-indexed arrays (indexed many
+  times at every node) use unchecked array access in release builds, backed by the same
+  `debug_assert` bound checks that guarded the safe indexing before — a node-identical, pure
+  speed change
 
 Protocol / usability:
 

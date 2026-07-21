@@ -1489,11 +1489,8 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     // Uses `beta` (a function parameter, never mutated in this function) as
     // the reference point rather than the just-raised `alpha`, which would
     // otherwise trivially equal `eval` whenever eval itself raised it.
-    let generate_checks = allow_checks
-        && !in_check
-        && !is_loss(best_score)
-        && is_valid(eval)
-        && beta - eval <= p::qs_checks_margin();
+    let generate_checks =
+        allow_checks && !in_check && !is_loss(best_score) && is_valid(eval) && beta - eval <= p::qs_checks_margin();
 
     while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets(best_score) && !generate_checks, ply) {
         if generate_checks && mv.is_quiet() && !td.board.is_direct_check(mv) {

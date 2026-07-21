@@ -149,15 +149,25 @@ define! {
 
     // Correction history updates
     i32 corr_bonus_scale: 148;
-    i32 corr_bonus_min: 4678;
+    // Was asymmetric (min 4678 / max 2496) despite every other history table
+    // in the codebase clamping symmetrically; no evidence that letting
+    // negative corrections swing ~2x larger than positive ones was
+    // intentional, so both bounds now match the smaller, already-shipped
+    // value rather than the untested larger one.
+    i32 corr_bonus_min: 2496;
     i32 corr_bonus_max: 2496;
     // Upstream tuned this divisor for a 5-term correction blend (pawn,
-    // non-pawn x2, continuation x2). Material/minor/major add 3 more
-    // full-strength terms to the same sum; rescaled proportionally
-    // (64 * 8/5) so the average per-term magnitude matches what the rest
-    // of the engine's corr-scaled margins were tuned around.
-    i32 corr_weight_div: 102;
-    i32 corr_minor_major: 128;
+    // non-pawn x2, continuation x2). Material/minor/major are folded in as a
+    // single group damped by corr_minor_major rather than counted as 3 more
+    // full-strength terms, so the divisor is rescaled by the group's
+    // *effective* contribution (5 + 3 * corr_minor_major/128 ≈ 6.9 effective
+    // terms) rather than its raw table count.
+    i32 corr_weight_div: 88;
+    // Damped below 100% (128): this group is an unproven addition relative
+    // to the pawn/non-pawn/continuation terms upstream actually tuned, so it
+    // defaults to a conservative ~63% weight rather than being trusted
+    // equally until real tuning data says otherwise.
+    i32 corr_minor_major: 80;
 
     // Continuation history
     i32 conthist_div: 70000;

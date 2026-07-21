@@ -5,7 +5,6 @@ use crate::{
     history::LowPlyHistory,
     movepick::{MovePicker, Stage},
     parameters as p,
-    stack::Stack,
     thread::{PlyArray, RootMove, Status, ThreadData},
     time::Limits,
     transposition::{Bound, TtDepth},
@@ -134,7 +133,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             td.optimism[!td.board.side_to_move()] = -td.optimism[td.board.side_to_move()];
 
             loop {
-                td.stack = Stack::new();
+                td.stack.reset();
                 td.stack[0].follow_pv = true;
                 td.cutoff_count = PlyArray::default();
                 td.excluded = PlyArray::default();
@@ -927,7 +926,7 @@ fn search<NODE: NodeType>(
             }
 
             // History Pruning (HP)
-            if !in_check && is_quiet && depth < 5 && history < -p::hp_margin() * depth {
+            if !in_check && !is_direct_check && is_quiet && depth < 5 && history < -p::hp_margin() * depth {
                 continue;
             }
 

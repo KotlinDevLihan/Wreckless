@@ -14,12 +14,24 @@ impl Stack {
 
     pub fn new() -> Box<Self> {
         let mut stack = Box::new(Self::default());
-        let ptr = &raw mut stack.sentinel;
-        for entry in &mut stack.data {
+        stack.reset();
+        stack
+    }
+
+    /// Resets an existing stack in place (same content as a freshly built
+    /// one), reusing its heap allocation instead of allocating a new `Box`.
+    /// Called every aspiration-window retry and every iterative-deepening
+    /// depth, so avoiding the realloc there is a real, if small, NPS win with
+    /// no change to search behavior.
+    pub fn reset(&mut self) {
+        self.data = [StackEntry::default(); MAX_PLY + 16];
+        self.sentinel = [[0; 64]; 13];
+
+        let ptr = &raw mut self.sentinel;
+        for entry in &mut self.data {
             entry.conthist = ptr;
             entry.contcorrhist = ptr;
         }
-        stack
     }
 }
 

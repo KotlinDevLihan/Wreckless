@@ -142,8 +142,18 @@ if you're deciding whether to trust a "pending" item.
   added at full strength on top of that sum without adjusting the divisor — silently inflating
   every RFP/FP/LMR/NMP margin that reads `eval_correction()`. This was the actual source of the
   persistent Elo losses that were, for a long time, mistakenly attributed to the qsearch-checks
-  batch below. Fixed by folding material into the existing `corr_minor_major` weight and scaling
-  `corr_weight_div` from 64 to 102 (proportional to the 5→8 term increase)
+  batch below. Fixed by folding material into the existing `corr_minor_major` weight
+- Untuned since: `corr_minor_major` and `corr_weight_div` have never had a real SPSA run against
+  this specific 8-term blend, so their current values (80 and 88) are a reasoned guess — the
+  minor/major/material group is treated as an unproven addition and damped to ~63% weight
+  (`corr_minor_major: 80`) rather than trusted equally with the terms upstream actually tuned, and
+  the divisor is rescaled by that group's *effective* contribution (~6.9 effective terms) rather
+  than its raw table count
+- `corr_bonus_min`/`corr_bonus_max` (the update clamp shared by every correction table) were
+  asymmetric (4678 / 2496) despite every other history table in the codebase clamping
+  symmetrically — letting negative corrections swing ~2x larger than positive ones, a systematic
+  pessimism bias with no documented rationale. Both now match the smaller, already-shipped bound
+  (2496)
 
 **Move ordering:**
 
@@ -167,6 +177,9 @@ if you're deciding whether to trust a "pending" item.
 - Razoring margin widens with correction-history magnitude (`razor_corr`), matching the same
   uncertainty-scaled-margin pattern already used by RFP, FP, and LMR/FDS — razoring was the one
   early-pruning decision that read `correction_value` nowhere
+- History Pruning now exempts quiet moves that give check, matching the exemption LMP and FP
+  already had — HP was the one sibling pruning check that could discard a checking move on history
+  alone
 - TT-only ProbCut check: a lower-bound TT entry from a near-full-depth search, comfortably above
   beta, is trusted as a cutoff without any further search
 - Opponent-worsening term in reverse futility pruning: the margin shrinks when the evaluation swung
@@ -207,6 +220,11 @@ if you're deciding whether to trust a "pending" item.
   times at every node, skip the bounds check in release builds. The same `debug_assert` that
   guarded the safe indexing before still covers debug builds. Verified node-identical — a pure
   speed change with no behavior difference
+- **Search stack reuse** — the per-ply search stack (`Stack`) was reallocated from scratch on every
+  aspiration-window retry and every iterative-deepening depth (`Stack::new()`, a fresh `Box` alloc
+  plus a `MAX_PLY+16`-entry init loop, called inside the hottest retry loop in the engine). It's now
+  reset in place (`Stack::reset()`), reusing the one allocation made at thread startup. Verified
+  node-identical (bench and perft unaffected) — a pure speed change
 
 ### Protocol / usability
 

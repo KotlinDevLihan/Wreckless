@@ -129,7 +129,9 @@ impl<T> Index<Square> for [T] {
     type Output = T;
 
     fn index(&self, square: Square) -> &Self::Output {
-        &self[square as usize]
+        // SAFETY: matches IndexMut<Square> below, which already assumes a
+        // Square used for indexing is always a real board square.
+        unsafe { self.get_unchecked(square as usize) }
     }
 }
 

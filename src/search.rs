@@ -575,7 +575,9 @@ fn search<NODE: NodeType>(
     if !NODE::PV
         && !in_check
         && estimated_score
-            < alpha - p::razor_base() - p::razor_quad() * depth * depth + 65 * (td.cutoff_count[ply + 1] > 3) as i32
+            < alpha - p::razor_base() - p::razor_quad() * depth * depth
+                - p::razor_corr() * correction_value.abs() / 1024
+                + 65 * (td.cutoff_count[ply + 1] > 3) as i32
         && alpha < 2048
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower

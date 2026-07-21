@@ -38,6 +38,7 @@ define! {
     // Razoring
     i32 razor_base: 237;
     i32 razor_quad: 254;
+    i32 razor_corr: 300;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;

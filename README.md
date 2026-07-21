@@ -164,6 +164,9 @@ if you're deciding whether to trust a "pending" item.
 
 **Pruning and extensions:**
 
+- Razoring margin widens with correction-history magnitude (`razor_corr`), matching the same
+  uncertainty-scaled-margin pattern already used by RFP, FP, and LMR/FDS — razoring was the one
+  early-pruning decision that read `correction_value` nowhere
 - TT-only ProbCut check: a lower-bound TT entry from a near-full-depth search, comfortably above
   beta, is trusted as a cutoff without any further search
 - Opponent-worsening term in reverse futility pruning: the margin shrinks when the evaluation swung
@@ -211,7 +214,7 @@ if you're deciding whether to trust a "pending" item.
 - **`searchmoves`** — root move filtering on the `go` command
 - **`UCI_ShowWDL`** — win/draw/loss estimates in `info` lines
 - **`SyzygyProbeDepth` / `SyzygyProbeLimit`** — user-tunable tablebase engagement
-- **SPSA tunables** — 96 search constants exposed as UCI options under the `spsa` cargo feature,
+- **SPSA tunables** — 97 search constants exposed as UCI options under the `spsa` cargo feature,
   for OpenBench SPSA tuning; identical compiled code in default (non-`spsa`) builds. A ready-to-use
   OpenBench SPSA input file is provided in [`spsa.config`](spsa.config)
 

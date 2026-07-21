@@ -1,0 +1,819 @@
+{
+    "configs": {
+        "engine_path": "C:\\Users\\USER-PC\\Downloads\\Reckless-main (1)\\Reckless-main\\target\\release\\wreckless.exe",
+        "fastchess_path": "C:\\Users\\USER-PC\\Downloads\\fastchess-windows-x86-64\\fastchess-windows-x86-64\\fastchess.exe",
+        "iterations": 20000,
+        "matches": 8,
+        "concurrency": 8,
+        "openings_path": "C:\\Users\\USER-PC\\Downloads\\fastchess-windows-x86-64\\fastchess-windows-x86-64\\UHO_Lichess_4852_v1.epd",
+        "save_path": "sparc_save.json",
+        "plot_name": "wreckless_spsa",
+        "nodes": 0,
+        "depth": 0,
+        "movetime": 0,
+        "time": 10,
+        "increment": 0.1,
+        "pgn_path": "sparc_games.pgn",
+        "tb_path": "",
+        "draw_adjudication": {
+            "enabled": false,
+            "movenumber": 40,
+            "movecount": 10,
+            "threshold": 10
+        },
+        "resign_adjudication": {
+            "enabled": false,
+            "movecount": 10,
+            "threshold": 600,
+            "twosided": true
+        }
+    },
+    "fixed_params": [
+        {
+            "name": "Hash",
+            "value": 16
+        },
+        {
+            "name": "Threads",
+            "value": 1
+        }
+    ],
+    "tuning_params": [
+        {
+            "name": "razor_base",
+            "default": 237.0,
+            "min": 118.0,
+            "max": 356.0,
+            "ck": 11.9,
+            "rk": 0.002
+        },
+        {
+            "name": "razor_quad",
+            "default": 254.0,
+            "min": 127.0,
+            "max": 381.0,
+            "ck": 12.7,
+            "rk": 0.002
+        },
+        {
+            "name": "razor_corr",
+            "default": 300.0,
+            "min": 150.0,
+            "max": 450.0,
+            "ck": 15.0,
+            "rk": 0.002
+        },
+        {
+            "name": "rfp_depth_quad",
+            "default": 1140.0,
+            "min": 570.0,
+            "max": 1710.0,
+            "ck": 57.0,
+            "rk": 0.002
+        },
+        {
+            "name": "rfp_improvement",
+            "default": 120.0,
+            "min": 60.0,
+            "max": 180.0,
+            "ck": 6.0,
+            "rk": 0.002
+        },
+        {
+            "name": "rfp_depth_lin",
+            "default": 22.0,
+            "min": 11.0,
+            "max": 33.0,
+            "ck": 1.1,
+            "rk": 0.002
+        },
+        {
+            "name": "rfp_corr",
+            "default": 669.0,
+            "min": 334.0,
+            "max": 1004.0,
+            "ck": 33.5,
+            "rk": 0.002
+        },
+        {
+            "name": "rfp_worsening",
+            "default": 20.0,
+            "min": 10.0,
+            "max": 30.0,
+            "ck": 1.0,
+            "rk": 0.002
+        },
+        {
+            "name": "rfp_no_threats",
+            "default": 54.0,
+            "min": 27.0,
+            "max": 81.0,
+            "ck": 2.7,
+            "rk": 0.002
+        },
+        {
+            "name": "rfp_base",
+            "default": 19.0,
+            "min": 9.0,
+            "max": 29.0,
+            "ck": 1.0,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_depth",
+            "default": 9.0,
+            "min": 4.0,
+            "max": 14.0,
+            "ck": 0.5,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_ttpv",
+            "default": 110.0,
+            "min": 55.0,
+            "max": 165.0,
+            "ck": 5.5,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_improvement",
+            "default": 94.0,
+            "min": 47.0,
+            "max": 141.0,
+            "ck": 4.7,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_cutoff",
+            "default": 21.0,
+            "min": 10.0,
+            "max": 32.0,
+            "ck": 1.1,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_base",
+            "default": 337.0,
+            "min": 168.0,
+            "max": 506.0,
+            "ck": 16.9,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_r_base",
+            "default": 4407.0,
+            "min": 2203.0,
+            "max": 6611.0,
+            "ck": 220.4,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_r_improving",
+            "default": 917.0,
+            "min": 458.0,
+            "max": 1376.0,
+            "ck": 45.9,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_r_depth",
+            "default": 265.0,
+            "min": 132.0,
+            "max": 398.0,
+            "ck": 13.3,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_r_beta",
+            "default": 477.0,
+            "min": 238.0,
+            "max": 716.0,
+            "ck": 23.9,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_r_beta_max",
+            "default": 1187.0,
+            "min": 593.0,
+            "max": 1781.0,
+            "ck": 59.4,
+            "rk": 0.002
+        },
+        {
+            "name": "probcut_tt_margin",
+            "default": 450.0,
+            "min": 225.0,
+            "max": 675.0,
+            "ck": 22.5,
+            "rk": 0.002
+        },
+        {
+            "name": "probcut_base",
+            "default": 254.0,
+            "min": 127.0,
+            "max": 381.0,
+            "ck": 12.7,
+            "rk": 0.002
+        },
+        {
+            "name": "probcut_improving",
+            "default": 85.0,
+            "min": 42.0,
+            "max": 128.0,
+            "ck": 4.3,
+            "rk": 0.002
+        },
+        {
+            "name": "probcut_score_div",
+            "default": 319.0,
+            "min": 159.0,
+            "max": 479.0,
+            "ck": 16.0,
+            "rk": 0.002
+        },
+        {
+            "name": "probcut_beta_step",
+            "default": 197.0,
+            "min": 98.0,
+            "max": 296.0,
+            "ck": 9.9,
+            "rk": 0.002
+        },
+        {
+            "name": "lmp_base",
+            "default": 2818.0,
+            "min": 1409.0,
+            "max": 4227.0,
+            "ck": 140.9,
+            "rk": 0.002
+        },
+        {
+            "name": "lmp_improvement",
+            "default": 78.0,
+            "min": 39.0,
+            "max": 117.0,
+            "ck": 3.9,
+            "rk": 0.002
+        },
+        {
+            "name": "lmp_quad",
+            "default": 1351.0,
+            "min": 675.0,
+            "max": 2027.0,
+            "ck": 67.6,
+            "rk": 0.002
+        },
+        {
+            "name": "lmp_history",
+            "default": 74.0,
+            "min": 37.0,
+            "max": 111.0,
+            "ck": 3.7,
+            "rk": 0.002
+        },
+        {
+            "name": "fp_depth",
+            "default": 79.0,
+            "min": 39.0,
+            "max": 119.0,
+            "ck": 4.0,
+            "rk": 0.002
+        },
+        {
+            "name": "fp_history",
+            "default": 55.0,
+            "min": 27.0,
+            "max": 83.0,
+            "ck": 2.8,
+            "rk": 0.002
+        },
+        {
+            "name": "fp_beta_bonus",
+            "default": 77.0,
+            "min": 38.0,
+            "max": 116.0,
+            "ck": 3.9,
+            "rk": 0.002
+        },
+        {
+            "name": "fp_corr",
+            "default": 555.0,
+            "min": 277.0,
+            "max": 833.0,
+            "ck": 27.8,
+            "rk": 0.002
+        },
+        {
+            "name": "fp_base",
+            "default": 127.0,
+            "min": 63.0,
+            "max": 191.0,
+            "ck": 6.4,
+            "rk": 0.002
+        },
+        {
+            "name": "bnfp_depth",
+            "default": 84.0,
+            "min": 42.0,
+            "max": 126.0,
+            "ck": 4.2,
+            "rk": 0.002
+        },
+        {
+            "name": "bnfp_history",
+            "default": 82.0,
+            "min": 41.0,
+            "max": 123.0,
+            "ck": 4.1,
+            "rk": 0.002
+        },
+        {
+            "name": "bnfp_base",
+            "default": 24.0,
+            "min": 12.0,
+            "max": 36.0,
+            "ck": 1.2,
+            "rk": 0.002
+        },
+        {
+            "name": "hp_margin",
+            "default": 948.0,
+            "min": 474.0,
+            "max": 1422.0,
+            "ck": 47.4,
+            "rk": 0.002
+        },
+        {
+            "name": "see_q_quad",
+            "default": 12.0,
+            "min": 6.0,
+            "max": 18.0,
+            "ck": 0.6,
+            "rk": 0.002
+        },
+        {
+            "name": "see_q_lin",
+            "default": 56.0,
+            "min": 28.0,
+            "max": 84.0,
+            "ck": 2.8,
+            "rk": 0.002
+        },
+        {
+            "name": "see_q_hist",
+            "default": 27.0,
+            "min": 13.0,
+            "max": 41.0,
+            "ck": 1.4,
+            "rk": 0.002
+        },
+        {
+            "name": "see_q_base",
+            "default": 27.0,
+            "min": 13.0,
+            "max": 41.0,
+            "ck": 1.4,
+            "rk": 0.002
+        },
+        {
+            "name": "see_n_quad",
+            "default": 7.0,
+            "min": 3.0,
+            "max": 11.0,
+            "ck": 0.5,
+            "rk": 0.002
+        },
+        {
+            "name": "see_n_lin",
+            "default": 36.0,
+            "min": 18.0,
+            "max": 54.0,
+            "ck": 1.8,
+            "rk": 0.002
+        },
+        {
+            "name": "see_n_hist",
+            "default": 39.0,
+            "min": 19.0,
+            "max": 59.0,
+            "ck": 2.0,
+            "rk": 0.002
+        },
+        {
+            "name": "see_n_base",
+            "default": 14.0,
+            "min": 7.0,
+            "max": 21.0,
+            "ck": 0.7,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_ilog",
+            "default": 269.0,
+            "min": 134.0,
+            "max": 404.0,
+            "ck": 13.5,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_improvement",
+            "default": 425.0,
+            "min": 212.0,
+            "max": 638.0,
+            "ck": 21.3,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_corr",
+            "default": 3417.0,
+            "min": 1708.0,
+            "max": 5126.0,
+            "ck": 170.9,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_exact",
+            "default": 1412.0,
+            "min": 706.0,
+            "max": 2118.0,
+            "ck": 70.6,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_tt_alpha",
+            "default": 464.0,
+            "min": 232.0,
+            "max": 696.0,
+            "ck": 23.2,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_tt_depth",
+            "default": 326.0,
+            "min": 163.0,
+            "max": 489.0,
+            "ck": 16.3,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_quiet_base",
+            "default": 2171.0,
+            "min": 1085.0,
+            "max": 3257.0,
+            "ck": 108.6,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_quiet_hist",
+            "default": 179.0,
+            "min": 89.0,
+            "max": 269.0,
+            "ck": 9.0,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_quiet_alpha",
+            "default": 418.0,
+            "min": 209.0,
+            "max": 627.0,
+            "ck": 20.9,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_capture_stat",
+            "default": 437.0,
+            "min": 218.0,
+            "max": 656.0,
+            "ck": 21.9,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_noisy_base",
+            "default": 1426.0,
+            "min": 713.0,
+            "max": 2139.0,
+            "ck": 71.3,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_noisy_hist",
+            "default": 130.0,
+            "min": 65.0,
+            "max": 195.0,
+            "ck": 6.5,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_pv_base",
+            "default": 519.0,
+            "min": 259.0,
+            "max": 779.0,
+            "ck": 26.0,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_pv_delta",
+            "default": 437.0,
+            "min": 218.0,
+            "max": 656.0,
+            "ck": 21.9,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_ttpv",
+            "default": 333.0,
+            "min": 166.0,
+            "max": 500.0,
+            "ck": 16.7,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_ttpv_score",
+            "default": 611.0,
+            "min": 305.0,
+            "max": 917.0,
+            "ck": 30.6,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_ttpv_depth",
+            "default": 685.0,
+            "min": 342.0,
+            "max": 1028.0,
+            "ck": 34.3,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_cutnode",
+            "default": 1852.0,
+            "min": 926.0,
+            "max": 2778.0,
+            "ck": 92.6,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_cutnode_null",
+            "default": 2204.0,
+            "min": 1102.0,
+            "max": 3306.0,
+            "ck": 110.2,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_check",
+            "default": 955.0,
+            "min": 477.0,
+            "max": 1433.0,
+            "ck": 47.8,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_cutoff",
+            "default": 1151.0,
+            "min": 575.0,
+            "max": 1727.0,
+            "ck": 57.6,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_cutoff_node",
+            "default": 400.0,
+            "min": 200.0,
+            "max": 600.0,
+            "ck": 20.0,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_singular",
+            "default": 496.0,
+            "min": 248.0,
+            "max": 744.0,
+            "ck": 24.8,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_singular_margin",
+            "default": 185.0,
+            "min": 92.0,
+            "max": 278.0,
+            "ck": 9.3,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_singular_max",
+            "default": 2021.0,
+            "min": 1010.0,
+            "max": 3032.0,
+            "ck": 101.1,
+            "rk": 0.002
+        },
+        {
+            "name": "lmr_prev_reduction",
+            "default": 136.0,
+            "min": 68.0,
+            "max": 204.0,
+            "ck": 6.8,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_ilog",
+            "default": 207.0,
+            "min": 103.0,
+            "max": 311.0,
+            "ck": 10.4,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_improvement",
+            "default": 366.0,
+            "min": 183.0,
+            "max": 549.0,
+            "ck": 18.3,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_corr",
+            "default": 2255.0,
+            "min": 1127.0,
+            "max": 3383.0,
+            "ck": 112.8,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_quiet_base",
+            "default": 1468.0,
+            "min": 734.0,
+            "max": 2202.0,
+            "ck": 73.4,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_quiet_hist",
+            "default": 118.0,
+            "min": 59.0,
+            "max": 177.0,
+            "ck": 5.9,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_noisy_base",
+            "default": 940.0,
+            "min": 470.0,
+            "max": 1410.0,
+            "ck": 47.0,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_noisy_hist",
+            "default": 63.0,
+            "min": 31.0,
+            "max": 95.0,
+            "ck": 3.2,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_ttpv",
+            "default": 844.0,
+            "min": 422.0,
+            "max": 1266.0,
+            "ck": 42.2,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_ttpv_depth",
+            "default": 1129.0,
+            "min": 564.0,
+            "max": 1694.0,
+            "ck": 56.5,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_cutnode",
+            "default": 1260.0,
+            "min": 630.0,
+            "max": 1890.0,
+            "ck": 63.0,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_cutnode_null",
+            "default": 2168.0,
+            "min": 1084.0,
+            "max": 3252.0,
+            "ck": 108.4,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_cutoff",
+            "default": 1394.0,
+            "min": 697.0,
+            "max": 2091.0,
+            "ck": 69.7,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_cutoff_node",
+            "default": 258.0,
+            "min": 129.0,
+            "max": 387.0,
+            "ck": 12.9,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_singular",
+            "default": 351.0,
+            "min": 175.0,
+            "max": 527.0,
+            "ck": 17.6,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_singular_margin",
+            "default": 188.0,
+            "min": 94.0,
+            "max": 282.0,
+            "ck": 9.4,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_singular_max",
+            "default": 2167.0,
+            "min": 1083.0,
+            "max": 3251.0,
+            "ck": 108.4,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_ttmove",
+            "default": 3002.0,
+            "min": 1501.0,
+            "max": 4503.0,
+            "ck": 150.1,
+            "rk": 0.002
+        },
+        {
+            "name": "fds_prev_reduction",
+            "default": 130.0,
+            "min": 65.0,
+            "max": 195.0,
+            "ck": 6.5,
+            "rk": 0.002
+        },
+        {
+            "name": "corr_bonus_scale",
+            "default": 148.0,
+            "min": 74.0,
+            "max": 222.0,
+            "ck": 7.4,
+            "rk": 0.002
+        },
+        {
+            "name": "corr_bonus_min",
+            "default": 2496.0,
+            "min": 1248.0,
+            "max": 3744.0,
+            "ck": 124.8,
+            "rk": 0.002
+        },
+        {
+            "name": "corr_bonus_max",
+            "default": 2496.0,
+            "min": 1248.0,
+            "max": 3744.0,
+            "ck": 124.8,
+            "rk": 0.002
+        },
+        {
+            "name": "corr_weight_div",
+            "default": 88.0,
+            "min": 44.0,
+            "max": 132.0,
+            "ck": 4.4,
+            "rk": 0.002
+        },
+        {
+            "name": "corr_minor_major",
+            "default": 80.0,
+            "min": 40.0,
+            "max": 120.0,
+            "ck": 4.0,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_div",
+            "default": 70000.0,
+            "min": 35000.0,
+            "max": 105000.0,
+            "ck": 3500.0,
+            "rk": 0.002
+        },
+        {
+            "name": "good_quiet_threshold",
+            "default": -14000.0,
+            "min": -21000.0,
+            "max": -7000.0,
+            "ck": 700.0,
+            "rk": 0.002
+        }
+    ]
+}

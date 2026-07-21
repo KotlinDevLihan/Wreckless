@@ -1481,7 +1481,19 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     // moves that give check (Stockfish-style qsearch checks), so forcing
     // resources at the horizon aren't missed. Deeper qsearch recursion (and
     // ProbCut's qsearch probe) stays captures-only.
-    let generate_checks = allow_checks && !in_check && !is_loss(best_score);
+    // Skip generating checks in clearly lost or clearly won positions, where
+    // a tactical shot rarely changes the outcome and the extra move
+    // generation/scoring just adds cost (matching how every other qsearch
+    // pruning decision here is gated by an eval margin, not applied
+    // unconditionally).
+    // Uses `beta` (a function parameter, never mutated in this function) as
+    // the reference point rather than the just-raised `alpha`, which would
+    // otherwise trivially equal `eval` whenever eval itself raised it.
+    let generate_checks = allow_checks
+        && !in_check
+        && !is_loss(best_score)
+        && is_valid(eval)
+        && beta - eval <= p::qs_checks_margin();
 
     while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets(best_score) && !generate_checks, ply) {
         if generate_checks && mv.is_quiet() && !td.board.is_direct_check(mv) {

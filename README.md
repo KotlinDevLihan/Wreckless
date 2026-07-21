@@ -136,16 +136,22 @@ if you're deciding whether to trust a "pending" item.
 - Material-key table (piece-count-only Zobrist key)
 - Minor-piece table (knight/bishop/king placement, as in Stockfish)
 - Major-piece table (rook/queen/king placement, as in Stormphrax)
-- Minor/major blend weight is SPSA-tunable (`corr_minor_major`)
+- Minor/major/material blend weight is SPSA-tunable (`corr_minor_major`)
+- The blend's shared divisor (`corr_weight_div`) is rescaled to match: upstream tuned it for a
+  5-term sum (pawn, non-pawn ×2, continuation ×2), and this fork's 3 extra tables were originally
+  added at full strength on top of that sum without adjusting the divisor — silently inflating
+  every RFP/FP/LMR/NMP margin that reads `eval_correction()`. This was the actual source of the
+  persistent Elo losses that were, for a long time, mistakenly attributed to the qsearch-checks
+  batch below. Fixed by folding material into the existing `corr_minor_major` weight and scaling
+  `corr_weight_div` from 64 to 102 (proportional to the 5→8 term increase)
 
 **Move ordering:**
 
 - Low-ply history: root-relative `[ply][from][to]` table for plies 0–4, carried over between searches
 - Continuation history: all six lags updated with per-lag weights and a positive-consistency
   multiplier (as in Stockfish), near lags limited when in check, overall scale SPSA-tunable
-  (`conthist_div`); per-thread, matching upstream (an earlier attempt to share it across threads,
-  the way Stockfish shares its own `sharedHistory.continuationHistory`, is covered in
-  [Removed](#removed-and-why) below)
+  (`conthist_div`); shared across search threads via atomic storage, matching Stockfish's own
+  `sharedHistory.continuationHistory` (verified directly against Stockfish source, not a guess)
 - Good/bad quiet split: quiets with strongly negative history are deferred until after bad captures
   (Stockfish's `GOOD_QUIET`/`BAD_QUIET` ordering); the threshold is SPSA-tunable (`good_quiet_threshold`)
 - Depth-indexed history divisors for late-move and futility pruning, replacing a flat divisor
@@ -169,6 +175,18 @@ if you're deciding whether to trust a "pending" item.
 - Far-from-root singular-extension margin damping
 - Pre-qsearch TT-move extension at PV nodes, gated by TT depth, that never overrides a negative
   (singular) extension decision
+- Check extension: a move giving direct check that would otherwise fall straight into qsearch is
+  extended a full ply
+- Singular-extension recursion cap: singular search is skipped beyond `ply < root_depth × 2`, on
+  top of the existing single-level `!excludedMove` guard
+
+**Quiescence search:**
+
+- Checking quiets at the first ply: alongside the usual captures/promotions, quiet moves giving
+  check are searched too, gated by an eval margin (`qs_checks_margin`) and capped by count
+  (`qs_checks_max`) so it stays cheap. A TT-depth distinction (`TtDepth::QS_CHECKS` vs. `SOME`)
+  ensures a plain captures-only cutoff can never be reused where a checks-considered result was
+  required
 
 **Search structure:**
 
@@ -224,32 +242,13 @@ and doesn't get re-litigated by mistake.
 - **Classic Internal Iterative Deepening** was not added. It's superseded by Internal Iterative
   *Reductions*, already present: IIR gets the same TT-population benefit from a cheaper reduced
   search rather than a separate full extra search.
-- **A check extension** (extend a move giving direct check to a full ply instead of dropping into
-  qsearch) was implemented, then removed after checking Stockfish's current source directly: modern
-  Stockfish has no `givesCheck`-triggered depth bump anywhere in its search loop. The technique was
-  superseded, most likely by qsearch checks (below) handling the same scenario more precisely —
-  though qsearch checks was itself later removed (see below), so this scenario currently has no
-  dedicated handling in Wreckless, matching upstream.
-- **Qsearch checks** (searching quiet checking moves at the first quiescence ply, gated by an
-  eval-margin and a cap on how many checking quiets to search, with a TT-depth distinction so a
-  captures-only cutoff couldn't silently reuse a less-thorough result) went through two rounds of
-  bug fixes — an early-cutoff TT bypass and a late-move-pruning coverage gap — and several rounds
-  of margin/cap tuning, but the combined batch it was part of never tested better than roughly −18
-  to −40 Elo across many SPRT samples even after every identified bug was fixed. Removed.
-- **Shared continuation history** (the move-ordering continuation-history table made atomic and
-  shared across search threads, matching Stockfish's own `sharedHistory.continuationHistory`) was
-  verified against Stockfish's actual source as a faithful port, not a guess — but it was part of
-  the same persistently-negative batch as qsearch checks, and was reverted to per-thread alongside
-  qsearch checks' removal on the same evidence (the batch's Elo never recovered despite fixing
-  every identified defect). The per-lag weight reweighting fix that came out of auditing this
-  feature (lags 2/4/6 had been silently weakened to 43–79% of their original strength) was kept —
-  that fix is unrelated to whether the table is shared or per-thread.
-- **A cap on singular-extension recursion depth** (skip singular search beyond `ply < root_depth × N`)
-  was implemented, then removed. Stockfish's actual "recursive singular search is avoided" guarantee
-  comes from a single-level `!excludedMove` guard — preventing a singular sub-search from triggering
-  *another* singular search at the same node — which Reckless already had independently. The
-  ply-distance cap was restricting something across the whole remaining line that was never actually
-  at risk of runaway recursion, at the cost of legitimate extensions in long forcing sequences.
+- **Qsearch checks, shared continuation history, the check extension, and a singular-extension
+  recursion cap** were removed as a batch after plateauing around **−18 to −40 Elo** across many
+  SPRT samples, even after fixing every identified bug in qsearch checks (an early-cutoff TT bypass
+  and a late-move-pruning coverage gap) and reference-checking the other two against Stockfish's
+  actual source. All four were later **restored** once a full-engine audit (see below) found the
+  real regression source elsewhere: this batch was never the cause, so there was no reason to keep
+  it out. They're documented under their normal sections above, not here.
 - **A correction-history update on singular multicut** (feeding the gap between the singular
   search's value and the static eval into correction history, as described for PlentyChess) was
   implemented and removed after code review: the singular sub-search excludes the TT move and runs
@@ -262,13 +261,14 @@ and doesn't get re-litigated by mistake.
   mechanism built into every history table's update function, and fired far more often than
   intended (every move of every game, not occasionally).
 
-A five-item batch (qsearch checks, shared continuation history, check extension, bounded singular
-recursion, and the multicut correction-history update) plateaued around **−18 to −40 Elo** across
-several rounds of bug fixes. The check extension and recursion cap were removed first, after being
-identified as unsupported by the reference design; qsearch checks and shared continuation history
-were removed afterward once neither reference-design status nor further bug fixes moved the
-batch's Elo out of that band. What's left of this line of work is the per-lag continuation-history
-reweighting fix, kept because it's independently correct regardless of the sharing decision.
+**The actual lesson**: repeatedly bisecting and patching that batch never moved the Elo, because the
+batch was never the problem. The real bug was the `corr_weight_div` normalization issue described
+under [Correction history](#search-pending-sprt-verification) above — present since the very first
+correction-history table beyond upstream's original three, and orthogonal to everything in this
+section. It surfaced only once the audit stopped re-litigating the recently-changed code and started
+checking older, previously-trusted code instead. The per-lag continuation-history reweighting fix
+(lags 2/4/6 had been silently weakened to 43–79% of their original strength) was kept throughout,
+since it's correct independent of anything else in this section.
 
 ## Testing and tuning
 

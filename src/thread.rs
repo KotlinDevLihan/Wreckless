@@ -155,6 +155,8 @@ pub struct SharedCorrectionHistory {
     pub minor: CorrectionHistory,
     pub major: CorrectionHistory,
     pub pawn_history: PawnHistory,
+    pub continuation_history: ContinuationHistory,
+    pub continuation_corrhist: ContinuationCorrectionHistory,
 }
 
 impl NumaReplicable for SharedCorrectionHistory {
@@ -249,8 +251,6 @@ pub struct ThreadData {
     pub noisy_history: NoisyHistory,
     pub quiet_history: QuietHistory,
     pub low_ply_history: LowPlyHistory,
-    pub continuation_history: ContinuationHistory,
-    pub continuation_corrhist: ContinuationCorrectionHistory,
     pub best_move_changes: usize,
     pub optimism: [i32; 2],
     pub tt_move_history: i32,
@@ -288,8 +288,6 @@ impl ThreadData {
             noisy_history: NoisyHistory::default(),
             quiet_history: QuietHistory::default(),
             low_ply_history: LowPlyHistory::default(),
-            continuation_history: ContinuationHistory::default(),
-            continuation_corrhist: ContinuationCorrectionHistory::default(),
             best_move_changes: 0,
             optimism: [0; 2],
             tt_move_history: 0,
@@ -322,7 +320,11 @@ impl ThreadData {
     }
 
     pub fn conthist(&self, ply: isize, index: isize, mv: Move) -> i32 {
-        self.continuation_history.get(self.stack[ply - index].conthist, self.board.piece_on(mv.from()), mv.to())
+        self.corrhist().continuation_history.get(
+            self.stack[ply - index].conthist,
+            self.board.piece_on(mv.from()),
+            mv.to(),
+        )
     }
 
     pub fn print_uci_info(&mut self, depth: i32) {

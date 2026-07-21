@@ -150,7 +150,12 @@ define! {
     i32 corr_bonus_scale: 148;
     i32 corr_bonus_min: 4678;
     i32 corr_bonus_max: 2496;
-    i32 corr_weight_div: 64;
+    // Upstream tuned this divisor for a 5-term correction blend (pawn,
+    // non-pawn x2, continuation x2). Material/minor/major add 3 more
+    // full-strength terms to the same sum; rescaled proportionally
+    // (64 * 8/5) so the average per-term magnitude matches what the rest
+    // of the engine's corr-scaled margins were tuned around.
+    i32 corr_weight_div: 102;
     i32 corr_minor_major: 128;
 
     // Continuation history
@@ -159,4 +164,7 @@ define! {
     // Move ordering
     i32 good_quiet_threshold: -14000;
 
+    // Quiescence checks
+    i32 qs_checks_margin: 200;
+    i32 qs_checks_max: 6;
 }

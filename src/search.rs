@@ -336,7 +336,7 @@ fn search<NODE: NodeType>(
 
     // Qsearch Dive
     if depth <= 0 {
-        return qsearch::<NODE>(td, alpha, beta, ply, true);
+        return qsearch::<NODE>(td, alpha, beta, ply);
     }
 
     let draw_score = draw(td);
@@ -580,7 +580,7 @@ fn search<NODE: NodeType>(
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
     {
-        return qsearch::<NonPV>(td, alpha, beta, ply, true);
+        return qsearch::<NonPV>(td, alpha, beta, ply);
     }
 
     // Reverse Futility Pruning (RFP)
@@ -712,7 +712,7 @@ fn search<NODE: NodeType>(
 
             make_move(td, ply, mv);
 
-            let mut score = -qsearch::<NonPV>(td, -probcut_beta, -probcut_beta + 1, ply + 1, false);
+            let mut score = -qsearch::<NonPV>(td, -probcut_beta, -probcut_beta + 1, ply + 1);
 
             let base_depth = (depth - 4 - improving as i32).max(0);
             let mut probcut_depth = (base_depth - (score - probcut_beta) / p::probcut_score_div()).clamp(0, base_depth);
@@ -769,53 +769,47 @@ fn search<NODE: NodeType>(
     if !NODE::ROOT && !excluded && potential_singularity && !is_shuffling(td, tt_move, ply) {
         debug_assert!(is_valid(tt_score));
 
-        // Bound how deep in a single line singular search can recur, guarding
-        // against runaway extension chains far from the root. This is an inner
-        // guard (not part of the outer condition) so hitting the cap leaves
-        // `extension` at 0 without falling through to the LDSE branch below.
-        if (ply as i32) < td.root_depth * 2 {
-            let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
-                + depth * (tt_pv && !NODE::PV) as i32;
-            let singular_beta = tt_score - singular_margin;
-            let singular_depth = (depth - 1) / 2;
+        let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
+            + depth * (tt_pv && !NODE::PV) as i32;
+        let singular_beta = tt_score - singular_margin;
+        let singular_depth = (depth - 1) / 2;
 
-            td.excluded[ply] = tt_move;
-            td.stack[ply].mv = Move::NULL;
-            singular_score = search::<NonPV>(td, singular_beta - 1, singular_beta, singular_depth, cut_node, ply);
-            td.excluded[ply] = Move::NULL;
-            td.stack[ply].tt_pv = tt_pv;
+        td.excluded[ply] = tt_move;
+        td.stack[ply].mv = Move::NULL;
+        singular_score = search::<NonPV>(td, singular_beta - 1, singular_beta, singular_depth, cut_node, ply);
+        td.excluded[ply] = Move::NULL;
+        td.stack[ply].tt_pv = tt_pv;
 
-            if td.shared.status.get() == Status::STOPPED {
-                return Score::ZERO;
-            }
+        if td.shared.status.get() == Status::STOPPED {
+            return Score::ZERO;
+        }
 
-            if singular_score < singular_beta {
-                let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
-                    - 16 * tt_move.is_quiet() as i32
-                    - 16 * correction_value.abs() / 128
-                    - 1175 * td.tt_move_history / 114178
-                    - 38 * (ply as i32 > td.root_depth) as i32;
-                let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
-                    - 19 * tt_move.is_quiet() as i32
-                    - 15 * correction_value.abs() / 128
-                    - 43 * (ply as i32 > td.root_depth) as i32
-                    + 36;
+        if singular_score < singular_beta {
+            let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
+                - 16 * tt_move.is_quiet() as i32
+                - 16 * correction_value.abs() / 128
+                - 1175 * td.tt_move_history / 114178
+                - 38 * (ply as i32 > td.root_depth) as i32;
+            let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
+                - 19 * tt_move.is_quiet() as i32
+                - 15 * correction_value.abs() / 128
+                - 43 * (ply as i32 > td.root_depth) as i32
+                + 36;
 
-                extension = 1;
-                extension += (singular_score < singular_beta - double_margin) as i32;
-                extension += (singular_score < singular_beta - triple_margin) as i32;
-            }
-            // Multi-Cut
-            else if singular_score >= beta && !is_decisive(singular_score) {
-                update_tt_move_history(td, -421 - 110 * depth);
-                return lerp(singular_score, beta, 0.4027);
-            } else if singular_score > tt_score && td.stack[ply].mv != Move::NULL {
-                tt_move = Move::NULL;
-            }
-            // Negative Extensions
-            else if tt_score >= beta || cut_node {
-                extension = -3;
-            }
+            extension = 1;
+            extension += (singular_score < singular_beta - double_margin) as i32;
+            extension += (singular_score < singular_beta - triple_margin) as i32;
+        }
+        // Multi-Cut
+        else if singular_score >= beta && !is_decisive(singular_score) {
+            update_tt_move_history(td, -421 - 110 * depth);
+            return lerp(singular_score, beta, 0.4027);
+        } else if singular_score > tt_score && td.stack[ply].mv != Move::NULL {
+            tt_move = Move::NULL;
+        }
+        // Negative Extensions
+        else if tt_score >= beta || cut_node {
+            extension = -3;
         }
     }
     // Low Depth Singular Extensions (LDSE)
@@ -961,14 +955,6 @@ fn search<NODE: NodeType>(
         // TT move one full ply instead of dropping it straight into qsearch.
         // Never override a negative (singular) extension decision.
         if NODE::PV && mv == tt_move && new_depth == 0 && extension >= 0 && tt_depth >= depth {
-            new_depth = 1;
-        }
-
-        // Check extension: a move giving direct check that would otherwise
-        // fall straight into qsearch is extended a full ply, so the search
-        // doesn't rely on qsearch's narrower move selection to find the best
-        // evasion in forced tactical sequences.
-        if is_direct_check && !in_check && new_depth == 0 {
             new_depth = 1;
         }
 
@@ -1307,7 +1293,7 @@ fn search<NODE: NodeType>(
             let entry = &td.stack[ply - 2];
             if entry.mv.is_present() {
                 let bonus = (152 * depth - 47).min(1379);
-                td.corrhist().continuation_history.update(
+                td.continuation_history.update(
                     entry.conthist,
                     td.stack[ply - 1].piece,
                     prior_move.to(),
@@ -1353,7 +1339,7 @@ fn search<NODE: NodeType>(
     best_score
 }
 
-fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: isize, allow_checks: bool) -> i32 {
+fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: isize) -> i32 {
     debug_assert!(!NODE::ROOT);
     debug_assert!(ply as usize <= MAX_PLY);
     debug_assert!(-Score::INFINITE <= alpha && alpha < beta && beta <= Score::INFINITE);
@@ -1398,19 +1384,13 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut tt_bound = Bound::None;
     let mut tt_pv = NODE::PV;
 
-    // Depth this call requires of a stored entry to trust it for an early
-    // cutoff: checks-considering calls need an entry that also considered
-    // checks (or better); a captures-only call can reuse either.
-    let required_tt_depth = if allow_checks && !in_check { TtDepth::QS_CHECKS } else { TtDepth::SOME };
-
     // QS early TT cutoff
     if let Some(entry) = &entry {
         tt_score = entry.score;
         tt_bound = entry.bound;
         tt_pv |= entry.tt_pv;
 
-        if entry.depth >= required_tt_depth
-            && is_valid(tt_score)
+        if is_valid(tt_score)
             && (!NODE::PV || !is_decisive(tt_score))
             && match tt_bound {
                 Bound::Upper => tt_score <= alpha,
@@ -1473,44 +1453,14 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut move_count = 0;
     let mut move_picker = MovePicker::new(Move::NULL, None);
 
-    let skip_quiets = |best_score| !in_check || !is_loss(best_score);
+    let skip_quiets = !in_check || !is_loss(best_score);
 
-    // At the first qsearch ply outside of check, additionally search quiet
-    // moves that give check (Stockfish-style qsearch checks), so forcing
-    // resources at the horizon aren't missed. Deeper qsearch recursion (and
-    // ProbCut's qsearch probe) stays captures-only. Skipped in clearly lost
-    // or clearly won positions, where a tactical shot rarely changes the
-    // outcome and the extra move generation/scoring just adds cost. Uses
-    // `beta` (a function parameter, never mutated in this function) as the
-    // reference point rather than the just-raised `alpha`, which would
-    // otherwise trivially equal `eval` whenever eval itself raised it.
-    let generate_checks =
-        allow_checks && !in_check && !is_loss(best_score) && is_valid(eval) && beta - eval <= p::qs_checks_margin();
-
-    let mut checks_searched = 0;
-
-    while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets(best_score) && !generate_checks, ply) {
-        if generate_checks && mv.is_quiet() {
-            if !td.board.is_direct_check(mv) {
-                continue;
-            }
-
-            // Cap how many checking quiets a single call will search: once
-            // exceeded, skip the rest rather than let the LMP exemption
-            // below admit an unbounded number of them.
-            checks_searched += 1;
-            if checks_searched > p::qs_checks_max() {
-                continue;
-            }
-        }
-
+    while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets, ply) {
         move_count += 1;
 
         if !is_loss(best_score) {
-            // Late Move Pruning (LMP): skipped while generating checks, since
-            // breaking here would exit before the move picker ever reaches
-            // the checking quiets this call exists to search.
-            if move_count >= 3 && !td.board.is_direct_check(mv) && !generate_checks {
+            // Late Move Pruning (LMP)
+            if move_count >= 3 && !td.board.is_direct_check(mv) {
                 break;
             }
 
@@ -1521,7 +1471,7 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
         }
 
         make_move(td, ply, mv);
-        let score = -qsearch::<NODE>(td, -beta, -alpha, ply + 1, false);
+        let score = -qsearch::<NODE>(td, -beta, -alpha, ply + 1);
         undo_move(td, mv);
 
         if td.shared.status.get() == Status::STOPPED {
@@ -1568,13 +1518,7 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     }
 
     let bound = if best_score >= beta { Bound::Lower } else { Bound::Upper };
-
-    // Mark the entry as checks-considering when this call actually searched
-    // quiet checks, so a future checks-wanting call can trust it, and a
-    // future captures-only call can too (a more thorough result is always
-    // safe to reuse in a less demanding context).
-    let write_depth = if generate_checks { TtDepth::QS_CHECKS } else { TtDepth::SOME };
-    td.shared.tt.write(hash, write_depth, raw_eval, best_score, bound, best_move, ply, tt_pv, false);
+    td.shared.tt.write(hash, TtDepth::SOME, raw_eval, best_score, bound, best_move, ply, tt_pv, false);
 
     debug_assert!(alpha < beta);
     debug_assert!(-Score::INFINITE < best_score && best_score < Score::INFINITE);
@@ -1599,12 +1543,12 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
             + corrhist.major.get(stm, td.board.major_key(), bucket))
             * p::corr_minor_major()
             / 128
-        + td.corrhist().continuation_corrhist.get(
+        + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
             td.stack[ply - 1].mv.to(),
         )
-        + td.corrhist().continuation_corrhist.get(
+        + td.continuation_corrhist.get(
             td.stack[ply - 4].contcorrhist,
             td.stack[ply - 1].piece,
             td.stack[ply - 1].mv.to(),
@@ -1630,7 +1574,7 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
     corrhist.major.update(stm, td.board.major_key(), bucket, bonus);
 
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 2].mv.is_present() {
-        td.corrhist().continuation_corrhist.update(
+        td.continuation_corrhist.update(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
             td.stack[ply - 1].mv.to(),
@@ -1639,7 +1583,7 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
     }
 
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 4].mv.is_present() {
-        td.corrhist().continuation_corrhist.update(
+        td.continuation_corrhist.update(
             td.stack[ply - 4].contcorrhist,
             td.stack[ply - 1].piece,
             td.stack[ply - 1].mv.to(),
@@ -1674,7 +1618,7 @@ fn update_continuation_histories_in_check(
 
         let entry = &td.stack[ply - offset];
         if entry.mv.is_present() {
-            if td.corrhist().continuation_history.get(entry.conthist, piece, sq) > 0 {
+            if td.continuation_history.get(entry.conthist, piece, sq) > 0 {
                 positive_count += 1;
             }
 
@@ -1682,7 +1626,7 @@ fn update_continuation_histories_in_check(
             // 6-lag scheme relative to the original 4-lag baseline is an
             // empirical question, not one to guess at.
             let scaled = bonus * weight * MULTIPLIERS[positive_count] / p::conthist_div() + 73 * (offset < 2) as i32;
-            td.corrhist().continuation_history.update(entry.conthist, piece, sq, scaled);
+            td.continuation_history.update(entry.conthist, piece, sq, scaled);
         }
     }
 }
@@ -1712,13 +1656,13 @@ fn make_move(td: &mut ThreadData, ply: isize, mv: Move) {
     td.stack[ply + 1].follow_pv = td.stack[ply].follow_pv && td.previous_pv.get(ply as usize) == Some(&mv);
     td.stack[ply].mv = mv;
     td.stack[ply].piece = td.board.moved_piece(mv);
-    td.stack[ply].conthist = td.corrhist().continuation_history.subtable_ptr(
+    td.stack[ply].conthist = td.continuation_history.subtable_ptr(
         td.board.in_check(),
         mv.is_noisy(),
         td.board.moved_piece(mv),
         mv.to(),
     );
-    td.stack[ply].contcorrhist = td.corrhist().continuation_corrhist.subtable_ptr(
+    td.stack[ply].contcorrhist = td.continuation_corrhist.subtable_ptr(
         td.board.in_check(),
         mv.is_noisy(),
         td.board.moved_piece(mv),

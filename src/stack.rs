@@ -1,13 +1,10 @@
-use std::{
-    ops::{Index, IndexMut},
-    sync::atomic::AtomicI16,
-};
+use std::ops::{Index, IndexMut};
 
 use crate::types::{MAX_PLY, Move, Piece, Score};
 
 pub struct Stack {
     data: [StackEntry; MAX_PLY + 16],
-    sentinel: [[AtomicI16; 64]; 13],
+    sentinel: [[i16; 64]; 13],
 }
 
 impl Stack {
@@ -28,10 +25,7 @@ impl Stack {
 
 impl Default for Stack {
     fn default() -> Self {
-        Self {
-            data: [StackEntry::default(); MAX_PLY + 16],
-            sentinel: std::array::from_fn(|_| std::array::from_fn(|_| AtomicI16::new(0))),
-        }
+        Self { data: [StackEntry::default(); MAX_PLY + 16], sentinel: [[0; 64]; 13] }
     }
 }
 
@@ -45,8 +39,8 @@ pub struct StackEntry {
     pub move_count: u16,
     pub reduction: i32,
     pub follow_pv: bool,
-    pub conthist: *mut [[AtomicI16; 64]; 13],
-    pub contcorrhist: *mut [[AtomicI16; 64]; 13],
+    pub conthist: *mut [[i16; 64]; 13],
+    pub contcorrhist: *mut [[i16; 64]; 13],
 }
 
 unsafe impl Send for StackEntry {}

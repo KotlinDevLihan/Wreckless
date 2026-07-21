@@ -87,12 +87,6 @@ pub enum TtDepth {}
 impl TtDepth {
     pub const NONE: i32 = 0;
     pub const SOME: i32 = -1;
-    /// A qsearch entry produced while quiet checking moves were also
-    /// considered (not just captures). Strictly deeper than `SOME` so an
-    /// early cutoff can require "at least as thorough as this call needs"
-    /// via a single depth comparison, the same mechanism Stockfish uses to
-    /// distinguish its DEPTH_QS_CHECKS / DEPTH_QS_NO_CHECKS TT entries.
-    pub const QS_CHECKS: i32 = 1;
 
     const fn from_tt(offset_depth: u8) -> i32 {
         offset_depth as i32 - 1

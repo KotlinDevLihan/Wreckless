@@ -769,56 +769,48 @@ fn search<NODE: NodeType>(
     if !NODE::ROOT && !excluded && potential_singularity && !is_shuffling(td, tt_move, ply) {
         debug_assert!(is_valid(tt_score));
 
-        // Bound how deep in a single line singular search can recur, guarding
-        // against runaway extension chains far from the root. This is an inner
-        // guard (not part of the outer condition) so hitting the cap leaves
-        // `extension` at 0 without falling through to the LDSE branch below.
-        if (ply as i32) < td.root_depth * p::singular_recursion_mult() {
-            let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
-                + depth * (tt_pv && !NODE::PV) as i32;
-            let singular_beta = tt_score - singular_margin;
-            let singular_depth = (depth - 1) / 2;
+        let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
+            + depth * (tt_pv && !NODE::PV) as i32;
+        let singular_beta = tt_score - singular_margin;
+        let singular_depth = (depth - 1) / 2;
 
-            td.excluded[ply] = tt_move;
-            td.stack[ply].mv = Move::NULL;
-            singular_score = search::<NonPV>(td, singular_beta - 1, singular_beta, singular_depth, cut_node, ply);
-            td.excluded[ply] = Move::NULL;
-            td.stack[ply].tt_pv = tt_pv;
+        td.excluded[ply] = tt_move;
+        td.stack[ply].mv = Move::NULL;
+        singular_score = search::<NonPV>(td, singular_beta - 1, singular_beta, singular_depth, cut_node, ply);
+        td.excluded[ply] = Move::NULL;
+        td.stack[ply].tt_pv = tt_pv;
 
-            if td.shared.status.get() == Status::STOPPED {
-                return Score::ZERO;
-            }
-
-            if singular_score < singular_beta {
-                let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
-                    - 16 * tt_move.is_quiet() as i32
-                    - 16 * correction_value.abs() / 128
-                    - 1175 * td.tt_move_history / 114178
-                    - 38 * (ply as i32 > td.root_depth) as i32;
-                let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
-                    - 19 * tt_move.is_quiet() as i32
-                    - 15 * correction_value.abs() / 128
-                    - 43 * (ply as i32 > td.root_depth) as i32
-                    + 36;
-
-                extension = 1;
-                extension += (singular_score < singular_beta - double_margin) as i32;
-                extension += (singular_score < singular_beta - triple_margin) as i32;
-            }
-            // Multi-Cut
-            else if singular_score >= beta && !is_decisive(singular_score) {
-                update_tt_move_history(td, -421 - 110 * depth);
-                return lerp(singular_score, beta, 0.4027);
-            } else if singular_score > tt_score && td.stack[ply].mv != Move::NULL {
-                tt_move = Move::NULL;
-            }
-            // Negative Extensions
-            else if tt_score >= beta || cut_node {
-                extension = -3;
-            }
+        if td.shared.status.get() == Status::STOPPED {
+            return Score::ZERO;
         }
-        // else: singular search is skipped this deep in the line; `extension`
-        // stays 0 (the outer `if` was still taken, so LDSE below is skipped).
+
+        if singular_score < singular_beta {
+            let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
+                - 16 * tt_move.is_quiet() as i32
+                - 16 * correction_value.abs() / 128
+                - 1175 * td.tt_move_history / 114178
+                - 38 * (ply as i32 > td.root_depth) as i32;
+            let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
+                - 19 * tt_move.is_quiet() as i32
+                - 15 * correction_value.abs() / 128
+                - 43 * (ply as i32 > td.root_depth) as i32
+                + 36;
+
+            extension = 1;
+            extension += (singular_score < singular_beta - double_margin) as i32;
+            extension += (singular_score < singular_beta - triple_margin) as i32;
+        }
+        // Multi-Cut
+        else if singular_score >= beta && !is_decisive(singular_score) {
+            update_tt_move_history(td, -421 - 110 * depth);
+            return lerp(singular_score, beta, 0.4027);
+        } else if singular_score > tt_score && td.stack[ply].mv != Move::NULL {
+            tt_move = Move::NULL;
+        }
+        // Negative Extensions
+        else if tt_score >= beta || cut_node {
+            extension = -3;
+        }
     }
     // Low Depth Singular Extensions (LDSE)
     else if depth <= 7 && !in_check && cut_node && estimated_score <= alpha - 25 {
@@ -963,14 +955,6 @@ fn search<NODE: NodeType>(
         // TT move one full ply instead of dropping it straight into qsearch.
         // Never override a negative (singular) extension decision.
         if NODE::PV && mv == tt_move && new_depth == 0 && extension >= 0 && tt_depth >= depth {
-            new_depth = 1;
-        }
-
-        // Check extension: a move giving direct check that would otherwise
-        // fall straight into qsearch is extended a full ply, so the search
-        // doesn't rely on qsearch's narrower move selection to find the best
-        // evasion in forced tactical sequences.
-        if is_direct_check && !in_check && new_depth == 0 {
             new_depth = 1;
         }
 
@@ -1492,9 +1476,21 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let generate_checks =
         allow_checks && !in_check && !is_loss(best_score) && is_valid(eval) && beta - eval <= p::qs_checks_margin();
 
+    let mut checks_searched = 0;
+
     while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets(best_score) && !generate_checks, ply) {
-        if generate_checks && mv.is_quiet() && !td.board.is_direct_check(mv) {
-            continue;
+        if generate_checks && mv.is_quiet() {
+            if !td.board.is_direct_check(mv) {
+                continue;
+            }
+
+            // Cap how many checking quiets a single call will search: once
+            // exceeded, skip the rest rather than let the LMP exemption
+            // below admit an unbounded number of them.
+            checks_searched += 1;
+            if checks_searched > p::qs_checks_max() {
+                continue;
+            }
         }
 
         move_count += 1;

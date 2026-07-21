@@ -156,12 +156,10 @@ define! {
     // Continuation history
     i32 conthist_div: 70000;
 
-    // Singular extension recursion bound
-    i32 singular_recursion_mult: 2;
-
     // Move ordering
     i32 good_quiet_threshold: -14000;
 
     // Quiescence checks
     i32 qs_checks_margin: 200;
+    i32 qs_checks_max: 6;
 }

@@ -4,7 +4,7 @@ use crate::types::{Bitboard, Color, Move, Piece, PieceType, Square};
 
 type FromToHistory<T> = [[T; 64]; 64];
 type PieceToHistory<T> = [[T; 64]; 13];
-type ContinuationHistoryType = [[[[PieceToHistory<AtomicI16>; 64]; 13]; 2]; 2];
+type ContinuationHistoryType = [[[[PieceToHistory<i16>; 64]; 13]; 2]; 2];
 
 struct HugeBox<T> {
     ptr: std::ptr::NonNull<T>,
@@ -263,39 +263,19 @@ pub struct ContinuationCorrectionHistory {
 impl ContinuationCorrectionHistory {
     const MAX_HISTORY: i32 = 16418;
 
-    /// Shared across search threads (atomic, racy-lossy updates), so `&self`
-    /// suffices to hand out a subtable pointer.
     pub fn subtable_ptr(
-        &self, in_check: bool, capture: bool, piece: Piece, to: Square,
-    ) -> *mut PieceToHistory<AtomicI16> {
-        (&raw const self.entries[in_check as usize][capture as usize][piece][to]).cast_mut()
+        &mut self, in_check: bool, capture: bool, piece: Piece, to: Square,
+    ) -> *mut PieceToHistory<i16> {
+        &raw mut self.entries[in_check as usize][capture as usize][piece][to]
     }
 
-    pub fn get(&self, subtable_ptr: *mut PieceToHistory<AtomicI16>, piece: Piece, to: Square) -> i32 {
-        unsafe { (&*subtable_ptr)[piece][to].load(Ordering::Relaxed) as i32 }
+    pub fn get(&self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square) -> i32 {
+        unsafe { (&*subtable_ptr)[piece][to] as i32 }
     }
 
-    pub fn update(&self, subtable_ptr: *mut PieceToHistory<AtomicI16>, piece: Piece, to: Square, bonus: i32) {
-        let entry = unsafe { &(&*subtable_ptr)[piece][to] };
-        let bonus = bonus.clamp(-Self::MAX_HISTORY, Self::MAX_HISTORY);
-        let current = entry.load(Ordering::Relaxed) as i32;
-        entry.store((current + bonus - bonus.abs() * current / Self::MAX_HISTORY) as i16, Ordering::Relaxed);
-    }
-
-    pub fn clear(&self) {
-        for a in self.entries.iter() {
-            for b in a.iter() {
-                for c in b.iter() {
-                    for d in c.iter() {
-                        for row in d.iter() {
-                            for entry in row.iter() {
-                                entry.store(0, Ordering::Relaxed);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    pub fn update(&self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square, bonus: i32) {
+        let entry = &mut unsafe { &mut *subtable_ptr }[piece][to];
+        apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
     }
 }
 
@@ -313,39 +293,19 @@ pub struct ContinuationHistory {
 impl ContinuationHistory {
     const MAX_HISTORY: i32 = 15320;
 
-    /// Shared across search threads (atomic, racy-lossy updates), so `&self`
-    /// suffices to hand out a subtable pointer.
     pub fn subtable_ptr(
-        &self, in_check: bool, capture: bool, piece: Piece, to: Square,
-    ) -> *mut PieceToHistory<AtomicI16> {
-        (&raw const self.entries[in_check as usize][capture as usize][piece][to]).cast_mut()
+        &mut self, in_check: bool, capture: bool, piece: Piece, to: Square,
+    ) -> *mut PieceToHistory<i16> {
+        &raw mut self.entries[in_check as usize][capture as usize][piece][to]
     }
 
-    pub fn get(&self, subtable_ptr: *mut PieceToHistory<AtomicI16>, piece: Piece, to: Square) -> i32 {
-        (unsafe { &*subtable_ptr }[piece][to]).load(Ordering::Relaxed) as i32
+    pub fn get(&self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square) -> i32 {
+        (unsafe { &*subtable_ptr }[piece][to]) as i32
     }
 
-    pub fn update(&self, subtable_ptr: *mut PieceToHistory<AtomicI16>, piece: Piece, to: Square, bonus: i32) {
-        let entry = unsafe { &(&*subtable_ptr)[piece][to] };
-        let bonus = bonus.clamp(-Self::MAX_HISTORY, Self::MAX_HISTORY);
-        let current = entry.load(Ordering::Relaxed) as i32;
-        entry.store((current + bonus - bonus.abs() * current / Self::MAX_HISTORY) as i16, Ordering::Relaxed);
-    }
-
-    pub fn clear(&self) {
-        for a in self.entries.iter() {
-            for b in a.iter() {
-                for c in b.iter() {
-                    for d in c.iter() {
-                        for row in d.iter() {
-                            for entry in row.iter() {
-                                entry.store(0, Ordering::Relaxed);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    pub fn update(&self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square, bonus: i32) {
+        let entry = &mut unsafe { &mut *subtable_ptr }[piece][to];
+        apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
     }
 }
 

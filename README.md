@@ -143,9 +143,9 @@ if you're deciding whether to trust a "pending" item.
 - Low-ply history: root-relative `[ply][from][to]` table for plies 0–4, carried over between searches
 - Continuation history: all six lags updated with per-lag weights and a positive-consistency
   multiplier (as in Stockfish), near lags limited when in check, overall scale SPSA-tunable
-  (`conthist_div`); shared atomically across all search threads, matching Stockfish's own
-  `sharedHistory.continuationHistory` and Reckless's existing shared pawn history
-  (fishtest-verified at +2.6 Elo with SMP for the pawn-history case)
+  (`conthist_div`); per-thread, matching upstream (an earlier attempt to share it across threads,
+  the way Stockfish shares its own `sharedHistory.continuationHistory`, is covered in
+  [Removed](#removed-and-why) below)
 - Good/bad quiet split: quiets with strongly negative history are deferred until after bad captures
   (Stockfish's `GOOD_QUIET`/`BAD_QUIET` ordering); the threshold is SPSA-tunable (`good_quiet_threshold`)
 - Depth-indexed history divisors for late-move and futility pruning, replacing a flat divisor
@@ -178,17 +178,6 @@ if you're deciding whether to trust a "pending" item.
 - Aspiration fail-low rebound: beta collapses to the failed window's floor before alpha drops,
   keeping re-searches narrow
 - Correction values computed before the TT probe, overlapping the work with the prefetch
-
-**Quiescence search:**
-
-- Qsearch checks: at the first quiescence ply outside of check (not on deeper recursion or
-  ProbCut's probe), quiet checking moves are additionally searched — but only when the static eval
-  is within a tunable margin of beta (`qs_checks_margin`), and capped at a tunable number of
-  checking quiets per call (`qs_checks_max`), so the feature doesn't add cost in positions where a
-  tactical shot is very unlikely to matter
-- TT entries record whether checks were considered (`TtDepth::QS_CHECKS`), so a captures-only
-  cutoff can never silently reuse a less-thorough result — the same distinction Stockfish makes
-  with `DEPTH_QS_CHECKS` / `DEPTH_QS_NO_CHECKS`
 
 **Time management:**
 
@@ -238,7 +227,23 @@ and doesn't get re-litigated by mistake.
 - **A check extension** (extend a move giving direct check to a full ply instead of dropping into
   qsearch) was implemented, then removed after checking Stockfish's current source directly: modern
   Stockfish has no `givesCheck`-triggered depth bump anywhere in its search loop. The technique was
-  superseded — most likely by qsearch checks (above) handling the same scenario more precisely.
+  superseded, most likely by qsearch checks (below) handling the same scenario more precisely —
+  though qsearch checks was itself later removed (see below), so this scenario currently has no
+  dedicated handling in Wreckless, matching upstream.
+- **Qsearch checks** (searching quiet checking moves at the first quiescence ply, gated by an
+  eval-margin and a cap on how many checking quiets to search, with a TT-depth distinction so a
+  captures-only cutoff couldn't silently reuse a less-thorough result) went through two rounds of
+  bug fixes — an early-cutoff TT bypass and a late-move-pruning coverage gap — and several rounds
+  of margin/cap tuning, but the combined batch it was part of never tested better than roughly −18
+  to −40 Elo across many SPRT samples even after every identified bug was fixed. Removed.
+- **Shared continuation history** (the move-ordering continuation-history table made atomic and
+  shared across search threads, matching Stockfish's own `sharedHistory.continuationHistory`) was
+  verified against Stockfish's actual source as a faithful port, not a guess — but it was part of
+  the same persistently-negative batch as qsearch checks, and was reverted to per-thread alongside
+  qsearch checks' removal on the same evidence (the batch's Elo never recovered despite fixing
+  every identified defect). The per-lag weight reweighting fix that came out of auditing this
+  feature (lags 2/4/6 had been silently weakened to 43–79% of their original strength) was kept —
+  that fix is unrelated to whether the table is shared or per-thread.
 - **A cap on singular-extension recursion depth** (skip singular search beyond `ply < root_depth × N`)
   was implemented, then removed. Stockfish's actual "recursive singular search is avoided" guarantee
   comes from a single-level `!excludedMove` guard — preventing a singular sub-search from triggering
@@ -259,8 +264,11 @@ and doesn't get re-litigated by mistake.
 
 A five-item batch (qsearch checks, shared continuation history, check extension, bounded singular
 recursion, and the multicut correction-history update) plateaued around **−18 to −40 Elo** across
-several rounds of bug fixes before the check extension and recursion cap were identified as
-unsupported by the reference design and removed, landing at the state described above.
+several rounds of bug fixes. The check extension and recursion cap were removed first, after being
+identified as unsupported by the reference design; qsearch checks and shared continuation history
+were removed afterward once neither reference-design status nor further bug fixes moved the
+batch's Elo out of that band. What's left of this line of work is the per-lag continuation-history
+reweighting fix, kept because it's independently correct regardless of the sharing decision.
 
 ## Testing and tuning
 

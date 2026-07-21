@@ -159,7 +159,4 @@ define! {
     // Move ordering
     i32 good_quiet_threshold: -14000;
 
-    // Quiescence checks
-    i32 qs_checks_margin: 200;
-    i32 qs_checks_max: 6;
 }

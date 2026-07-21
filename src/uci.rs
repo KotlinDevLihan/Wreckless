@@ -204,8 +204,6 @@ fn reset(threads: &mut ThreadPool, shared: &Arc<SharedContext>) {
         corrhist.minor.clear();
         corrhist.major.clear();
         corrhist.pawn_history.clear();
-        corrhist.continuation_history.clear();
-        corrhist.continuation_corrhist.clear();
     }
 }
 

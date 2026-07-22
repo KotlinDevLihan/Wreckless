@@ -46,6 +46,13 @@ define! {
     // relative to their own base margins -- needs SPSA/SPRT more than most
     // values here.
     i32 razor_corr: 900;
+    // Guessed, not just exposed: the same cutoff-count signal is already
+    // SPSA-tunable everywhere else it's used (lmr_cutoff: 1151, fds_cutoff:
+    // 1394), but razoring's own version was left as a bare 65 -- tiny
+    // relative to razor_base/razor_quad's own scale, the same
+    // under-weighted shape as razor_corr's original guess. Raised toward
+    // where lmr_cutoff/fds_cutoff sit relative to their own base terms.
+    i32 razor_cutoff: 200;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -180,6 +187,20 @@ define! {
     i32 fds_ttmove: 3002;
     i32 fds_prev_reduction: 130;
 
+    // TT-move reliability tracking (ttMoveHistory) -- fork addition, never
+    // tuned. Guessed values, not just exposed defaults: multicut is rare but
+    // fairly strong evidence (the TT move wasn't even searched, yet a
+    // reduced sub-search still beat beta without it), so strengthened from
+    // -421/-110 toward more confident magnitudes. The best/not-best pair
+    // fires at every non-PV node with a TT move -- the highest-volume update
+    // this table gets -- and its original 918/-747 ratio assumes a specific
+    // TT-move hit rate with no data behind it, so narrowed toward symmetry
+    // as the more defensible default.
+    i32 tt_move_history_multicut_base: -500;
+    i32 tt_move_history_multicut_depth: 130;
+    i32 tt_move_history_best: 850;
+    i32 tt_move_history_not_best: -800;
+
     // Correction history updates
     i32 corr_bonus_scale: 148;
     // Was asymmetric (min 4678 / max 2496) despite every other history table
@@ -204,6 +225,27 @@ define! {
 
     // Continuation history
     i32 conthist_div: 70000;
+    // Per-lag weights, previously hardcoded consts with no SPSA exposure at
+    // all. Defaults unchanged (lags 1/2/4/6 at the original 700, lags 3/5 at
+    // Stockfish's relative ratio) -- this doesn't guess new values, it just
+    // lets SPSA actually explore around them instead of leaving them frozen
+    // forever as unverified literals.
+    i32 conthist_lag1: 700;
+    i32 conthist_lag2: 700;
+    i32 conthist_lag3: 195;
+    i32 conthist_lag4: 700;
+    i32 conthist_lag5: 89;
+    i32 conthist_lag6: 700;
+    // Positive-consistency multipliers, indexed by how many of the (up to 6)
+    // continuation entries checked so far were already positive. Same
+    // reasoning as the lag weights above: exposed, not re-guessed.
+    i32 conthist_mult0: 94;
+    i32 conthist_mult1: 103;
+    i32 conthist_mult2: 110;
+    i32 conthist_mult3: 106;
+    i32 conthist_mult4: 119;
+    i32 conthist_mult5: 126;
+    i32 conthist_mult6: 121;
 
     // Move ordering
     i32 good_quiet_threshold: -14000;

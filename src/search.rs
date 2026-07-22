@@ -576,7 +576,7 @@ fn search<NODE: NodeType>(
         && estimated_score
             < alpha - p::razor_base() - p::razor_quad() * depth * depth
                 - p::razor_corr() * correction_value.abs() / 1024
-                + 65 * (td.cutoff_count[ply + 1] > 3) as i32
+                + p::razor_cutoff() * (td.cutoff_count[ply + 1] > 3) as i32
         && alpha < 2048
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
@@ -803,7 +803,7 @@ fn search<NODE: NodeType>(
         }
         // Multi-Cut
         else if singular_score >= beta && !is_decisive(singular_score) {
-            update_tt_move_history(td, -421 - 110 * depth);
+            update_tt_move_history(td, p::tt_move_history_multicut_base() - p::tt_move_history_multicut_depth() * depth);
             return lerp(singular_score, beta, 0.4027);
         } else if singular_score > tt_score && td.stack[ply].mv != Move::NULL {
             tt_move = Move::NULL;
@@ -1264,7 +1264,10 @@ fn search<NODE: NodeType>(
         // Track how often the TT move turns out to be the best move; feeds back
         // into the singular double-extension margin (as in Stockfish).
         if !NODE::PV && tt_move.is_present() {
-            update_tt_move_history(td, if best_move == tt_move { 918 } else { -747 });
+            update_tt_move_history(
+                td,
+                if best_move == tt_move { p::tt_move_history_best() } else { p::tt_move_history_not_best() },
+            );
         }
 
         if !NODE::ROOT && td.stack[ply - 1].mv.is_quiet() && td.stack[ply - 1].move_count < 2 {
@@ -1606,12 +1609,28 @@ fn update_continuation_histories_in_check(
     // weighted equally (matching the original, already-tuned baseline, which
     // treated those four lags at full and equal strength); lags 3/5 are new
     // additions kept at Stockfish's relative ratio to the primary weight.
-    const CONTHIST_BONUSES: [(isize, i32); 6] = [(1, 700), (2, 700), (3, 195), (4, 700), (5, 89), (6, 700)];
-    const MULTIPLIERS: [i32; 7] = [94, 103, 110, 106, 119, 126, 121];
+    // Both SPSA-tunable now (previously hardcoded consts).
+    let conthist_bonuses: [(isize, i32); 6] = [
+        (1, p::conthist_lag1()),
+        (2, p::conthist_lag2()),
+        (3, p::conthist_lag3()),
+        (4, p::conthist_lag4()),
+        (5, p::conthist_lag5()),
+        (6, p::conthist_lag6()),
+    ];
+    let multipliers: [i32; 7] = [
+        p::conthist_mult0(),
+        p::conthist_mult1(),
+        p::conthist_mult2(),
+        p::conthist_mult3(),
+        p::conthist_mult4(),
+        p::conthist_mult5(),
+        p::conthist_mult6(),
+    ];
 
     let mut positive_count = 0;
 
-    for (offset, weight) in CONTHIST_BONUSES {
+    for (offset, weight) in conthist_bonuses {
         // Only update the nearest two continuation histories when in check.
         if in_check && offset > 2 {
             break;
@@ -1626,7 +1645,7 @@ fn update_continuation_histories_in_check(
             // Overall scale is SPSA-tunable since the right magnitude for this
             // 6-lag scheme relative to the original 4-lag baseline is an
             // empirical question, not one to guess at.
-            let scaled = bonus * weight * MULTIPLIERS[positive_count] / p::conthist_div() + 73 * (offset < 2) as i32;
+            let scaled = bonus * weight * multipliers[positive_count] / p::conthist_div() + 73 * (offset < 2) as i32;
             td.continuation_history.update(entry.conthist, piece, sq, scaled);
         }
     }

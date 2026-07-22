@@ -64,6 +64,14 @@
             "rk": 0.002
         },
         {
+            "name": "razor_cutoff",
+            "default": 200.0,
+            "min": 100.0,
+            "max": 300.0,
+            "ck": 10.0,
+            "rk": 0.002
+        },
+        {
             "name": "rfp_depth_quad",
             "default": 1140.0,
             "min": 570.0,
@@ -760,6 +768,38 @@
             "rk": 0.002
         },
         {
+            "name": "tt_move_history_multicut_base",
+            "default": -500.0,
+            "min": -750.0,
+            "max": -250.0,
+            "ck": 25.0,
+            "rk": 0.002
+        },
+        {
+            "name": "tt_move_history_multicut_depth",
+            "default": 130.0,
+            "min": 65.0,
+            "max": 195.0,
+            "ck": 6.5,
+            "rk": 0.002
+        },
+        {
+            "name": "tt_move_history_best",
+            "default": 850.0,
+            "min": 425.0,
+            "max": 1275.0,
+            "ck": 42.5,
+            "rk": 0.002
+        },
+        {
+            "name": "tt_move_history_not_best",
+            "default": -800.0,
+            "min": -1200.0,
+            "max": -400.0,
+            "ck": 40.0,
+            "rk": 0.002
+        },
+        {
             "name": "corr_bonus_scale",
             "default": 148.0,
             "min": 74.0,
@@ -805,6 +845,110 @@
             "min": 35000.0,
             "max": 105000.0,
             "ck": 3500.0,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_lag1",
+            "default": 700.0,
+            "min": 350.0,
+            "max": 1050.0,
+            "ck": 35.0,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_lag2",
+            "default": 700.0,
+            "min": 350.0,
+            "max": 1050.0,
+            "ck": 35.0,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_lag3",
+            "default": 195.0,
+            "min": 98.0,
+            "max": 293.0,
+            "ck": 9.8,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_lag4",
+            "default": 700.0,
+            "min": 350.0,
+            "max": 1050.0,
+            "ck": 35.0,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_lag5",
+            "default": 89.0,
+            "min": 45.0,
+            "max": 134.0,
+            "ck": 4.5,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_lag6",
+            "default": 700.0,
+            "min": 350.0,
+            "max": 1050.0,
+            "ck": 35.0,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_mult0",
+            "default": 94.0,
+            "min": 47.0,
+            "max": 141.0,
+            "ck": 4.7,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_mult1",
+            "default": 103.0,
+            "min": 52.0,
+            "max": 155.0,
+            "ck": 5.2,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_mult2",
+            "default": 110.0,
+            "min": 55.0,
+            "max": 165.0,
+            "ck": 5.5,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_mult3",
+            "default": 106.0,
+            "min": 53.0,
+            "max": 159.0,
+            "ck": 5.3,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_mult4",
+            "default": 119.0,
+            "min": 60.0,
+            "max": 179.0,
+            "ck": 6.0,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_mult5",
+            "default": 126.0,
+            "min": 63.0,
+            "max": 189.0,
+            "ck": 6.3,
+            "rk": 0.002
+        },
+        {
+            "name": "conthist_mult6",
+            "default": 121.0,
+            "min": 61.0,
+            "max": 182.0,
+            "ck": 6.1,
             "rk": 0.002
         },
         {

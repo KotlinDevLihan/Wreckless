@@ -38,7 +38,14 @@ define! {
     // Razoring
     i32 razor_base: 237;
     i32 razor_quad: 254;
-    i32 razor_corr: 300;
+    // Rougher estimate than lmr_capture_stat's fix below: razoring's own
+    // terms (razor_base, razor_quad*depth^2) have no /1024 normalization to
+    // compare against directly, unlike RFP/FP's margins. Raised from an
+    // initial 300 (too weak relative to razor_base/razor_quad's own scale)
+    // toward rough proportional consistency with how rfp_corr/fp_corr sit
+    // relative to their own base margins -- needs SPSA/SPRT more than most
+    // values here.
+    i32 razor_corr: 900;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -109,7 +116,14 @@ define! {
     i32 lmr_quiet_base: 2171;
     i32 lmr_quiet_hist: 179;
     i32 lmr_quiet_alpha: 418;
-    i32 lmr_capture_stat: 437;
+    // At 437, a queen capture (value 1242) alone contributed ~8483 to the
+    // noisy `history` term feeding lmr_noisy_hist/1024 -- larger than
+    // lmr_noisy_base (1426) and comparable to NoisyHistory::MAX_HISTORY
+    // (12800), the clamp on the entire learned capture-history signal.
+    // Rescaled so a queen capture contributes ~600 (comparable to
+    // lmr_noisy_base), a supplementary nudge rather than a term that
+    // swamps the actual learned noisy-history signal it's meant to add to.
+    i32 lmr_capture_stat: 31;
     i32 lmr_noisy_base: 1426;
     i32 lmr_noisy_hist: 130;
     i32 lmr_pv_base: 519;

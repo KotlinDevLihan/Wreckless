@@ -57,18 +57,18 @@
         },
         {
             "name": "razor_corr",
-            "default": 900.0,
-            "min": 450.0,
-            "max": 1350.0,
-            "ck": 45.0,
+            "default": 600.0,
+            "min": 300.0,
+            "max": 900.0,
+            "ck": 30.0,
             "rk": 0.002
         },
         {
             "name": "razor_cutoff",
-            "default": 200.0,
-            "min": 100.0,
-            "max": 300.0,
-            "ck": 10.0,
+            "default": 100.0,
+            "min": 50.0,
+            "max": 150.0,
+            "ck": 5.0,
             "rk": 0.002
         },
         {
@@ -105,18 +105,18 @@
         },
         {
             "name": "rfp_worsening",
-            "default": 55.0,
-            "min": 28.0,
-            "max": 83.0,
-            "ck": 2.8,
+            "default": 32.0,
+            "min": 16.0,
+            "max": 48.0,
+            "ck": 1.6,
             "rk": 0.002
         },
         {
             "name": "rfp_no_threats",
-            "default": 55.0,
-            "min": 28.0,
-            "max": 83.0,
-            "ck": 2.8,
+            "default": 54.0,
+            "min": 27.0,
+            "max": 81.0,
+            "ck": 2.7,
             "rk": 0.002
         },
         {
@@ -209,10 +209,10 @@
         },
         {
             "name": "probcut_tt_margin",
-            "default": 600.0,
-            "min": 300.0,
-            "max": 900.0,
-            "ck": 30.0,
+            "default": 500.0,
+            "min": 250.0,
+            "max": 750.0,
+            "ck": 25.0,
             "rk": 0.002
         },
         {
@@ -769,34 +769,34 @@
         },
         {
             "name": "tt_move_history_multicut_base",
-            "default": -500.0,
-            "min": -750.0,
-            "max": -250.0,
-            "ck": 25.0,
+            "default": -450.0,
+            "min": -675.0,
+            "max": -225.0,
+            "ck": 22.5,
             "rk": 0.002
         },
         {
             "name": "tt_move_history_multicut_depth",
-            "default": 130.0,
-            "min": 65.0,
-            "max": 195.0,
-            "ck": 6.5,
+            "default": 115.0,
+            "min": 58.0,
+            "max": 173.0,
+            "ck": 5.8,
             "rk": 0.002
         },
         {
             "name": "tt_move_history_best",
-            "default": 850.0,
-            "min": 425.0,
-            "max": 1275.0,
-            "ck": 42.5,
+            "default": 918.0,
+            "min": 459.0,
+            "max": 1377.0,
+            "ck": 45.9,
             "rk": 0.002
         },
         {
             "name": "tt_move_history_not_best",
-            "default": -800.0,
-            "min": -1200.0,
-            "max": -400.0,
-            "ck": 40.0,
+            "default": -747.0,
+            "min": -1121.0,
+            "max": -374.0,
+            "ck": 37.4,
             "rk": 0.002
         },
         {

@@ -40,19 +40,17 @@ define! {
     i32 razor_quad: 254;
     // Rougher estimate than lmr_capture_stat's fix below: razoring's own
     // terms (razor_base, razor_quad*depth^2) have no /1024 normalization to
-    // compare against directly, unlike RFP/FP's margins. Raised from an
-    // initial 300 (too weak relative to razor_base/razor_quad's own scale)
-    // toward rough proportional consistency with how rfp_corr/fp_corr sit
-    // relative to their own base margins -- needs SPSA/SPRT more than most
-    // values here.
-    i32 razor_corr: 900;
+    // compare against directly, unlike RFP/FP's margins. Pulled back from an
+    // earlier 900 guess (too large a swing from the original 300) toward a
+    // more conservative increase -- needs SPSA/SPRT more than most values
+    // here.
+    i32 razor_corr: 600;
     // Guessed, not just exposed: the same cutoff-count signal is already
     // SPSA-tunable everywhere else it's used (lmr_cutoff: 1151, fds_cutoff:
-    // 1394), but razoring's own version was left as a bare 65 -- tiny
-    // relative to razor_base/razor_quad's own scale, the same
-    // under-weighted shape as razor_corr's original guess. Raised toward
-    // where lmr_cutoff/fds_cutoff sit relative to their own base terms.
-    i32 razor_cutoff: 200;
+    // 1394), but razoring's own version was left as a bare 65. Pulled back
+    // from an earlier 200 guess (a 3x jump, too aggressive a swing) to a
+    // smaller increase.
+    i32 razor_cutoff: 100;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -62,16 +60,13 @@ define! {
     // Speculative, low-confidence: both rfp_worsening and rfp_no_threats are
     // flat boolean-gated subtractions in the same margin, so they're directly
     // comparable (unlike rfp_corr, which is continuously scaled). Opponent-
-    // worsening is arguably the more information-rich signal of the two --
-    // concrete evidence eval beat the opponent's own null-move-symmetric
-    // expectation, vs. no-threats' weaker "nothing of ours is attacked right
-    // now" (true in a large fraction of all positions). A richer signal
-    // getting less weight than a common, weak one didn't sit right, so
-    // brought to rough parity rather than leaving the original 20 vs 54
-    // split. Neither number is derived, just reasoned -- treat as a guess
-    // pending SPSA/SPRT.
-    i32 rfp_worsening: 55;
-    i32 rfp_no_threats: 55;
+    // worsening is arguably the more information-rich signal of the two, so
+    // nudged up from the original 20 -- but pulled back from an earlier
+    // guess of full parity (55) to a smaller move, since full parity was a
+    // bigger swing than the reasoning actually supports. rfp_no_threats
+    // reverted to its original value -- no real evidence it needed changing.
+    i32 rfp_worsening: 32;
+    i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
 
     // Null Move Pruning
@@ -90,12 +85,10 @@ define! {
     // Speculative, low-confidence: a TT-only cutoff trusts a cached score
     // with no fresh verification search at all, unlike regular ProbCut
     // (probcut_base: 254, which still runs a live qsearch plus a reduced
-    // search before trusting its result). Pushed to roughly 2.4x
-    // probcut_base rather than the original ~1.77x, reflecting that a purely
-    // cached, unverified signal deserves a noticeably bigger buffer than one
-    // that's actually re-confirmed -- still a directional guess, not a
-    // derived fix.
-    i32 probcut_tt_margin: 600;
+    // search before trusting its result). Pulled back from an earlier guess
+    // of 600 (~2.4x probcut_base) to a smaller increase over the original
+    // ~1.77x ratio -- still a directional guess, not a derived fix.
+    i32 probcut_tt_margin: 500;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
     i32 probcut_score_div: 319;
@@ -188,18 +181,18 @@ define! {
     i32 fds_prev_reduction: 130;
 
     // TT-move reliability tracking (ttMoveHistory) -- fork addition, never
-    // tuned. Guessed values, not just exposed defaults: multicut is rare but
-    // fairly strong evidence (the TT move wasn't even searched, yet a
-    // reduced sub-search still beat beta without it), so strengthened from
-    // -421/-110 toward more confident magnitudes. The best/not-best pair
-    // fires at every non-PV node with a TT move -- the highest-volume update
-    // this table gets -- and its original 918/-747 ratio assumes a specific
-    // TT-move hit rate with no data behind it, so narrowed toward symmetry
-    // as the more defensible default.
-    i32 tt_move_history_multicut_base: -500;
-    i32 tt_move_history_multicut_depth: 130;
-    i32 tt_move_history_best: 850;
-    i32 tt_move_history_not_best: -800;
+    // tuned. Multicut is rare but fairly strong evidence (the TT move wasn't
+    // even searched, yet a reduced sub-search still beat beta without it),
+    // so modestly strengthened from -421/-110, pulled back from an earlier,
+    // larger -500/130 guess. The best/not-best pair fires at every non-PV
+    // node with a TT move -- the highest-volume update this table gets --
+    // and an earlier attempt to "symmetrize" its 918/-747 ratio had no real
+    // evidence behind it either way; reverted to the original values rather
+    // than defend an unfounded alternative.
+    i32 tt_move_history_multicut_base: -450;
+    i32 tt_move_history_multicut_depth: 115;
+    i32 tt_move_history_best: 918;
+    i32 tt_move_history_not_best: -747;
 
     // Correction history updates
     i32 corr_bonus_scale: 148;

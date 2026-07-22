@@ -52,8 +52,18 @@ define! {
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
-    i32 rfp_worsening: 20;
-    i32 rfp_no_threats: 54;
+    // Speculative, low-confidence: opponent-worsening is conceptually similar
+    // in strength to the improving/corr signals (rfp_improvement: 120,
+    // rfp_corr: 669) but was weighted well below even rfp_no_threats (54).
+    // Raised toward rough parity with its sibling terms, not derived from a
+    // concrete disproportion the way lmr_capture_stat was -- treat as a
+    // guess pending SPSA/SPRT.
+    i32 rfp_worsening: 35;
+    // Speculative, low-confidence: nudged up slightly on the same reasoning
+    // as rfp_worsening above, though this one already sat at a reasonable
+    // proportion of the margin (~18% at depth 5), so the change here is
+    // minor.
+    i32 rfp_no_threats: 60;
     i32 rfp_base: 19;
 
     // Null Move Pruning
@@ -69,7 +79,12 @@ define! {
     i32 nmp_r_beta_max: 1187;
 
     // ProbCut
-    i32 probcut_tt_margin: 450;
+    // Speculative, low-confidence: a TT-only cutoff trusts a cached score
+    // with no fresh verification search, unlike regular ProbCut (probcut_base:
+    // 254), so it arguably deserves a wider safety margin than the ~1.77x
+    // ratio this already had -- widened further, but this is a directional
+    // guess, not a derived fix.
+    i32 probcut_tt_margin: 550;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
     i32 probcut_score_div: 319;

@@ -57,18 +57,18 @@
     },
     {
         "name": "rfp_worsening",
-        "default": 35.0,
-        "min": 18.0,
-        "max": 53.0,
-        "ck": 1.8,
+        "default": 55.0,
+        "min": 28.0,
+        "max": 83.0,
+        "ck": 2.8,
         "rk": 0.002
     },
     {
         "name": "rfp_no_threats",
-        "default": 60.0,
-        "min": 30.0,
-        "max": 90.0,
-        "ck": 3.0,
+        "default": 55.0,
+        "min": 28.0,
+        "max": 83.0,
+        "ck": 2.8,
         "rk": 0.002
     },
     {
@@ -161,10 +161,10 @@
     },
     {
         "name": "probcut_tt_margin",
-        "default": 550.0,
-        "min": 275.0,
-        "max": 825.0,
-        "ck": 27.5,
+        "default": 600.0,
+        "min": 300.0,
+        "max": 900.0,
+        "ck": 30.0,
         "rk": 0.002
     },
     {

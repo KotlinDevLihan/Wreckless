@@ -52,18 +52,19 @@ define! {
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
-    // Speculative, low-confidence: opponent-worsening is conceptually similar
-    // in strength to the improving/corr signals (rfp_improvement: 120,
-    // rfp_corr: 669) but was weighted well below even rfp_no_threats (54).
-    // Raised toward rough parity with its sibling terms, not derived from a
-    // concrete disproportion the way lmr_capture_stat was -- treat as a
-    // guess pending SPSA/SPRT.
-    i32 rfp_worsening: 35;
-    // Speculative, low-confidence: nudged up slightly on the same reasoning
-    // as rfp_worsening above, though this one already sat at a reasonable
-    // proportion of the margin (~18% at depth 5), so the change here is
-    // minor.
-    i32 rfp_no_threats: 60;
+    // Speculative, low-confidence: both rfp_worsening and rfp_no_threats are
+    // flat boolean-gated subtractions in the same margin, so they're directly
+    // comparable (unlike rfp_corr, which is continuously scaled). Opponent-
+    // worsening is arguably the more information-rich signal of the two --
+    // concrete evidence eval beat the opponent's own null-move-symmetric
+    // expectation, vs. no-threats' weaker "nothing of ours is attacked right
+    // now" (true in a large fraction of all positions). A richer signal
+    // getting less weight than a common, weak one didn't sit right, so
+    // brought to rough parity rather than leaving the original 20 vs 54
+    // split. Neither number is derived, just reasoned -- treat as a guess
+    // pending SPSA/SPRT.
+    i32 rfp_worsening: 55;
+    i32 rfp_no_threats: 55;
     i32 rfp_base: 19;
 
     // Null Move Pruning
@@ -80,11 +81,14 @@ define! {
 
     // ProbCut
     // Speculative, low-confidence: a TT-only cutoff trusts a cached score
-    // with no fresh verification search, unlike regular ProbCut (probcut_base:
-    // 254), so it arguably deserves a wider safety margin than the ~1.77x
-    // ratio this already had -- widened further, but this is a directional
-    // guess, not a derived fix.
-    i32 probcut_tt_margin: 550;
+    // with no fresh verification search at all, unlike regular ProbCut
+    // (probcut_base: 254, which still runs a live qsearch plus a reduced
+    // search before trusting its result). Pushed to roughly 2.4x
+    // probcut_base rather than the original ~1.77x, reflecting that a purely
+    // cached, unverified signal deserves a noticeably bigger buffer than one
+    // that's actually re-confirmed -- still a directional guess, not a
+    // derived fix.
+    i32 probcut_tt_margin: 600;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
     i32 probcut_score_div: 319;

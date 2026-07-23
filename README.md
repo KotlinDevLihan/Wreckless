@@ -129,6 +129,32 @@ checks (perft, bench, clippy) but hasn't cleared game testing yet — treat thes
 Reasoning for what was tried and removed is in [Removed](#removed-and-why) below; it's worth reading
 if you're deciding whether to trust a "pending" item.
 
+### Evaluation (pending SPRT verification)
+
+**Classical (hand-crafted, not learned) evaluation terms** — added on top of the NNUE output in
+plain centipawn space, in [`classical_eval.rs`](src/classical_eval.rs):
+
+- Pawn structure: doubled, isolated, backward, phalanx/connected, and defended (chain) pawns; passed
+  pawns with a per-relative-rank bonus
+- Bishop pair; rook on an open or semi-open file; knight/bishop outposts (pawn-defended, unreachable
+  by an enemy pawn, in enemy territory)
+- Simple mobility (attacked-square count, weighted per piece type) for knights, bishops, rooks, queens
+- King safety: pawn-shield gaps directly in front of the king; king on an open file
+
+Every constant above is SPSA-tunable (`doubled_penalty`, `isolated_penalty`, `backward_penalty`,
+`phalanx_bonus`, `chain_bonus`, `passed_r1`–`passed_r6`, `bishop_pair_bonus`,
+`rook_open_file_bonus`, `rook_semi_open_file_bonus`, `knight_outpost_bonus`, `bishop_outpost_bonus`,
+`knight_mobility`, `bishop_mobility`, `rook_mobility`, `queen_mobility`, `king_shield_penalty`,
+`king_open_file_penalty`), but the starting values are reasoned guesses from classical (pre-NNUE)
+engine evaluation, not SPSA/SPRT output — unlike the rest of this file's constants, they aren't even
+normalized against an internal `/1024`-style scale, since they're a direct centipawn addition.
+
+This intentionally lives outside the network's own feature transformer rather than as a new NNUE
+input: a brand-new *learned* feature has no meaningful weights without training data (zero-init is a
+no-op, random-init is noise once it flows through the already-trained layers), so this gets the same
+non-zero, non-random signal classical engines got before NNUE, at a magnitude that's transparent and
+safe to tune directly.
+
 ### Search (pending SPRT verification)
 
 **Correction history** — additional tables beyond upstream's pawn/non-pawn/continuation set:
@@ -192,6 +218,17 @@ if you're deciding whether to trust a "pending" item.
 - Far-from-root singular-extension margin damping
 - Pre-qsearch TT-move extension at PV nodes, gated by TT depth, that never overrides a negative
   (singular) extension decision
+- Check extensions: a move giving check gets a flat +1 ply, gated by shallow remaining depth
+  (`check_extension_depth`, SPSA-tunable) and non-losing SEE, so it sharpens tactics near the leaves
+  without compounding into a search explosion near the root or rewarding a sacrificial check.
+  **Caution:** a check extension was already tried in this fork once, as part of the batch described
+  under [Removed](#removed-and-why) below, and was removed alongside qsearch checks and shared
+  continuation history after that batch plateaued around −18 to −40 Elo — it was never isolated and
+  SPRT-tested on its own, so it isn't established as the cause, but it also was never confirmed
+  innocent. This implementation differs in specifics (full-search-depth only, SEE- and
+  shallow-depth-gated) but is the same broad technique the earlier removed one was, and was added
+  without first cross-checking that history — treat it as higher-risk than the "pending" label
+  elsewhere implies, and prioritize testing it in isolation
 
 **Search structure:**
 
@@ -225,6 +262,14 @@ if you're deciding whether to trust a "pending" item.
   plus a `MAX_PLY+16`-entry init loop, called inside the hottest retry loop in the engine). It's now
   reset in place (`Stack::reset()`), reusing the one allocation made at thread startup. Verified
   node-identical (bench and perft unaffected) — a pure speed change
+- **Per-thread pawn-structure cache** — the classical pawn-structure term (above) is pure-computed
+  from pawn placement, is evaluated for both the side to move and the opponent at every node, and is
+  identical across any two positions sharing a pawn structure (most of the tree, since most moves
+  don't touch a pawn). It's now cached per thread, keyed by `pawn_key()` (65536-entry direct-mapped
+  table), so it's computed once per distinct pawn structure instead of recomputed from scratch on
+  every call. Deterministic and lossless by construction (a cache hit returns the exact value a fresh
+  computation would), but introduced in the same session as the classical-eval feature it caches and
+  not yet independently bench/perft-verified against a clean build — confirm before relying on it
 
 ### Protocol / usability
 
@@ -232,7 +277,7 @@ if you're deciding whether to trust a "pending" item.
 - **`searchmoves`** — root move filtering on the `go` command
 - **`UCI_ShowWDL`** — win/draw/loss estimates in `info` lines
 - **`SyzygyProbeDepth` / `SyzygyProbeLimit`** — user-tunable tablebase engagement
-- **SPSA tunables** — 97 search constants exposed as UCI options under the `spsa` cargo feature,
+- **SPSA tunables** — 138 search and evaluation constants exposed as UCI options under the `spsa` cargo feature,
   for OpenBench SPSA tuning; identical compiled code in default (non-`spsa`) builds. A ready-to-use
   OpenBench SPSA input file is provided in [`spsa.config`](spsa.config)
 

@@ -6,16 +6,69 @@
 //! technique on its own, and every constant below is SPSA-tunable (see
 //! `parameters.rs`) so it can be refined by testing instead of guessing.
 
+use std::cell::Cell;
+
 use crate::{
     board::Board,
     lookup,
     parameters as p,
+    thread::ThreadData,
     types::{Bitboard, Color, Piece, PieceType, Square},
 };
 
-pub fn classical_bonus(board: &Board) -> i32 {
-    let stm = board.side_to_move();
-    classical_score(board, stm) - classical_score(board, !stm)
+// Pawn placement alone drives the priciest term here (nested per-file and
+// per-pawn loops with neighbor lookups), and it's shared between the two
+// `classical_score` calls a node makes (stm and !stm) and identical across
+// any two positions with the same pawn structure -- which is most of the
+// tree, since most moves don't touch a pawn. Caching it by `pawn_key()`
+// turns "recomputed twice, from scratch, on effectively every node" into
+// "computed once per distinct pawn structure."
+#[derive(Clone, Copy, Default)]
+struct PawnCacheEntry {
+    key: u64,
+    white_score: i32,
+    black_score: i32,
+}
+
+pub struct PawnCache {
+    entries: Box<[Cell<PawnCacheEntry>]>,
+}
+
+impl PawnCache {
+    const BITS: u32 = 16;
+    const SIZE: usize = 1 << Self::BITS;
+    const MASK: u64 = (Self::SIZE - 1) as u64;
+
+    pub fn new() -> Self {
+        Self { entries: (0..Self::SIZE).map(|_| Cell::new(PawnCacheEntry::default())).collect() }
+    }
+}
+
+impl Default for PawnCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn cached_pawn_score(td: &ThreadData, color: Color) -> i32 {
+    let key = td.board.pawn_key();
+    let cell = &td.pawn_cache.entries[(key & PawnCache::MASK) as usize];
+    let entry = cell.get();
+
+    if entry.key == key {
+        return if color == Color::White { entry.white_score } else { entry.black_score };
+    }
+
+    let white_score = pawn_score(&td.board, Color::White);
+    let black_score = pawn_score(&td.board, Color::Black);
+    cell.set(PawnCacheEntry { key, white_score, black_score });
+
+    if color == Color::White { white_score } else { black_score }
+}
+
+pub fn classical_bonus(td: &ThreadData) -> i32 {
+    let stm = td.board.side_to_move();
+    classical_score(td, stm) - classical_score(td, !stm)
 }
 
 fn file_mask(file_index: u8) -> Bitboard {
@@ -74,8 +127,9 @@ fn passed_bonus(relative_rank: u8) -> i32 {
     }
 }
 
-fn classical_score(board: &Board, color: Color) -> i32 {
-    let mut score = pawn_score(board, color);
+fn classical_score(td: &ThreadData, color: Color) -> i32 {
+    let board = &td.board;
+    let mut score = cached_pawn_score(td, color);
     score += bishop_pair_score(board, color);
     score += rook_file_score(board, color);
     score += outpost_score(board, color);

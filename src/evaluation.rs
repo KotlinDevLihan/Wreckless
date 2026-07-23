@@ -8,7 +8,7 @@ pub fn correct_eval(td: &ThreadData, raw_eval: i32, correction_value: i32) -> i3
     eval = eval * (200 - td.board.fiftymove_clock() as i32) / 200;
 
     eval += correction_value;
-    eval += classical_bonus(&td.board);
+    eval += classical_bonus(td);
 
     eval.clamp(-Score::TB_WIN_IN_MAX + 1, Score::TB_WIN_IN_MAX - 1)
 }

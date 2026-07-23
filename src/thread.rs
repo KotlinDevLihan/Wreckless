@@ -24,6 +24,7 @@ pub static WORKERS_REMAINING: AtomicUsize = AtomicUsize::new(0);
 
 use crate::{
     board::Board,
+    classical_eval::PawnCache,
     history::{
         ContinuationCorrectionHistory, ContinuationHistory, CorrectionHistory, LowPlyHistory, NoisyHistory,
         PawnHistory, QuietHistory,
@@ -241,6 +242,7 @@ pub struct ThreadData {
     pub shared: Arc<SharedContext>,
     pub corrhist: Arc<SharedCorrectionHistory>,
     pub board: Board,
+    pub pawn_cache: PawnCache,
     pub time_manager: TimeManager,
     pub stack: Box<Stack>,
     pub nnue: Network,
@@ -280,6 +282,7 @@ impl ThreadData {
             shared,
             corrhist,
             board: Board::starting_position(),
+            pawn_cache: PawnCache::new(),
             time_manager: TimeManager::new(Limits::Infinite, 0, 0),
             stack: Stack::new(),
             nnue: Network::new(parameters),

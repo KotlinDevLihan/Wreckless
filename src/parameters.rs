@@ -180,12 +180,6 @@ define! {
     i32 fds_ttmove: 3002;
     i32 fds_prev_reduction: 130;
 
-    // Check Extensions
-    // Depth cap only, no magnitude to tune -- the extension itself is a flat
-    // +1 ply, gated on remaining depth and SEE so it stays cheap and doesn't
-    // reward losing sacrificial checks.
-    i32 check_extension_depth: 8;
-
     // TT-move reliability tracking (ttMoveHistory) -- fork addition, never
     // tuned. Multicut is rare but fairly strong evidence (the TT move wasn't
     // even searched, yet a reduced sub-search still beat beta without it),
@@ -256,6 +250,20 @@ define! {
     // picked by reasoning from classical (pre-NNUE) engine evaluation terms
     // rather than SPSA/SPRT data. Exposed here so they can actually be
     // tuned by testing instead of staying frozen guesses.
+    //
+    // The whole classical contribution is gated behind these two weights
+    // (out of 128 = full strength) rather than added directly, and
+    // interpolated between them by material (see classical_eval_contribution
+    // in evaluation.rs): a hand-crafted eval on top of an already-trained
+    // NNUE risks double-counting signal the network already learned from
+    // real games, so this defaults low in the middlegame (32 = 25%) where
+    // that risk is highest, and higher in material-light endgames (80 = 63%)
+    // where classical rules are well-established and network training data
+    // is typically sparser. SPSA can push either toward 0 if the whole
+    // approach doesn't pay off, or toward 128 if it does.
+    i32 classical_eval_weight: 32;
+    i32 classical_eval_endgame_weight: 80;
+
     i32 doubled_penalty: 10;
     i32 isolated_penalty: 12;
     i32 backward_penalty: 8;
@@ -285,4 +293,9 @@ define! {
     // Per missing pawn in the 3-square shield directly in front of the king.
     i32 king_shield_penalty: 8;
     i32 king_open_file_penalty: 15;
+    // Separate flat weight (out of 128), deliberately not tied to the
+    // endgame ramp above: an exposed king is a liability while material is
+    // on the board, but kings become active, attacking pieces once it's
+    // bare, so this shouldn't scale up the way pawn-structure/mobility do.
+    i32 king_safety_weight: 64;
 }

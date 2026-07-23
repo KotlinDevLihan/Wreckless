@@ -42,7 +42,7 @@
         {
             "name": "razor_base",
             "default": 237.0,
-            "min": 118.0,
+            "min": 119.0,
             "max": 356.0,
             "ck": 11.9,
             "rk": 0.002
@@ -98,7 +98,7 @@
         {
             "name": "rfp_corr",
             "default": 669.0,
-            "min": 334.0,
+            "min": 335.0,
             "max": 1004.0,
             "ck": 33.5,
             "rk": 0.002
@@ -122,7 +122,7 @@
         {
             "name": "rfp_base",
             "default": 19.0,
-            "min": 9.0,
+            "min": 10.0,
             "max": 29.0,
             "ck": 1.0,
             "rk": 0.002
@@ -130,7 +130,7 @@
         {
             "name": "nmp_depth",
             "default": 9.0,
-            "min": 4.0,
+            "min": 5.0,
             "max": 14.0,
             "ck": 0.5,
             "rk": 0.002
@@ -154,7 +154,7 @@
         {
             "name": "nmp_cutoff",
             "default": 21.0,
-            "min": 10.0,
+            "min": 11.0,
             "max": 32.0,
             "ck": 1.1,
             "rk": 0.002
@@ -162,7 +162,7 @@
         {
             "name": "nmp_base",
             "default": 337.0,
-            "min": 168.0,
+            "min": 169.0,
             "max": 506.0,
             "ck": 16.9,
             "rk": 0.002
@@ -170,7 +170,7 @@
         {
             "name": "nmp_r_base",
             "default": 4407.0,
-            "min": 2203.0,
+            "min": 2204.0,
             "max": 6611.0,
             "ck": 220.4,
             "rk": 0.002
@@ -178,7 +178,7 @@
         {
             "name": "nmp_r_improving",
             "default": 917.0,
-            "min": 458.0,
+            "min": 459.0,
             "max": 1376.0,
             "ck": 45.9,
             "rk": 0.002
@@ -186,15 +186,15 @@
         {
             "name": "nmp_r_depth",
             "default": 265.0,
-            "min": 132.0,
+            "min": 133.0,
             "max": 398.0,
-            "ck": 13.3,
+            "ck": 13.2,
             "rk": 0.002
         },
         {
             "name": "nmp_r_beta",
             "default": 477.0,
-            "min": 238.0,
+            "min": 239.0,
             "max": 716.0,
             "ck": 23.9,
             "rk": 0.002
@@ -202,7 +202,7 @@
         {
             "name": "nmp_r_beta_max",
             "default": 1187.0,
-            "min": 593.0,
+            "min": 594.0,
             "max": 1781.0,
             "ck": 59.4,
             "rk": 0.002
@@ -226,15 +226,15 @@
         {
             "name": "probcut_improving",
             "default": 85.0,
-            "min": 42.0,
+            "min": 43.0,
             "max": 128.0,
-            "ck": 4.3,
+            "ck": 4.2,
             "rk": 0.002
         },
         {
             "name": "probcut_score_div",
             "default": 319.0,
-            "min": 159.0,
+            "min": 160.0,
             "max": 479.0,
             "ck": 16.0,
             "rk": 0.002
@@ -242,7 +242,7 @@
         {
             "name": "probcut_beta_step",
             "default": 197.0,
-            "min": 98.0,
+            "min": 99.0,
             "max": 296.0,
             "ck": 9.9,
             "rk": 0.002
@@ -266,9 +266,9 @@
         {
             "name": "lmp_quad",
             "default": 1351.0,
-            "min": 675.0,
+            "min": 676.0,
             "max": 2027.0,
-            "ck": 67.6,
+            "ck": 67.5,
             "rk": 0.002
         },
         {
@@ -282,7 +282,7 @@
         {
             "name": "fp_depth",
             "default": 79.0,
-            "min": 39.0,
+            "min": 40.0,
             "max": 119.0,
             "ck": 4.0,
             "rk": 0.002
@@ -290,7 +290,7 @@
         {
             "name": "fp_history",
             "default": 55.0,
-            "min": 27.0,
+            "min": 28.0,
             "max": 83.0,
             "ck": 2.8,
             "rk": 0.002
@@ -298,7 +298,7 @@
         {
             "name": "fp_beta_bonus",
             "default": 77.0,
-            "min": 38.0,
+            "min": 39.0,
             "max": 116.0,
             "ck": 3.9,
             "rk": 0.002
@@ -306,7 +306,7 @@
         {
             "name": "fp_corr",
             "default": 555.0,
-            "min": 277.0,
+            "min": 278.0,
             "max": 833.0,
             "ck": 27.8,
             "rk": 0.002
@@ -314,7 +314,7 @@
         {
             "name": "fp_base",
             "default": 127.0,
-            "min": 63.0,
+            "min": 64.0,
             "max": 191.0,
             "ck": 6.4,
             "rk": 0.002
@@ -370,7 +370,7 @@
         {
             "name": "see_q_hist",
             "default": 27.0,
-            "min": 13.0,
+            "min": 14.0,
             "max": 41.0,
             "ck": 1.4,
             "rk": 0.002
@@ -378,7 +378,7 @@
         {
             "name": "see_q_base",
             "default": 27.0,
-            "min": 13.0,
+            "min": 14.0,
             "max": 41.0,
             "ck": 1.4,
             "rk": 0.002
@@ -386,9 +386,9 @@
         {
             "name": "see_n_quad",
             "default": 7.0,
-            "min": 3.0,
+            "min": 4.0,
             "max": 11.0,
-            "ck": 0.5,
+            "ck": 0.4,
             "rk": 0.002
         },
         {
@@ -402,7 +402,7 @@
         {
             "name": "see_n_hist",
             "default": 39.0,
-            "min": 19.0,
+            "min": 20.0,
             "max": 59.0,
             "ck": 2.0,
             "rk": 0.002
@@ -418,7 +418,7 @@
         {
             "name": "lmr_ilog",
             "default": 269.0,
-            "min": 134.0,
+            "min": 135.0,
             "max": 404.0,
             "ck": 13.5,
             "rk": 0.002
@@ -426,15 +426,15 @@
         {
             "name": "lmr_improvement",
             "default": 425.0,
-            "min": 212.0,
+            "min": 213.0,
             "max": 638.0,
-            "ck": 21.3,
+            "ck": 21.2,
             "rk": 0.002
         },
         {
             "name": "lmr_corr",
             "default": 3417.0,
-            "min": 1708.0,
+            "min": 1709.0,
             "max": 5126.0,
             "ck": 170.9,
             "rk": 0.002
@@ -466,7 +466,7 @@
         {
             "name": "lmr_quiet_base",
             "default": 2171.0,
-            "min": 1085.0,
+            "min": 1086.0,
             "max": 3257.0,
             "ck": 108.6,
             "rk": 0.002
@@ -474,7 +474,7 @@
         {
             "name": "lmr_quiet_hist",
             "default": 179.0,
-            "min": 89.0,
+            "min": 90.0,
             "max": 269.0,
             "ck": 9.0,
             "rk": 0.002
@@ -490,8 +490,8 @@
         {
             "name": "lmr_capture_stat",
             "default": 31.0,
-            "min": 15.0,
-            "max": 46.0,
+            "min": 16.0,
+            "max": 47.0,
             "ck": 1.6,
             "rk": 0.002
         },
@@ -514,7 +514,7 @@
         {
             "name": "lmr_pv_base",
             "default": 519.0,
-            "min": 259.0,
+            "min": 260.0,
             "max": 779.0,
             "ck": 26.0,
             "rk": 0.002
@@ -522,7 +522,7 @@
         {
             "name": "lmr_pv_delta",
             "default": 437.0,
-            "min": 218.0,
+            "min": 219.0,
             "max": 656.0,
             "ck": 21.9,
             "rk": 0.002
@@ -530,7 +530,7 @@
         {
             "name": "lmr_ttpv",
             "default": 333.0,
-            "min": 166.0,
+            "min": 167.0,
             "max": 500.0,
             "ck": 16.7,
             "rk": 0.002
@@ -538,7 +538,7 @@
         {
             "name": "lmr_ttpv_score",
             "default": 611.0,
-            "min": 305.0,
+            "min": 306.0,
             "max": 917.0,
             "ck": 30.6,
             "rk": 0.002
@@ -546,9 +546,9 @@
         {
             "name": "lmr_ttpv_depth",
             "default": 685.0,
-            "min": 342.0,
+            "min": 343.0,
             "max": 1028.0,
-            "ck": 34.3,
+            "ck": 34.2,
             "rk": 0.002
         },
         {
@@ -570,7 +570,7 @@
         {
             "name": "lmr_check",
             "default": 955.0,
-            "min": 477.0,
+            "min": 478.0,
             "max": 1433.0,
             "ck": 47.8,
             "rk": 0.002
@@ -578,7 +578,7 @@
         {
             "name": "lmr_cutoff",
             "default": 1151.0,
-            "min": 575.0,
+            "min": 576.0,
             "max": 1727.0,
             "ck": 57.6,
             "rk": 0.002
@@ -602,15 +602,15 @@
         {
             "name": "lmr_singular_margin",
             "default": 185.0,
-            "min": 92.0,
+            "min": 93.0,
             "max": 278.0,
-            "ck": 9.3,
+            "ck": 9.2,
             "rk": 0.002
         },
         {
             "name": "lmr_singular_max",
             "default": 2021.0,
-            "min": 1010.0,
+            "min": 1011.0,
             "max": 3032.0,
             "ck": 101.1,
             "rk": 0.002
@@ -626,7 +626,7 @@
         {
             "name": "fds_ilog",
             "default": 207.0,
-            "min": 103.0,
+            "min": 104.0,
             "max": 311.0,
             "ck": 10.4,
             "rk": 0.002
@@ -642,7 +642,7 @@
         {
             "name": "fds_corr",
             "default": 2255.0,
-            "min": 1127.0,
+            "min": 1128.0,
             "max": 3383.0,
             "ck": 112.8,
             "rk": 0.002
@@ -674,7 +674,7 @@
         {
             "name": "fds_noisy_hist",
             "default": 63.0,
-            "min": 31.0,
+            "min": 32.0,
             "max": 95.0,
             "ck": 3.2,
             "rk": 0.002
@@ -690,7 +690,7 @@
         {
             "name": "fds_ttpv_depth",
             "default": 1129.0,
-            "min": 564.0,
+            "min": 565.0,
             "max": 1694.0,
             "ck": 56.5,
             "rk": 0.002
@@ -730,7 +730,7 @@
         {
             "name": "fds_singular",
             "default": 351.0,
-            "min": 175.0,
+            "min": 176.0,
             "max": 527.0,
             "ck": 17.6,
             "rk": 0.002
@@ -746,7 +746,7 @@
         {
             "name": "fds_singular_max",
             "default": 2167.0,
-            "min": 1083.0,
+            "min": 1084.0,
             "max": 3251.0,
             "ck": 108.4,
             "rk": 0.002
@@ -957,6 +957,206 @@
             "min": -21000.0,
             "max": -7000.0,
             "ck": 700.0,
+            "rk": 0.002
+        },
+        {
+            "name": "classical_eval_weight",
+            "default": 32.0,
+            "min": 16.0,
+            "max": 48.0,
+            "ck": 1.6,
+            "rk": 0.002
+        },
+        {
+            "name": "classical_eval_endgame_weight",
+            "default": 80.0,
+            "min": 40.0,
+            "max": 120.0,
+            "ck": 4.0,
+            "rk": 0.002
+        },
+        {
+            "name": "doubled_penalty",
+            "default": 10.0,
+            "min": 5.0,
+            "max": 15.0,
+            "ck": 0.5,
+            "rk": 0.002
+        },
+        {
+            "name": "isolated_penalty",
+            "default": 12.0,
+            "min": 6.0,
+            "max": 18.0,
+            "ck": 0.6,
+            "rk": 0.002
+        },
+        {
+            "name": "backward_penalty",
+            "default": 8.0,
+            "min": 4.0,
+            "max": 12.0,
+            "ck": 0.4,
+            "rk": 0.002
+        },
+        {
+            "name": "phalanx_bonus",
+            "default": 6.0,
+            "min": 3.0,
+            "max": 9.0,
+            "ck": 0.3,
+            "rk": 0.002
+        },
+        {
+            "name": "chain_bonus",
+            "default": 5.0,
+            "min": 3.0,
+            "max": 8.0,
+            "ck": 0.2,
+            "rk": 0.002
+        },
+        {
+            "name": "passed_r1",
+            "default": 5.0,
+            "min": 3.0,
+            "max": 8.0,
+            "ck": 0.2,
+            "rk": 0.002
+        },
+        {
+            "name": "passed_r2",
+            "default": 10.0,
+            "min": 5.0,
+            "max": 15.0,
+            "ck": 0.5,
+            "rk": 0.002
+        },
+        {
+            "name": "passed_r3",
+            "default": 20.0,
+            "min": 10.0,
+            "max": 30.0,
+            "ck": 1.0,
+            "rk": 0.002
+        },
+        {
+            "name": "passed_r4",
+            "default": 35.0,
+            "min": 18.0,
+            "max": 53.0,
+            "ck": 1.8,
+            "rk": 0.002
+        },
+        {
+            "name": "passed_r5",
+            "default": 55.0,
+            "min": 28.0,
+            "max": 83.0,
+            "ck": 2.8,
+            "rk": 0.002
+        },
+        {
+            "name": "passed_r6",
+            "default": 80.0,
+            "min": 40.0,
+            "max": 120.0,
+            "ck": 4.0,
+            "rk": 0.002
+        },
+        {
+            "name": "bishop_pair_bonus",
+            "default": 25.0,
+            "min": 13.0,
+            "max": 38.0,
+            "ck": 1.2,
+            "rk": 0.002
+        },
+        {
+            "name": "rook_open_file_bonus",
+            "default": 20.0,
+            "min": 10.0,
+            "max": 30.0,
+            "ck": 1.0,
+            "rk": 0.002
+        },
+        {
+            "name": "rook_semi_open_file_bonus",
+            "default": 10.0,
+            "min": 5.0,
+            "max": 15.0,
+            "ck": 0.5,
+            "rk": 0.002
+        },
+        {
+            "name": "knight_outpost_bonus",
+            "default": 15.0,
+            "min": 8.0,
+            "max": 23.0,
+            "ck": 0.8,
+            "rk": 0.002
+        },
+        {
+            "name": "bishop_outpost_bonus",
+            "default": 12.0,
+            "min": 6.0,
+            "max": 18.0,
+            "ck": 0.6,
+            "rk": 0.002
+        },
+        {
+            "name": "knight_mobility",
+            "default": 3.0,
+            "min": 2.0,
+            "max": 5.0,
+            "ck": 0.2,
+            "rk": 0.002
+        },
+        {
+            "name": "bishop_mobility",
+            "default": 3.0,
+            "min": 2.0,
+            "max": 5.0,
+            "ck": 0.2,
+            "rk": 0.002
+        },
+        {
+            "name": "rook_mobility",
+            "default": 2.0,
+            "min": 1.0,
+            "max": 3.0,
+            "ck": 0.1,
+            "rk": 0.002
+        },
+        {
+            "name": "queen_mobility",
+            "default": 1.0,
+            "min": 1.0,
+            "max": 2.0,
+            "ck": 0.1,
+            "rk": 0.002
+        },
+        {
+            "name": "king_shield_penalty",
+            "default": 8.0,
+            "min": 4.0,
+            "max": 12.0,
+            "ck": 0.4,
+            "rk": 0.002
+        },
+        {
+            "name": "king_open_file_penalty",
+            "default": 15.0,
+            "min": 8.0,
+            "max": 23.0,
+            "ck": 0.8,
+            "rk": 0.002
+        },
+        {
+            "name": "king_safety_weight",
+            "default": 64.0,
+            "min": 32.0,
+            "max": 96.0,
+            "ck": 3.2,
             "rk": 0.002
         }
     ]

@@ -66,9 +66,25 @@ fn cached_pawn_score(td: &ThreadData, color: Color) -> i32 {
     if color == Color::White { white_score } else { black_score }
 }
 
+// Split from king safety deliberately: this half is phase-scaled stronger in
+// endgames by the caller (evaluation.rs), which is the right direction for
+// pawn structure, mobility, and outposts, but wrong for king safety (an
+// exposed king is a liability with material on the board; kings become
+// active, attacking pieces once it's bare, so shield/open-file penalties
+// should if anything shrink, not grow). King safety gets its own flat
+// weight instead, not tied to the endgame ramp.
 pub fn classical_bonus(td: &ThreadData) -> i32 {
     let stm = td.board.side_to_move();
-    classical_score(td, stm) - classical_score(td, !stm)
+    // Occupancy doesn't depend on side to move, so it's computed once here
+    // and passed down instead of being recomputed inside mobility_score on
+    // both the stm and !stm passes below.
+    let occ = td.board.occupancies();
+    classical_score(td, stm, occ) - classical_score(td, !stm, occ)
+}
+
+pub fn king_safety_bonus(td: &ThreadData) -> i32 {
+    let stm = td.board.side_to_move();
+    king_safety_score(&td.board, stm) - king_safety_score(&td.board, !stm)
 }
 
 fn file_mask(file_index: u8) -> Bitboard {
@@ -127,14 +143,13 @@ fn passed_bonus(relative_rank: u8) -> i32 {
     }
 }
 
-fn classical_score(td: &ThreadData, color: Color) -> i32 {
+fn classical_score(td: &ThreadData, color: Color, occ: Bitboard) -> i32 {
     let board = &td.board;
     let mut score = cached_pawn_score(td, color);
     score += bishop_pair_score(board, color);
     score += rook_file_score(board, color);
     score += outpost_score(board, color);
-    score += mobility_score(board, color);
-    score += king_safety_score(board, color);
+    score += mobility_score(board, color, occ);
     score
 }
 
@@ -254,8 +269,7 @@ fn outpost_score(board: &Board, color: Color) -> i32 {
     score
 }
 
-fn mobility_score(board: &Board, color: Color) -> i32 {
-    let occ = board.occupancies();
+fn mobility_score(board: &Board, color: Color, occ: Bitboard) -> i32 {
     let own = board.colors(color);
 
     let mut score = 0;

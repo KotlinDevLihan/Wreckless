@@ -258,7 +258,11 @@ fn outpost_score(board: &Board, color: Color) -> i32 {
             let file_index = sq as u8 & 7;
             let rank_index = sq as u8 >> 3;
             let neighbor_files = adjacent_files_mask(file_index);
-            let attackable_zone = ahead_mask(rank_index, !color) & neighbor_files;
+            // Ranks ahead of our piece (our own color's forward direction),
+            // not behind it: an enemy pawn can only ever attack this square
+            // if it hasn't already advanced past it. A pawn behind our piece
+            // has passed it entirely and can never come back to threaten it.
+            let attackable_zone = ahead_mask(rank_index, color) & neighbor_files;
 
             if (their_pawns & attackable_zone).is_empty() {
                 score += bonus;

@@ -155,6 +155,34 @@ no-op, random-init is noise once it flows through the already-trained layers), s
 non-zero, non-random signal classical engines got before NNUE, at a magnitude that's transparent and
 safe to tune directly.
 
+**Known risk, and how it's mitigated:** a hand-crafted eval added on top of an already-trained NNUE
+risks double-counting signal the network already learned from real games, then distorting a
+calibration that was tuned assuming that signal didn't exist twice. A first version added all these
+terms directly, unscaled, and tested clearly negative in an SPRT. It's now gated behind two weights
+(`classical_eval_weight` for the middlegame, `classical_eval_endgame_weight` for material-light
+endgames, out of 128 = full strength) and phase-interpolated by `board.material()` — defaulting low
+(25%) where redundancy risk with the network is highest, higher (63%) where classical rules are
+well-established and network training data is typically sparser. King safety is deliberately
+excluded from that ramp and given its own flat weight (`king_safety_weight`): an exposed king is a
+liability with material on the board but an asset once it's bare, so scaling shield/open-file
+penalties *up* toward the endgame — as the rest of the terms do — would fight against the piece it's
+evaluating.
+
+**A real bug found and fixed during audit:** `outpost_score`'s "can no enemy pawn ever attack this
+square" check used `ahead_mask(rank_index, !color)` — ranks *behind* the piece from its own color's
+perspective. Since enemy pawns essentially never sit behind an established piece in normal play, that
+check was almost always trivially true, awarding the outpost bonus almost unconditionally whenever
+the rank/defense conditions were met, regardless of whether an advancing enemy pawn could actually
+still kick the piece off the square. Fixed to `ahead_mask(rank_index, color)` — ranks *ahead* of the
+piece, the direction an enemy pawn still has to advance through to ever threaten it.
+
+**Speed**: pawn placement is the priciest term here (nested per-file/per-pawn loops with neighbor
+lookups) and identical between the two `classical_score` calls a node makes (side to move and its
+opponent) whenever they share a pawn structure — true for most of the tree, since most moves don't
+touch a pawn. It's cached by `pawn_key()` (a dedicated per-thread `PawnCache`, 65536 entries) instead
+of recomputed from scratch every node. Occupancy (`board.occupancies()`) is likewise
+color-independent and computed once per node rather than twice.
+
 ### Search (pending SPRT verification)
 
 **Correction history** — additional tables beyond upstream's pawn/non-pawn/continuation set:
@@ -218,17 +246,6 @@ safe to tune directly.
 - Far-from-root singular-extension margin damping
 - Pre-qsearch TT-move extension at PV nodes, gated by TT depth, that never overrides a negative
   (singular) extension decision
-- Check extensions: a move giving check gets a flat +1 ply, gated by shallow remaining depth
-  (`check_extension_depth`, SPSA-tunable) and non-losing SEE, so it sharpens tactics near the leaves
-  without compounding into a search explosion near the root or rewarding a sacrificial check.
-  **Caution:** a check extension was already tried in this fork once, as part of the batch described
-  under [Removed](#removed-and-why) below, and was removed alongside qsearch checks and shared
-  continuation history after that batch plateaued around −18 to −40 Elo — it was never isolated and
-  SPRT-tested on its own, so it isn't established as the cause, but it also was never confirmed
-  innocent. This implementation differs in specifics (full-search-depth only, SEE- and
-  shallow-depth-gated) but is the same broad technique the earlier removed one was, and was added
-  without first cross-checking that history — treat it as higher-risk than the "pending" label
-  elsewhere implies, and prioritize testing it in isolation
 
 **Search structure:**
 
@@ -312,6 +329,11 @@ and doesn't get re-litigated by mistake.
     shared/atomic back to per-thread, non-atomic storage (see [Move ordering](#search-pending-sprt-verification)
     above) — the sharing itself was never implicated in anything, it just travels with qsearch
     checks as part of the same historical batch.
+- **A second check extension** (full-search-depth only, gated by shallow remaining depth and
+  non-losing SEE) was tried again, without first cross-checking the history above, and removed. A
+  different implementation of the same broad technique that already plateaued at −18 to −40 Elo
+  unisolated once — treated as higher-risk than a typical "pending" item for that reason, and
+  removed on request rather than risk-tested.
 - **A correction-history update on singular multicut** (feeding the gap between the singular
   search's value and the static eval into correction history, as described for PlentyChess) was
   implemented and removed after code review: the singular sub-search excludes the TT move and runs

@@ -66,6 +66,61 @@ fn cached_pawn_score(td: &ThreadData, color: Color) -> i32 {
     if color == Color::White { white_score } else { black_score }
 }
 
+// king_safety_score only depends on each color's king square and its own
+// pawns (a function of pawn structure), so like pawn_score it's identical
+// across any two nodes sharing both -- cached the same way, keyed by pawn
+// structure folded together with both king squares (not a real Zobrist
+// term, just enough mixing to disambiguate king placement; collisions are
+// safe since the full key is stored and compared, same as PawnCache).
+#[derive(Clone, Copy, Default)]
+struct KingSafetyCacheEntry {
+    key: u64,
+    white_score: i32,
+    black_score: i32,
+}
+
+pub struct KingSafetyCache {
+    entries: Box<[Cell<KingSafetyCacheEntry>]>,
+}
+
+impl KingSafetyCache {
+    const BITS: u32 = 16;
+    const SIZE: usize = 1 << Self::BITS;
+    const MASK: u64 = (Self::SIZE - 1) as u64;
+
+    pub fn new() -> Self {
+        Self { entries: (0..Self::SIZE).map(|_| Cell::new(KingSafetyCacheEntry::default())).collect() }
+    }
+}
+
+impl Default for KingSafetyCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn king_safety_key(board: &Board) -> u64 {
+    let white_king = board.king_square(Color::White) as u64;
+    let black_king = board.king_square(Color::Black) as u64;
+    board.pawn_key() ^ white_king.wrapping_mul(0x9E3779B97F4A7C15) ^ black_king.wrapping_mul(0xC2B2AE3D27D4EB4F)
+}
+
+fn cached_king_safety_score(td: &ThreadData, color: Color) -> i32 {
+    let key = king_safety_key(&td.board);
+    let cell = &td.king_safety_cache.entries[(key & KingSafetyCache::MASK) as usize];
+    let entry = cell.get();
+
+    if entry.key == key {
+        return if color == Color::White { entry.white_score } else { entry.black_score };
+    }
+
+    let white_score = king_safety_score(&td.board, Color::White);
+    let black_score = king_safety_score(&td.board, Color::Black);
+    cell.set(KingSafetyCacheEntry { key, white_score, black_score });
+
+    if color == Color::White { white_score } else { black_score }
+}
+
 // Split from king safety deliberately: this half is phase-scaled stronger in
 // endgames by the caller (evaluation.rs), which is the right direction for
 // pawn structure, mobility, and outposts, but wrong for king safety (an
@@ -84,7 +139,7 @@ pub fn classical_bonus(td: &ThreadData) -> i32 {
 
 pub fn king_safety_bonus(td: &ThreadData) -> i32 {
     let stm = td.board.side_to_move();
-    king_safety_score(&td.board, stm) - king_safety_score(&td.board, !stm)
+    cached_king_safety_score(td, stm) - cached_king_safety_score(td, !stm)
 }
 
 fn file_mask(file_index: u8) -> Bitboard {

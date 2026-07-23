@@ -5,6 +5,7 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code, unused_imports))]
 
 mod board;
+mod classical_eval;
 mod evaluation;
 mod history;
 mod lookup;

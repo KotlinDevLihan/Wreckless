@@ -180,6 +180,12 @@ define! {
     i32 fds_ttmove: 3002;
     i32 fds_prev_reduction: 130;
 
+    // Check Extensions
+    // Depth cap only, no magnitude to tune -- the extension itself is a flat
+    // +1 ply, gated on remaining depth and SEE so it stays cheap and doesn't
+    // reward losing sacrificial checks.
+    i32 check_extension_depth: 8;
+
     // TT-move reliability tracking (ttMoveHistory) -- fork addition, never
     // tuned. Multicut is rare but fairly strong evidence (the TT move wasn't
     // even searched, yet a reduced sub-search still beat beta without it),
@@ -242,4 +248,41 @@ define! {
 
     // Move ordering
     i32 good_quiet_threshold: -14000;
+
+    // Classical evaluation (hand-crafted, not learned -- see classical_eval.rs).
+    // Added on top of the NNUE output in plain centipawn space, so unlike
+    // every other value in this file these aren't normalized against any
+    // internal /1024-style scaling -- they're direct centipawn magnitudes,
+    // picked by reasoning from classical (pre-NNUE) engine evaluation terms
+    // rather than SPSA/SPRT data. Exposed here so they can actually be
+    // tuned by testing instead of staying frozen guesses.
+    i32 doubled_penalty: 10;
+    i32 isolated_penalty: 12;
+    i32 backward_penalty: 8;
+    i32 phalanx_bonus: 6;
+    i32 chain_bonus: 5;
+    // Passed pawn bonus by relative rank (1 = just off the home rank, 6 =
+    // one step from promotion); ranks 0 and 7 never hold a pawn.
+    i32 passed_r1: 5;
+    i32 passed_r2: 10;
+    i32 passed_r3: 20;
+    i32 passed_r4: 35;
+    i32 passed_r5: 55;
+    i32 passed_r6: 80;
+
+    i32 bishop_pair_bonus: 25;
+    i32 rook_open_file_bonus: 20;
+    i32 rook_semi_open_file_bonus: 10;
+    i32 knight_outpost_bonus: 15;
+    i32 bishop_outpost_bonus: 12;
+
+    // Per attacked square not occupied by our own piece.
+    i32 knight_mobility: 3;
+    i32 bishop_mobility: 3;
+    i32 rook_mobility: 2;
+    i32 queen_mobility: 1;
+
+    // Per missing pawn in the 3-square shield directly in front of the king.
+    i32 king_shield_penalty: 8;
+    i32 king_open_file_penalty: 15;
 }

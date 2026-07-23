@@ -847,6 +847,14 @@ fn search<NODE: NodeType>(
         let is_quiet = mv.is_quiet();
         let is_direct_check = td.board.is_direct_check(mv);
 
+        // Check Extensions (CE): a move giving check that doesn't hang
+        // material gets a full extra ply. Gated to shallow remaining depth
+        // so it only sharpens tactics near the leaves rather than
+        // compounding into a search explosion near the root; SEE-gated so
+        // it doesn't reward sacrificial checks that a deeper search would
+        // just refute anyway.
+        let check_extension = is_direct_check && depth <= p::check_extension_depth() && td.board.see(mv, 0);
+
         // For noisy moves, reductions additionally credit the captured piece's
         // value (as in Stockfish's statScore for captures).
         let mut capture_stat = 0;
@@ -950,7 +958,7 @@ fn search<NODE: NodeType>(
 
         make_move(td, ply, mv);
 
-        let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 };
+        let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 } + check_extension as i32;
 
         // Pre-qsearch TT-move extension: at PV nodes, give a well-established
         // TT move one full ply instead of dropping it straight into qsearch.

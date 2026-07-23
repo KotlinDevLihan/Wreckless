@@ -1,6 +1,6 @@
 {
     "configs": {
-        "engine_path": "C:\\Users\\USER-PC\\Downloads\\wreckless-spsa\\wreckless.exe",
+        "engine_path": "C:\\Users\\USER-PC\\Downloads\\Reckless-main (1)\\Reckless-main\\target\\x86_64-pc-windows-msvc\\release\\wreckless.exe",
         "fastchess_path": "C:\\Users\\USER-PC\\Downloads\\fastchess-windows-x86-64\\fastchess-windows-x86-64\\fastchess.exe",
         "iterations": 20000,
         "matches": 8,

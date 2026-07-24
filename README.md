@@ -138,7 +138,8 @@ plain centipawn space, in [`classical_eval.rs`](src/classical_eval.rs):
   pawns with a per-relative-rank bonus
 - Bishop pair; rook on an open or semi-open file; knight/bishop outposts (pawn-defended, unreachable
   by an enemy pawn, in enemy territory)
-- Simple mobility (attacked-square count, weighted per piece type) for knights, bishops, rooks, queens
+- Safe mobility (attacked-square count excluding squares an enemy pawn attacks, weighted per piece
+  type) for knights, bishops, rooks, queens
 - King safety: pawn-shield gaps directly in front of the king; king on an open file
 
 Every constant above is SPSA-tunable (`doubled_penalty`, `isolated_penalty`, `backward_penalty`,
@@ -160,28 +161,39 @@ risks double-counting signal the network already learned from real games, then d
 calibration that was tuned assuming that signal didn't exist twice. A first version added all these
 terms directly, unscaled, and tested clearly negative in an SPRT. It's now gated behind two weights
 (`classical_eval_weight` for the middlegame, `classical_eval_endgame_weight` for material-light
-endgames, out of 128 = full strength) and phase-interpolated by `board.material()` — defaulting low
-(25%) where redundancy risk with the network is highest, higher (63%) where classical rules are
-well-established and network training data is typically sparser. King safety is deliberately
-excluded from that ramp and given its own flat weight (`king_safety_weight`): an exposed king is a
+endgames, out of 128 = full strength) and phase-interpolated by `board.material()`. A second SPRT of
+that gated version (32/80, 25%/63%) *also* tested negative, even after fixing the outpost bug and
+adding safe mobility below — so both weights were pulled back further (16/50, 12%/39%) to limit the
+downside while it's still unclear whether a further bug or simply an unhelpful approach is at fault.
+King safety is deliberately excluded from the endgame ramp and given its own flat weight
+(`king_safety_weight`, also pulled back from 64 to 32 for the same reason): an exposed king is a
 liability with material on the board but an asset once it's bare, so scaling shield/open-file
 penalties *up* toward the endgame — as the rest of the terms do — would fight against the piece it's
-evaluating.
+evaluating. This is still an open question, not a resolved one: two negative SPRTs in a row on the
+same broad approach, even after real bug fixes, is a meaningful signal that classical eval on top of
+this NNUE may simply not pay off — worth treating with real skepticism rather than continuing to
+lower the weight indefinitely.
 
-**A real bug found and fixed during audit:** `outpost_score`'s "can no enemy pawn ever attack this
-square" check used `ahead_mask(rank_index, !color)` — ranks *behind* the piece from its own color's
-perspective. Since enemy pawns essentially never sit behind an established piece in normal play, that
-check was almost always trivially true, awarding the outpost bonus almost unconditionally whenever
-the rank/defense conditions were met, regardless of whether an advancing enemy pawn could actually
-still kick the piece off the square. Fixed to `ahead_mask(rank_index, color)` — ranks *ahead* of the
-piece, the direction an enemy pawn still has to advance through to ever threaten it.
+**Two real bugs found and fixed during audit:**
+- `outpost_score`'s "can no enemy pawn ever attack this square" check used
+  `ahead_mask(rank_index, !color)` — ranks *behind* the piece from its own color's perspective. Since
+  enemy pawns essentially never sit behind an established piece in normal play, that check was almost
+  always trivially true, awarding the outpost bonus almost unconditionally whenever the rank/defense
+  conditions were met, regardless of whether an advancing enemy pawn could actually still kick the
+  piece off the square. Fixed to `ahead_mask(rank_index, color)` — ranks *ahead* of the piece, the
+  direction an enemy pawn still has to advance through to ever threaten it.
+- Mobility counted every attacked square, including ones an enemy pawn attacks — moving a piece there
+  just hangs it for nothing. Excluding pawn-attacked squares ("safe mobility") is standard practice in
+  every major engine with a mobility term, not a guess.
 
 **Speed**: pawn placement is the priciest term here (nested per-file/per-pawn loops with neighbor
 lookups) and identical between the two `classical_score` calls a node makes (side to move and its
 opponent) whenever they share a pawn structure — true for most of the tree, since most moves don't
 touch a pawn. It's cached by `pawn_key()` (a dedicated per-thread `PawnCache`, 65536 entries) instead
-of recomputed from scratch every node. Occupancy (`board.occupancies()`) is likewise
-color-independent and computed once per node rather than twice.
+of recomputed from scratch every node. King safety only depends on each color's king square and its
+own pawns, so it's cached the same way (`KingSafetyCache`, keyed by pawn structure folded together
+with both king squares). Occupancy (`board.occupancies()`) is likewise color-independent and computed
+once per node rather than twice.
 
 ### Search (pending SPRT verification)
 

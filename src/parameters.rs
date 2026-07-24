@@ -243,6 +243,15 @@ define! {
     // Move ordering
     i32 good_quiet_threshold: -14000;
 
+    // Qsearch SEE pruning threshold -- previously hardcoded consts with no
+    // SPSA exposure at all. Defaults unchanged; exposed so SPSA can actually
+    // re-check qs_see_corr_cap now that corr_weight_div/corr_minor_major
+    // have shifted what typical correction_value magnitudes look like since
+    // this cap was last (informally) calibrated.
+    i32 qs_see_div: 8;
+    i32 qs_see_corr_cap: 68;
+    i32 qs_see_base: 74;
+
     // Classical evaluation (hand-crafted, not learned -- see classical_eval.rs).
     // Added on top of the NNUE output in plain centipawn space, so unlike
     // every other value in this file these aren't normalized against any
@@ -256,13 +265,17 @@ define! {
     // interpolated between them by material (see classical_eval_contribution
     // in evaluation.rs): a hand-crafted eval on top of an already-trained
     // NNUE risks double-counting signal the network already learned from
-    // real games, so this defaults low in the middlegame (32 = 25%) where
-    // that risk is highest, and higher in material-light endgames (80 = 63%)
-    // where classical rules are well-established and network training data
-    // is typically sparser. SPSA can push either toward 0 if the whole
-    // approach doesn't pay off, or toward 128 if it does.
-    i32 classical_eval_weight: 32;
-    i32 classical_eval_endgame_weight: 80;
+    // real games. An earlier version at 32/80 (25%/63%) still tested
+    // negative in SPRT even after fixing a real bug in outpost_score and
+    // adding safe mobility, so pulled back further to limit the downside
+    // while a real bug or bad weight remains possible -- defaults low in the
+    // middlegame (16 = 12%) where redundancy risk is highest, moderate in
+    // material-light endgames (50 = 39%) where classical rules are
+    // well-established and network training data is typically sparser.
+    // SPSA can push either toward 0 if the whole approach doesn't pay off,
+    // or back up if it does.
+    i32 classical_eval_weight: 16;
+    i32 classical_eval_endgame_weight: 50;
 
     i32 doubled_penalty: 10;
     i32 isolated_penalty: 12;
@@ -297,5 +310,10 @@ define! {
     // endgame ramp above: an exposed king is a liability while material is
     // on the board, but kings become active, attacking pieces once it's
     // bare, so this shouldn't scale up the way pawn-structure/mobility do.
-    i32 king_safety_weight: 64;
+    // Pulled back from 64 (50%) for the same reason as the weights above:
+    // king safety concepts are at least as well-represented in NNUE
+    // training data as pawn structure, so the double-counting risk applies
+    // here too, and repeated negative SPRT results argue for a smaller
+    // default until real tuning data says otherwise.
+    i32 king_safety_weight: 32;
 }

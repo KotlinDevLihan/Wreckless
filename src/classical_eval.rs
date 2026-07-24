@@ -208,6 +208,11 @@ fn classical_score(td: &ThreadData, color: Color, occ: Bitboard) -> i32 {
     score
 }
 
+fn enemy_pawn_attacks(board: &Board, color: Color) -> Bitboard {
+    let their_pawns = board.pieces(PieceType::Pawn) & board.colors(!color);
+    pawn_attacks(their_pawns, !color)
+}
+
 fn pawn_score(board: &Board, color: Color) -> i32 {
     let pawns = board.pieces(PieceType::Pawn) & board.colors(color);
     let their_pawns = board.pieces(PieceType::Pawn) & board.colors(!color);
@@ -330,6 +335,11 @@ fn outpost_score(board: &Board, color: Color) -> i32 {
 
 fn mobility_score(board: &Board, color: Color, occ: Bitboard) -> i32 {
     let own = board.colors(color);
+    // Squares an enemy pawn attacks aren't real mobility: moving a piece
+    // there just hangs it for nothing. Standard practice ("safe mobility"),
+    // not a guess -- excluding these is how mobility is computed in every
+    // major engine that has a mobility term at all.
+    let unsafe_squares = enemy_pawn_attacks(board, color);
 
     let mut score = 0;
 
@@ -342,7 +352,7 @@ fn mobility_score(board: &Board, color: Color, occ: Bitboard) -> i32 {
         let pieces = board.pieces(piece_type) & own;
         for sq in pieces {
             let attacks = lookup::attacks(Piece::new(color, piece_type), sq, occ);
-            score += weight * (attacks & !own).popcount() as i32;
+            score += weight * (attacks & !own & !unsafe_squares).popcount() as i32;
         }
     }
 

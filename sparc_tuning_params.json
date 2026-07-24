@@ -921,18 +921,18 @@
     },
     {
         "name": "classical_eval_weight",
-        "default": 32.0,
-        "min": 16.0,
-        "max": 48.0,
-        "ck": 1.6,
+        "default": 16.0,
+        "min": 8.0,
+        "max": 24.0,
+        "ck": 0.8,
         "rk": 0.002
     },
     {
         "name": "classical_eval_endgame_weight",
-        "default": 80.0,
-        "min": 40.0,
-        "max": 120.0,
-        "ck": 4.0,
+        "default": 50.0,
+        "min": 25.0,
+        "max": 75.0,
+        "ck": 2.5,
         "rk": 0.002
     },
     {
@@ -1113,10 +1113,10 @@
     },
     {
         "name": "king_safety_weight",
-        "default": 64.0,
-        "min": 32.0,
-        "max": 96.0,
-        "ck": 3.2,
+        "default": 32.0,
+        "min": 16.0,
+        "max": 48.0,
+        "ck": 1.6,
         "rk": 0.002
     }
 ]

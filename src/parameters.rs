@@ -47,13 +47,16 @@ define! {
     i32 razor_corr: 600;
     // Guessed, not just exposed: the same cutoff-count signal is already
     // SPSA-tunable everywhere else it's used (lmr_cutoff: 1151, fds_cutoff:
-    // 1394), but razoring's own version was left as a bare 65. Pulled back
-    // from an earlier 200 guess (a 3x jump, too aggressive a swing) to a
-    // smaller increase.
-    i32 razor_cutoff: 100;
-    // New: extends opponent_worsening (already used in RFP's rfp_worsening)
-    // to razoring, on the same consistency reasoning as razor_cutoff above.
-    i32 razor_worsening: 80;
+    // 1394). Re-checked against the established lmr_cutoff/lmr_noisy_base
+    // and fds_cutoff/fds_noisy_base ratios (~0.81x and ~1.48x) applied to
+    // razor_base (237), which suggests ~190-350 -- raised from an earlier,
+    // too-conservative 100 toward the low end of that range.
+    i32 razor_cutoff: 190;
+    // Extends opponent_worsening (already used in RFP's rfp_worsening) to
+    // razoring. Genuinely ambiguous how to scale between the two formulas'
+    // very different base magnitudes (razor_base is ~12x rfp_base), so this
+    // sits between two competing anchors rather than committing to either.
+    i32 razor_worsening: 150;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -133,12 +136,17 @@ define! {
     i32 see_q_hist: 27;
     // Extends the cutoff_count signal (already used in lmr_cutoff/fds_cutoff/
     // razor_cutoff) to SEE pruning as well -- not previously used here.
-    i32 see_q_cutoff: 15;
+    // Re-checked: at depth 5 the surrounding terms sum to roughly 600
+    // (quad+lin+base), and an initial guess of 15 was only ~2.5% of that --
+    // far weaker proportionally than lmr_cutoff/fds_cutoff are relative to
+    // their own base terms (~80%). Raised to a still-modest but more
+    // meaningful fraction.
+    i32 see_q_cutoff: 45;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
-    i32 see_n_cutoff: 10;
+    i32 see_n_cutoff: 25;
     i32 see_n_base: 14;
 
     // Late Move Reductions

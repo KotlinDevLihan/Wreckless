@@ -867,13 +867,18 @@ fn search<NODE: NodeType>(
         let is_direct_check = td.board.is_direct_check(mv);
 
         // Recapture extension: a capture landing on the square the
-        // opponent's last move captured on, that doesn't lose material
+        // opponent's last move *captured* on, that doesn't lose material
         // itself, gets a full extra ply -- compensating for the horizon
-        // effect at the end of a forced capture sequence. A different
-        // technique from the (removed) check extension: gated on square
-        // repetition and SEE, not on giving check.
-        let is_recapture =
-            !is_quiet && td.stack[ply - 1].mv.is_present() && mv.to() == td.stack[ply - 1].mv.to() && td.board.see(mv, 0);
+        // effect at the end of a forced capture sequence. Checking the prior
+        // move actually was a capture (not just that it ended on this
+        // square) matters: otherwise a normal capture of a piece that
+        // happened to move here would be misidentified as a recapture. A
+        // different technique from the (removed) check extension: gated on
+        // square repetition and SEE, not on giving check.
+        let is_recapture = !is_quiet
+            && td.stack[ply - 1].mv.is_capture()
+            && mv.to() == td.stack[ply - 1].mv.to()
+            && td.board.see(mv, 0);
 
         // For noisy moves, reductions additionally credit the captured piece's
         // value (as in Stockfish's statScore for captures).

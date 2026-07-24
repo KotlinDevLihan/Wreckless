@@ -252,15 +252,6 @@ if you're deciding whether to trust a "pending" item.
   plus a `MAX_PLY+16`-entry init loop, called inside the hottest retry loop in the engine). It's now
   reset in place (`Stack::reset()`), reusing the one allocation made at thread startup. Verified
   node-identical (bench and perft unaffected) — a pure speed change
-- **Per-thread pawn-structure cache** — the classical pawn-structure term (above) is pure-computed
-  from pawn placement, is evaluated for both the side to move and the opponent at every node, and is
-  identical across any two positions sharing a pawn structure (most of the tree, since most moves
-  don't touch a pawn). It's now cached per thread, keyed by `pawn_key()` (65536-entry direct-mapped
-  table), so it's computed once per distinct pawn structure instead of recomputed from scratch on
-  every call. Deterministic and lossless by construction (a cache hit returns the exact value a fresh
-  computation would), but introduced in the same session as the classical-eval feature it caches and
-  not yet independently bench/perft-verified against a clean build — confirm before relying on it
-
 ### Protocol / usability
 
 - **Pondering** — `go ponder` / `ponderhit` support and `bestmove ... ponder ...` output

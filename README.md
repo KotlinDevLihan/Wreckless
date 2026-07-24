@@ -235,6 +235,54 @@ if you're deciding whether to trust a "pending" item.
   best score from four iterations ago (Stockfish's `fallingEval`), extending time when the
   evaluation is sliding across recent iterations
 
+### Correctness fixes
+
+Found via a systematic audit (transposition table, time management, threading, board state,
+hashing), not through game testing — these are bugs in the fork's own code, independent of whether
+any specific search/eval feature helps or hurts. **The node-limit time-check fix in particular means
+any earlier SPRT run in this project's history that used `go nodes N` rather than a time control may
+have been measured under an artificially slowed engine** — worth keeping in mind when weighing older
+results against new ones.
+
+- **Unthrottled node-limit time check** — `Limits::Nodes` in `check_time()` called
+  `Counter::aggregate()` (summing every shard — at least 512, per `ThreadPool::available_threads()`)
+  on *every node*, while every other limit type was already gated behind the same `& 2047 == 2047`
+  periodic mask. A severe NPS penalty specific to node-limited search — exactly the mode typically
+  used for deterministic SPRT testing. Now gated the same as the rest.
+- **TT verification key race under multithreading** — `Cluster.keys` packs all 3 entries'
+  verification keys into one `u64`, updated via a plain (non-atomic) read-modify-write from
+  `write()`, which every lazy-SMP thread calls concurrently. Two threads updating *different* slots
+  in the same cluster could race: one thread's update, computed from a stale read, could silently
+  revert the other's — corrupting a sibling slot's key, not just the writer's own entry (worse than
+  the "torn own entry" tradeoff this lock-free design otherwise deliberately accepts, the same way
+  Stockfish's TT does). `keys` is now an `AtomicU64` updated via `fetch_update`.
+- **Cyclic (`movestogo`) hard time bound could consume the entire remaining clock** — with a small
+  `movestogo` (e.g. 2), `5x` the per-move time allocation already exceeds the remaining clock, so the
+  hard safety bound collapsed to "everything left," even though another move is due before the
+  control replenishes. Now reserves one more allocation's worth of time when a next move is still due.
+- **Worker-thread panic caused a silent, permanent hang instead of a diagnosable crash** — if a
+  search thread's work panicked, the completion signal update was skipped entirely, so the caller's
+  `ReceiverHandle::join()` blocked forever with no output. The signal now fires regardless (via
+  `catch_unwind`) before the panic is re-raised, so it's still visible rather than a silent freeze.
+- **`TtDepth::NONE` was unreachable** — the depth encoding put both a real `SOME`-depth write and a
+  genuinely empty (zero-initialized, never-written) slot at the same raw byte value, making them
+  indistinguishable. The "found a truly free slot" fast path in the TT replacement logic could never
+  trigger as a result. Re-encoded so a never-written slot is uniquely identifiable.
+- **Qsearch delta pruning didn't credit promotion value** — for a non-capture promotion,
+  `type_on(mv.to())` reads an empty square (value 0), not the ~1133cp actually gained by promoting,
+  which could prune a winning promotion out of qsearch in a low-eval position. Now credits the
+  promoted piece's value swing separately.
+- **`ttMoveHistory`'s gravity update was missing its bonus clamp** — every other gravity-style
+  history update in the codebase clamps its bonus first; this one didn't, letting the multicut caller
+  push the tracked value briefly past its documented ±8192 bound at high depth.
+- Several lower-severity hygiene fixes from the same audit: `CorrectionHistory::update` now clamps
+  its bonus internally (previously safe only because its one caller already did); the LMR
+  `reduced_depth` PV bonus is applied before its clamp rather than after (previously could exceed its
+  own ceiling by up to 2 plies); Chess960 castling no longer leaves a stale rook in `state.captured`
+  (inert today — the one consumer already gates on move kind — but a real invariant violation); the
+  `Zobrist` table's `mem::transmute` from a flat array is now backed by `#[repr(C)]` rather than
+  relying on Rust's unguaranteed default field ordering.
+
 ### Speed
 
 - **PEXT bitboards** — sliding-piece attacks indexed with the BMI2 `pext` instruction where
@@ -252,6 +300,7 @@ if you're deciding whether to trust a "pending" item.
   plus a `MAX_PLY+16`-entry init loop, called inside the hottest retry loop in the engine). It's now
   reset in place (`Stack::reset()`), reusing the one allocation made at thread startup. Verified
   node-identical (bench and perft unaffected) — a pure speed change
+
 ### Protocol / usability
 
 - **Pondering** — `go ponder` / `ponderhit` support and `bestmove ... ponder ...` output

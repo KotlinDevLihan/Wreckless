@@ -560,6 +560,11 @@ fn search<NODE: NodeType>(
         eval - td.stack[ply - 2].eval
     } else if is_valid(td.stack[ply - 4].eval) {
         eval - td.stack[ply - 4].eval
+    } else if is_valid(td.stack[ply - 6].eval) {
+        // Extends the existing ply-2/ply-4 fallback chain one step further,
+        // for long same-side-to-move gaps (e.g. extended check-evasion
+        // sequences) where neither is available but ply-6 is.
+        eval - td.stack[ply - 6].eval
     } else {
         0
     };
@@ -577,6 +582,10 @@ fn search<NODE: NodeType>(
             < alpha - p::razor_base() - p::razor_quad() * depth * depth
                 - p::razor_corr() * correction_value.abs() / 1024
                 + p::razor_cutoff() * (td.cutoff_count[ply + 1] > 3) as i32
+                // Extends opponent_worsening (already used in RFP) to
+                // razoring too, same direction: prune more willingly when
+                // the position is trending our way more than expected.
+                + p::razor_worsening() * opponent_worsening as i32
         && alpha < 2048
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
@@ -617,7 +626,11 @@ fn search<NODE: NodeType>(
                     + p::nmp_base())
                 .max(2)
         && ply as i32 >= td.nmp_min_ply
-        && td.board.material() > 491
+        // Zugzwang guard: material() sums every piece including pawns, so a
+        // pawn-heavy, piece-empty endgame (the textbook zugzwang scenario
+        // this check exists to catch) could pass a material()-based
+        // threshold. non_pawn_material() is the correct signal here.
+        && td.board.non_pawn_material() > 491
         && !is_loss(beta)
         && !is_win(estimated_score)
         && !(tt_bound == Bound::Lower
@@ -629,7 +642,13 @@ fn search<NODE: NodeType>(
         let r = (p::nmp_r_base()
             + p::nmp_r_improving() * improving as i32
             + p::nmp_r_depth() * depth
-            + p::nmp_r_beta() * (estimated_score - beta).clamp(0, p::nmp_r_beta_max()) / 128)
+            + p::nmp_r_beta() * (estimated_score - beta).clamp(0, p::nmp_r_beta_max()) / 128
+            // Speculative, lower confidence than the fixes above: ttMoveHistory
+            // already tracks move-ordering reliability elsewhere (singular
+            // margins); extending it here on the theory that a well-trusted
+            // TT move correlates with a more settled, less tactically volatile
+            // position -- not a derived relationship, just a plausible one.
+            + p::nmp_r_tt_history() * td.tt_move_history / 8192)
             / 1024;
 
         td.stack[ply].conthist = td.stack.sentinel().conthist;
@@ -847,6 +866,15 @@ fn search<NODE: NodeType>(
         let is_quiet = mv.is_quiet();
         let is_direct_check = td.board.is_direct_check(mv);
 
+        // Recapture extension: a capture landing on the square the
+        // opponent's last move captured on, that doesn't lose material
+        // itself, gets a full extra ply -- compensating for the horizon
+        // effect at the end of a forced capture sequence. A different
+        // technique from the (removed) check extension: gated on square
+        // repetition and SEE, not on giving check.
+        let is_recapture =
+            !is_quiet && td.stack[ply - 1].mv.is_present() && mv.to() == td.stack[ply - 1].mv.to() && td.board.see(mv, 0);
+
         // For noisy moves, reductions additionally credit the captured piece's
         // value (as in Stockfish's statScore for captures).
         let mut capture_stat = 0;
@@ -930,18 +958,41 @@ fn search<NODE: NodeType>(
                 continue;
             }
 
+            // History Pruning, noisy moves: the same pure-history threshold
+            // as above, extended to already-bad-SEE noisy moves. Distinct
+            // from BNFP just above, which tests eval+history combined
+            // against alpha rather than a raw history cutoff.
+            if !in_check
+                && !is_direct_check
+                && !is_quiet
+                && move_picker.stage() == Stage::BadNoisy
+                && depth < 5
+                && history < -p::hp_noisy_margin() * depth
+            {
+                continue;
+            }
+
             // Static Exchange Evaluation Pruning (SEE Pruning)
+            // The cutoff_count term matches the same signal already used in
+            // lmr_cutoff/fds_cutoff/razor_cutoff: many recent cutoffs at
+            // this node's children is a signal to prune more freely here too.
             let threshold = if is_quiet {
                 (-p::see_q_quad() * depth * depth + p::see_q_lin() * depth - p::see_q_hist() * history / 1024
+                    + p::see_q_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32
                     + p::see_q_base())
                 .min(0)
             } else {
                 (-p::see_n_quad() * depth * depth - p::see_n_lin() * depth - p::see_n_hist() * history / 1024
+                    + p::see_n_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32
                     + p::see_n_base())
                 .min(0)
             };
 
-            if !in_check && !td.board.see(mv, threshold) {
+            // Matches the check exemption LMP/FP/HP already have above: a
+            // move giving check can have follow-up tactical value a static
+            // exchange estimate can't see, so it shouldn't be pruned purely
+            // on looking like a bad trade.
+            if !in_check && !is_direct_check && !td.board.see(mv, threshold) {
                 continue;
             }
         }
@@ -956,6 +1007,10 @@ fn search<NODE: NodeType>(
         // TT move one full ply instead of dropping it straight into qsearch.
         // Never override a negative (singular) extension decision.
         if NODE::PV && mv == tt_move && new_depth == 0 && extension >= 0 && tt_depth >= depth {
+            new_depth = 1;
+        }
+
+        if is_recapture && new_depth == 0 && extension >= 0 {
             new_depth = 1;
         }
 
@@ -1463,13 +1518,28 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
         move_count += 1;
 
         if !is_loss(best_score) {
+            let is_direct_check = td.board.is_direct_check(mv);
+
             // Late Move Pruning (LMP)
-            if move_count >= 3 && !td.board.is_direct_check(mv) {
+            if move_count >= 3 && !is_direct_check {
                 break;
             }
 
+            // Delta pruning: skip a capture that can't plausibly raise
+            // alpha even crediting the full value of the captured piece,
+            // before the pricier SEE call below. Standard qsearch technique.
+            if !in_check
+                && !is_direct_check
+                && !mv.is_quiet()
+                && is_valid(eval)
+                && eval + td.board.type_on(mv.to()).value() + p::qs_delta_margin() < alpha
+            {
+                continue;
+            }
+
             // Static Exchange Evaluation Pruning (SEE Pruning)
-            if is_valid(eval)
+            if !is_direct_check
+                && is_valid(eval)
                 && !td.board.see(
                     mv,
                     (alpha - eval) / p::qs_see_div() - correction_value.abs().min(p::qs_see_corr_cap()) - p::qs_see_base(),

@@ -174,6 +174,14 @@ impl Board {
         self.state.material
     }
 
+    // material() sums every piece including pawns (see board/parser.rs), so
+    // it isn't the right signal for "is this a bare, zugzwang-prone
+    // endgame" -- a pawn-heavy, piece-empty endgame (the textbook zugzwang
+    // scenario) has plenty of material() but zero non-pawn material.
+    pub fn non_pawn_material(&self) -> i32 {
+        self.state.material - self.pieces(PieceType::Pawn).popcount() as i32 * PieceType::Pawn.value()
+    }
+
     pub const fn in_check(&self) -> bool {
         !self.state.checkers.is_empty()
     }

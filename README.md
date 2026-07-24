@@ -171,12 +171,34 @@ if you're deciding whether to trust a "pending" item.
 - Best-move history bonus scaled by how many other moves were searched first, at non-PV nodes
 - Captured-piece value credited in noisy-move reductions (Stockfish's capture `statScore`),
   strength SPSA-tunable (`lmr_capture_stat`)
+- History Pruning extended to already-bad-SEE noisy moves (`hp_noisy_margin`), not just quiets —
+  distinct from Bad Noisy Futility Pruning, which tests eval+history combined against alpha rather
+  than a raw history cutoff
 
 **Pruning and extensions:**
 
+- **Null-move zugzwang guard fixed**: `board.material()` sums every piece including pawns (see
+  `board/parser.rs`), so a pawn-heavy, piece-empty endgame — the textbook zugzwang scenario this
+  guard exists to catch — could pass a `material() > 491` threshold and get null-move pruned
+  anyway. Now checks `non_pawn_material()` (a new `Board` accessor), the correct signal for "is
+  this position bare enough that null-move's assumptions might not hold"
+- SEE pruning now exempts moves that give check, in both the main search and quiescence search,
+  matching the exemption LMP/FP/HP already had — a static-exchange estimate can't see a check's
+  follow-up tactical value, so it shouldn't prune one for looking like a bad trade
+- SEE pruning threshold now also responds to `cutoff_count` (`see_q_cutoff`/`see_n_cutoff`),
+  extending the same signal already used by `lmr_cutoff`/`fds_cutoff`/`razor_cutoff`
+- Qsearch delta pruning: a capture that can't plausibly reach alpha even crediting the full
+  captured-piece value is skipped before the pricier SEE call (`qs_delta_margin`) — a standard
+  technique, not previously present here
+- Recapture extension: a capture landing on the square the opponent's last move captured on, that
+  doesn't lose material itself, gets a full extra ply — compensates for the horizon effect at the
+  end of a forced capture sequence. A different technique from the check extension tried and
+  removed earlier (gated on square repetition and SEE, not on giving check)
 - Razoring margin widens with correction-history magnitude (`razor_corr`), matching the same
   uncertainty-scaled-margin pattern already used by RFP, FP, and LMR/FDS — razoring was the one
   early-pruning decision that read `correction_value` nowhere
+- Razoring margin also responds to opponent-worsening (`razor_worsening`), extending the same
+  signal RFP already uses
 - History Pruning now exempts quiet moves that give check, matching the exemption LMP and FP
   already had — HP was the one sibling pruning check that could discard a checking move on history
   alone
@@ -185,11 +207,16 @@ if you're deciding whether to trust a "pending" item.
 - Opponent-worsening term in reverse futility pruning: the margin shrinks when the evaluation swung
   further in our favor than the opponent's null-move expectation
 - "Improving" also counts a node whose static eval already clears beta
+- Improving signal's ply-2/ply-4 fallback chain extended to ply-6, for long same-side-to-move gaps
+  (e.g. extended check-evasion sequences) where neither ply-2 nor ply-4 is available
 - Shuffling guard: repetitive piece shuffling near the 50-move rule disables singular extensions,
   preventing search explosions (Stockfish #6447)
 - RFP skipped when the TT move is quiet with strongly negative history
 - Correction history updated on confirmed null-move fail-highs
 - Far-from-root singular-extension margin damping
+- Null-move reduction depth also responds to `ttMoveHistory` (`nmp_r_tt_history`), on the theory
+  that a well-trusted TT move correlates with a more settled position — a plausible connection,
+  not a derived one, lower confidence than the fixes above
 - Pre-qsearch TT-move extension at PV nodes, gated by TT depth, that never overrides a negative
   (singular) extension decision
 
@@ -240,7 +267,7 @@ if you're deciding whether to trust a "pending" item.
 - **`searchmoves`** — root move filtering on the `go` command
 - **`UCI_ShowWDL`** — win/draw/loss estimates in `info` lines
 - **`SyzygyProbeDepth` / `SyzygyProbeLimit`** — user-tunable tablebase engagement
-- **SPSA tunables** — 118 search constants exposed as UCI options under the `spsa` cargo feature,
+- **SPSA tunables** — 124 search constants exposed as UCI options under the `spsa` cargo feature,
   for OpenBench SPSA tuning; identical compiled code in default (non-`spsa`) builds. A ready-to-use
   OpenBench SPSA input file is provided in [`spsa.config`](spsa.config)
 

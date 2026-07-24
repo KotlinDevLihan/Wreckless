@@ -72,6 +72,14 @@
             "rk": 0.002
         },
         {
+            "name": "razor_worsening",
+            "default": 80.0,
+            "min": 40.0,
+            "max": 120.0,
+            "ck": 4.0,
+            "rk": 0.002
+        },
+        {
             "name": "rfp_depth_quad",
             "default": 1140.0,
             "min": 570.0,
@@ -205,6 +213,14 @@
             "min": 594.0,
             "max": 1781.0,
             "ck": 59.4,
+            "rk": 0.002
+        },
+        {
+            "name": "nmp_r_tt_history",
+            "default": 300.0,
+            "min": 150.0,
+            "max": 450.0,
+            "ck": 15.0,
             "rk": 0.002
         },
         {
@@ -352,6 +368,14 @@
             "rk": 0.002
         },
         {
+            "name": "hp_noisy_margin",
+            "default": 1480.0,
+            "min": 740.0,
+            "max": 2220.0,
+            "ck": 74.0,
+            "rk": 0.002
+        },
+        {
             "name": "see_q_quad",
             "default": 12.0,
             "min": 6.0,
@@ -373,6 +397,14 @@
             "min": 14.0,
             "max": 41.0,
             "ck": 1.4,
+            "rk": 0.002
+        },
+        {
+            "name": "see_q_cutoff",
+            "default": 15.0,
+            "min": 8.0,
+            "max": 23.0,
+            "ck": 0.8,
             "rk": 0.002
         },
         {
@@ -405,6 +437,14 @@
             "min": 20.0,
             "max": 59.0,
             "ck": 2.0,
+            "rk": 0.002
+        },
+        {
+            "name": "see_n_cutoff",
+            "default": 10.0,
+            "min": 5.0,
+            "max": 15.0,
+            "ck": 0.5,
             "rk": 0.002
         },
         {
@@ -981,6 +1021,14 @@
             "min": 37.0,
             "max": 111.0,
             "ck": 3.7,
+            "rk": 0.002
+        },
+        {
+            "name": "qs_delta_margin",
+            "default": 200.0,
+            "min": 100.0,
+            "max": 300.0,
+            "ck": 10.0,
             "rk": 0.002
         }
     ]

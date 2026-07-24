@@ -51,6 +51,9 @@ define! {
     // from an earlier 200 guess (a 3x jump, too aggressive a swing) to a
     // smaller increase.
     i32 razor_cutoff: 100;
+    // New: extends opponent_worsening (already used in RFP's rfp_worsening)
+    // to razoring, on the same consistency reasoning as razor_cutoff above.
+    i32 razor_worsening: 80;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -80,6 +83,11 @@ define! {
     i32 nmp_r_depth: 265;
     i32 nmp_r_beta: 477;
     i32 nmp_r_beta_max: 1187;
+    // Speculative: extends ttMoveHistory (an existing, already-tracked
+    // signal) into the null-move reduction depth, on the theory that a
+    // well-trusted TT move correlates with a more settled position -- a
+    // plausible connection, not a derived one.
+    i32 nmp_r_tt_history: 300;
 
     // ProbCut
     // Speculative, low-confidence: a TT-only cutoff trusts a cached score
@@ -114,15 +122,23 @@ define! {
 
     // History Pruning
     i32 hp_margin: 948;
+    // New: history pruning extended to bad-SEE noisy moves, previously
+    // quiet-only. Scaled up from hp_margin by noisy_history's larger range
+    // (MAX_HISTORY 12800 vs quiet's 8192) rather than reused as-is.
+    i32 hp_noisy_margin: 1480;
 
     // SEE Pruning
     i32 see_q_quad: 12;
     i32 see_q_lin: 56;
     i32 see_q_hist: 27;
+    // Extends the cutoff_count signal (already used in lmr_cutoff/fds_cutoff/
+    // razor_cutoff) to SEE pruning as well -- not previously used here.
+    i32 see_q_cutoff: 15;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
+    i32 see_n_cutoff: 10;
     i32 see_n_base: 14;
 
     // Late Move Reductions
@@ -251,5 +267,13 @@ define! {
     i32 qs_see_div: 8;
     i32 qs_see_corr_cap: 68;
     i32 qs_see_base: 74;
+
+    // Delta pruning margin: a standard qsearch technique (skip a capture
+    // that can't plausibly reach alpha even crediting the full captured
+    // piece value, before the pricier SEE call), not previously present
+    // here at all. 200cp is a fairly standard, moderate starting margin
+    // used across many engines with this technique -- not derived
+    // specifically for this codebase.
+    i32 qs_delta_margin: 200;
 
 }

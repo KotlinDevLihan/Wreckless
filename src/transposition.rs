@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 use crate::types::{Move, Score, is_decisive, is_loss, is_valid, is_win};
 
@@ -85,15 +85,22 @@ impl InternalEntry {
 pub enum TtDepth {}
 
 impl TtDepth {
-    pub const NONE: i32 = 0;
+    // NONE must decode uniquely from the raw zero-initialized byte a
+    // genuinely never-written slot has (offset_depth == 0). The old
+    // depth+1 encoding put SOME (-1) at that same offset_depth == 0, so an
+    // empty slot was indistinguishable from a real SOME-depth write --
+    // silently disabling the "found a genuinely free slot" fast path in
+    // write()'s replacement logic, which could never trigger. Shifted the
+    // encoding by one more step so offset_depth == 0 uniquely means NONE.
+    pub const NONE: i32 = -2;
     pub const SOME: i32 = -1;
 
     const fn from_tt(offset_depth: u8) -> i32 {
-        offset_depth as i32 - 1
+        offset_depth as i32 - 2
     }
 
     fn to_tt(depth: i32) -> u8 {
-        (depth + 1).clamp(u8::MIN as i32, u8::MAX as i32) as u8
+        (depth + 2).clamp(u8::MIN as i32, u8::MAX as i32) as u8
     }
 }
 
@@ -103,27 +110,36 @@ impl InternalEntry {
     }
 }
 
-#[derive(Clone)]
 #[repr(align(32))]
 struct Cluster {
     entries: [InternalEntry; ENTRIES_PER_CLUSTER],
-    keys: u64,
+    // Packs all 3 entries' 16-bit verification keys into one word. Must be
+    // atomic: every lazy-SMP thread calls write() concurrently via a raw
+    // pointer (see TranspositionTable::write), and a plain read-modify-write
+    // here let one thread's set_key() clobber a *different* thread's update
+    // to a sibling slot's key with a stale read -- corrupting an entry the
+    // writing thread never touched, worse than the accepted "torn own
+    // entry" tradeoff this lock-free design otherwise relies on.
+    keys: AtomicU64,
 }
 
 impl Cluster {
-    const fn key(&self, index: usize) -> u16 {
-        verification_key(self.keys >> (index * 16))
+    fn key(&self, index: usize) -> u16 {
+        verification_key(self.keys.load(Ordering::Relaxed) >> (index * 16))
     }
 
-    const fn set_key(&mut self, index: usize, key: u16) {
-        self.keys &= !(0xFFFF << (index * 16));
-        self.keys |= (key as u64) << (index * 16);
+    fn set_key(&self, index: usize, key: u16) {
+        let mask = 0xFFFFu64 << (index * 16);
+        let bits = (key as u64) << (index * 16);
+        // fetch_update's closure always returns Some, so this never fails
+        // and never needs a retry beyond the CAS loop it already performs.
+        let _ = self.keys.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| Some((old & !mask) | bits));
     }
 
-    const fn lookup_key(&self, key: u16) -> usize {
+    fn lookup_key(&self, key: u16) -> usize {
         let bits = 0x0001_0001_0001_0001;
         let needle = key as u64 * bits;
-        let zeros = self.keys ^ needle;
+        let zeros = self.keys.load(Ordering::Relaxed) ^ needle;
         let matches = zeros.wrapping_sub(bits) & !zeros & (bits << 15);
         (matches.trailing_zeros() / 16) as usize
     }

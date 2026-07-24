@@ -335,12 +335,24 @@ fn make_worker_thread() -> WorkerThread {
 
     let handle = std::thread::spawn(move || {
         while let Ok(work) = receiver.receiver.recv() {
-            work();
+            // If work() panics, the unwind must not skip the completion
+            // signal below -- otherwise ReceiverHandle::join() on the caller
+            // blocks forever with no diagnostic at all, turning a panic in
+            // search::start into a silent freeze instead of a visible
+            // crash. catch_unwind lets the signal fire regardless, then the
+            // panic is re-raised so it's still surfaced (Rust's default
+            // panic hook prints it to stderr even for a spawned thread).
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+
             let (lock, cvar) = &*receiver.completion_signal;
             let mut completed = lock.lock().unwrap();
             *completed = true;
             drop(completed); // Release the lock before notifying
             cvar.notify_one();
+
+            if let Err(payload) = result {
+                std::panic::resume_unwind(payload);
+            }
         }
     });
 

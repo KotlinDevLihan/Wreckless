@@ -1,6 +1,11 @@
 /// Represents the sets of random numbers used to produce an *almost* unique hash value
 /// for a position using [Zobrist Hashing](https://en.wikipedia.org/wiki/Zobrist_hashing)
 /// generated using the SplitMix64 pseudorandom number generator.
+// repr(C) pins field order to declaration order, which the transmute below
+// from a flat [u64; 865] array relies on -- Rust's default repr makes no
+// such guarantee (the compiler is free to reorder fields), so without this
+// the transmute is technically unsound even though it happens to work today.
+#[repr(C)]
 pub struct Zobrist {
     pub pieces: [[u64; 64]; 12],
     pub en_passant: [u64; 64],

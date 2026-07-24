@@ -52,7 +52,15 @@ impl TimeManager {
                 let base = (main as f64 / moves as f64) + 0.75 * inc as f64;
 
                 soft = ((1.0 * base) as u64).min(main + inc);
-                hard = ((5.0 * base) as u64).min(main + inc);
+                // With a small movestogo, 5x base already exceeds main+inc,
+                // so the clamp alone made hard consume the entire remaining
+                // clock regardless of the 5x multiplier -- even though more
+                // moves are due before the control replenishes. Reserving
+                // one more base-sized allocation (when there's a next move
+                // to reserve it for) keeps the hard bound from spending
+                // everything on a single move.
+                let reserve = if moves > 1 { base as u64 } else { 0 };
+                hard = ((5.0 * base) as u64).min((main + inc).saturating_sub(reserve));
             }
             _ => {
                 soft = u64::MAX;
@@ -105,7 +113,13 @@ impl TimeManager {
 
         match self.limits {
             Limits::Infinite | Limits::Depth(_) | Limits::Mate(_) => false,
-            Limits::Nodes(maximum) => td.shared.nodes.aggregate() > maximum,
+            // Gated behind the same periodic mask as the other branches:
+            // aggregate() sums every shard in Counter (at least 512, see
+            // ThreadPool::available_threads), so calling it unconditionally
+            // on every node was a severe NPS penalty specific to node-limited
+            // search -- exactly the mode used for deterministic SPRT/self-play
+            // testing.
+            Limits::Nodes(maximum) => td.nodes() & 2047 == 2047 && td.shared.nodes.aggregate() > maximum,
             _ => td.nodes() & 2047 == 2047 && self.search_elapsed(td) >= self.hard_bound,
         }
     }

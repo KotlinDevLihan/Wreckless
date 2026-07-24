@@ -37,7 +37,14 @@ impl Board {
 
         self.increment_stack();
 
-        let captured = self.piece_on(to);
+        // In Chess960/FRC, a castling move's `to` square is the castling
+        // rook's own square (the king-captures-its-own-rook encoding), so
+        // piece_on(to) would read the rook here, not an actual capture.
+        // Currently inert (the sole captured_piece() consumer already gates
+        // on is_noisy(), which excludes castling by move kind), but a real
+        // invariant violation worth closing rather than relying on callers
+        // to keep gating correctly.
+        let captured = if mv.is_castling() { Piece::None } else { self.piece_on(to) };
         self.state.captured = captured;
         self.state.plies_from_null += 1;
 

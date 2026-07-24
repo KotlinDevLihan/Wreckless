@@ -150,8 +150,12 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
                 match score {
                     s if s <= alpha => {
-                        // Collapse beta to the failed window's floor (as in
-                        // Stockfish) so the re-search stays narrow.
+                        // Collapse beta all the way to the failed window's
+                        // floor so the re-search stays narrow. Note: this is
+                        // a fuller collapse than Stockfish's own
+                        // beta = (alpha+beta)/2 midpoint -- an intentional
+                        // deviation as far as anyone has verified, but flag
+                        // it if re-tuning this: the two aren't equivalent.
                         beta = alpha;
                         alpha = (score - delta).max(-Score::INFINITE);
                         delta += 26 * delta / 128;
@@ -1077,7 +1081,13 @@ fn search<NODE: NodeType>(
 
             reduction += ((td.nodes() + td.id as u64 * 27) % 128) as i32 - 59;
 
-            let reduced_depth = (new_depth - reduction / 1024).clamp(1, new_depth + 2) + 2 * NODE::PV as i32;
+            // The PV bonus was previously added after the clamp, letting
+            // reduced_depth exceed its own new_depth+2 ceiling by up to 2
+            // more plies for PV nodes. Applying it before clamping keeps the
+            // apparent intent (a higher floor for PV nodes, via the same +2
+            // shift) while actually respecting the ceiling.
+            let pv_bonus = 2 * NODE::PV as i32;
+            let reduced_depth = (new_depth - reduction / 1024 + pv_bonus).clamp(1 + pv_bonus, new_depth + 2);
 
             td.stack[ply].reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, true, ply + 1);
@@ -1533,11 +1543,16 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             // Delta pruning: skip a capture that can't plausibly raise
             // alpha even crediting the full value of the captured piece,
             // before the pricier SEE call below. Standard qsearch technique.
+            // A non-capture promotion has nothing on the target square (so
+            // type_on(mv.to()) alone would credit zero material gain), so
+            // its own value swing is credited separately.
+            let promotion_gain =
+                if mv.is_promotion() { mv.promo_piece_type().value() - PieceType::Pawn.value() } else { 0 };
             if !in_check
                 && !is_direct_check
                 && !mv.is_quiet()
                 && is_valid(eval)
-                && eval + td.board.type_on(mv.to()).value() + p::qs_delta_margin() < alpha
+                && eval + td.board.type_on(mv.to()).value() + promotion_gain + p::qs_delta_margin() < alpha
             {
                 continue;
             }
@@ -1734,6 +1749,11 @@ fn update_continuation_histories_in_check(
 /// Gravity-style update of the global TT-move reliability statistic, bounded
 /// to roughly [-8192, 8192] like Stockfish's `TTMoveHistory`.
 fn update_tt_move_history(td: &mut ThreadData, bonus: i32) {
+    // Unlike every other gravity-style history update in the codebase, this
+    // one was missing the initial clamp -- the multicut caller can pass
+    // |bonus| > 8192 at high depth, letting the tracked value briefly
+    // overshoot its documented [-8192, 8192] bound.
+    let bonus = bonus.clamp(-8192, 8192);
     let entry = td.tt_move_history;
     td.tt_move_history = entry + bonus - entry * bonus.abs() / 8192;
 }

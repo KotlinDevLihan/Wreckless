@@ -233,6 +233,13 @@ impl CorrectionHistory {
     }
 
     pub fn update(&self, stm: Color, key: u64, bucket: usize, bonus: i32) {
+        // Unlike apply_bonus() (used by every other history table), this
+        // was missing the initial clamp. Currently safe -- the sole caller
+        // already clamps its bonus argument well within MAX_HISTORY -- but
+        // fragile against a future caller or an SPSA range change pushing
+        // bonus past MAX_HISTORY, which could silently overflow the `as i16`
+        // truncation below.
+        let bonus = bonus.clamp(-Self::MAX_HISTORY, Self::MAX_HISTORY);
         let current = self.entries[bucket][stm][key as usize & Self::MASK].load(Ordering::Relaxed) as i32;
         let new = current + bonus - bonus.abs() * current / Self::MAX_HISTORY;
         self.entries[bucket][stm][key as usize & Self::MASK].store(new as i16, Ordering::Relaxed);

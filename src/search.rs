@@ -101,14 +101,24 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             rm.previous_score = rm.score;
         }
 
-        // Aspiration window floor: keep a minimum delta so very stable
-        // positions still search wide enough to catch a sudden tactical
-        // shift, rather than triggering hairline-window re-searches.
-        let mut delta = (23 - eval_stability.min(pv_stability).min(7)).max(10);
-        let mut reduction = 0;
-
         for index in 0..td.multi_pv {
             td.pv_index = index;
+
+            // Aspiration window floor: keep a minimum delta so very stable
+            // positions still search wide enough to catch a sudden tactical
+            // shift, rather than triggering hairline-window re-searches.
+            //
+            // Both of these are per-PV-line state, and are reset here rather
+            // than once per depth -- Stockfish likewise resets its own
+            // failedHighCnt inside the pvIdx loop. Declared outside it, `delta`
+            // accumulated the `average^2` term plus every window widening from
+            // earlier PV lines, and `reduction` kept every earlier line's
+            // fail-high depth cut, so under MultiPV each successive line was
+            // searched with a wider window and at a shallower depth than the
+            // one before it. Single-PV search runs this body once and is
+            // unaffected.
+            let mut delta = (23 - eval_stability.min(pv_stability).min(7)).max(10);
+            let mut reduction = 0;
 
             if td.pv_index == td.pv_end {
                 td.pv_start = td.pv_end;
@@ -196,7 +206,28 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
         if td.shared.status.get() != Status::STOPPED {
             td.completed_depth = depth;
-            td.previous_pv = td.pv_table.line().to_vec();
+
+            // `td.pv_table.line()` reads slot 0, but the root deliberately
+            // never writes its own slot -- `pv_table.update()` is called only
+            // under `!NODE::ROOT`, and `commit_full_root_pv` writes each root
+            // move's *own* table, not this one. So `line()` was always empty
+            // here, `previous_pv` stayed empty for the entire search, every
+            // `previous_pv.get(ply)` in `make_move` missed, and `follow_pv`
+            // was false at every ply below the root.
+            //
+            // That silently disabled the Internal Iterative Reductions
+            // exemption: nodes on the previous iteration's principal variation
+            // were supposed to keep their full depth, and instead every one of
+            // them was reduced like any other. The per-node cost of
+            // maintaining `follow_pv` was still being paid for no effect.
+            //
+            // The line has to lead with the root move itself, because
+            // `make_move` at ply p tests `previous_pv[p]` -- at the root that
+            // is the root move, and `RootMove::pv` only holds the
+            // continuation from ply 1 onwards.
+            td.previous_pv.clear();
+            td.previous_pv.push(td.root_moves[0].mv);
+            td.previous_pv.extend_from_slice(td.root_moves[0].pv.line());
         }
 
         if (td.root_moves[0].score - average[0]).abs() < 12 {
@@ -718,7 +749,25 @@ fn search<NODE: NodeType>(
     // ProbCut
     let mut probcut_beta = beta + p::probcut_base() - p::probcut_improving() * improving as i32;
 
+    // The `!in_check` guard is not cosmetic. At an in-check node there is no
+    // static evaluation, so `eval` is the Score::NONE sentinel (32002):
+    //
+    //   - the `eval >= beta` arm below was therefore true for every non-mate
+    //     beta, so ProbCut ran at essentially *every* in-check cut node that
+    //     had no usable TT score, and
+    //   - the move picker's SEE threshold (`probcut_beta - eval`) came out
+    //     around -31500, which every capture passes -- so every evasion was
+    //     classified GoodNoisy and the `Stage::BadNoisy` break below could
+    //     never fire, leaving no bound on how many were tried.
+    //
+    // Both the razoring and RFP/NMP steps above already carry this guard.
+    // Stockfish skips this step in check for the same reason: its in-check
+    // path jumps straight to `moves_loop:`, past razoring, futility, null move
+    // and ProbCut. Note the TT-only ProbCut immediately below sits *after*
+    // that label upstream and reads no static eval, so it is deliberately
+    // left running in check.
     if cut_node
+        && !in_check
         && !is_win(beta)
         && if is_valid(tt_score) { tt_score >= probcut_beta && !is_decisive(tt_score) } else { eval >= beta }
         && !tt_move.is_quiet()
@@ -851,6 +900,15 @@ fn search<NODE: NodeType>(
     let mut quiet_moves = ArrayVec::<Move, 32>::new();
     let mut noisy_moves = ArrayVec::<Move, 32>::new();
 
+    // Depth-indexed divisor for history contributions to quiet pruning
+    // (Stockfish's lmrDivisor table, renormalized around a 1024 base) so
+    // history weighs in non-uniformly per depth. Depends only on `depth`,
+    // which is final by this point, so it is looked up once rather than once
+    // per move.
+    const HISTORY_DIVISORS: [i32; 16] =
+        [1221, 936, 927, 987, 1065, 1124, 1057, 927, 931, 1043, 1043, 1027, 1045, 1004, 1037, 1189];
+    let history_divisor = HISTORY_DIVISORS[(depth.min(16) - 1) as usize];
+
     let mut move_count = 0;
     let mut move_picker = MovePicker::new(tt_move, None);
     let mut skip_quiets = false;
@@ -872,21 +930,6 @@ fn search<NODE: NodeType>(
         td.stack[ply].move_count = move_count;
 
         let is_quiet = mv.is_quiet();
-        let is_direct_check = td.board.is_direct_check(mv);
-
-        // Recapture extension: a capture landing on the square the
-        // opponent's last move *captured* on, that doesn't lose material
-        // itself, gets a full extra ply -- compensating for the horizon
-        // effect at the end of a forced capture sequence. Checking the prior
-        // move actually was a capture (not just that it ended on this
-        // square) matters: otherwise a normal capture of a piece that
-        // happened to move here would be misidentified as a recapture. A
-        // different technique from the (removed) check extension: gated on
-        // square repetition and SEE, not on giving check.
-        let is_recapture = !is_quiet
-            && td.stack[ply - 1].mv.is_capture()
-            && mv.to() == td.stack[ply - 1].mv.to()
-            && td.board.see(mv, 0);
 
         // For noisy moves, reductions additionally credit the captured piece's
         // value (as in Stockfish's statScore for captures).
@@ -904,14 +947,12 @@ fn search<NODE: NodeType>(
             td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), captured_type)
         };
 
-        // Depth-indexed divisor for history contributions to quiet pruning
-        // (Stockfish's lmrDivisor table, renormalized around a 1024 base) so
-        // history weighs in non-uniformly per depth.
-        const HISTORY_DIVISORS: [i32; 16] =
-            [1221, 936, 927, 987, 1065, 1124, 1057, 927, 931, 1043, 1043, 1027, 1045, 1004, 1037, 1189];
-        let history_divisor = HISTORY_DIVISORS[(depth.min(16) - 1) as usize];
-
         if !NODE::ROOT && !is_loss(best_score) {
+            // Only the pruning heuristics below consult this, so it is not
+            // computed for root nodes or for nodes still sitting on a losing
+            // best score, where none of them run.
+            let is_direct_check = td.board.is_direct_check(mv);
+
             // Late Move Pruning (LMP)
             if !in_check
                 && !is_direct_check
@@ -1015,11 +1056,34 @@ fn search<NODE: NodeType>(
             }
         }
 
-        let initial_nodes = td.nodes();
+        let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 };
+
+        // Recapture extension: a capture landing on the square the
+        // opponent's last move *captured* on, that doesn't lose material
+        // itself, gets a full extra ply -- compensating for the horizon
+        // effect at the end of a forced capture sequence. Checking the prior
+        // move actually was a capture (not just that it ended on this
+        // square) matters: otherwise a normal capture of a piece that
+        // happened to move here would be misidentified as a recapture. A
+        // different technique from the (removed) check extension: gated on
+        // square repetition and SEE, not on giving check.
+        //
+        // The `new_depth`/`extension` conditions come first so the SEE call --
+        // by far the most expensive term -- is only paid when the move would
+        // otherwise drop straight into qsearch, instead of on every recapture
+        // at every depth. It still has to be evaluated before `make_move`,
+        // since SEE reads the pre-move board.
+        let is_recapture = new_depth == 0
+            && extension >= 0
+            && !is_quiet
+            && td.stack[ply - 1].mv.is_capture()
+            && mv.to() == td.stack[ply - 1].mv.to()
+            && td.board.see(mv, 0);
+
+        // Only ever read back on the root's per-move node accounting.
+        let initial_nodes = if NODE::ROOT { td.nodes() } else { 0 };
 
         make_move(td, ply, mv);
-
-        let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 };
 
         // Pre-qsearch TT-move extension: at PV nodes, give a well-established
         // TT move one full ply instead of dropping it straight into qsearch.
@@ -1028,7 +1092,7 @@ fn search<NODE: NodeType>(
             new_depth = 1;
         }
 
-        if is_recapture && new_depth == 0 && extension >= 0 {
+        if is_recapture {
             new_depth = 1;
         }
 
@@ -1195,38 +1259,7 @@ fn search<NODE: NodeType>(
         }
 
         if NODE::ROOT {
-            let current_nodes = td.nodes();
-            let root_move = td.root_moves.iter_mut().find(|v| v.mv == mv).unwrap();
-
-            root_move.nodes += current_nodes - initial_nodes;
-
-            if move_count == 1 || score > alpha {
-                root_move.upperbound = false;
-                root_move.lowerbound = false;
-                match score {
-                    v if v <= alpha => {
-                        root_move.display_score = alpha;
-                        root_move.upperbound = true;
-                    }
-                    v if v >= beta => {
-                        root_move.display_score = beta;
-                        root_move.lowerbound = true;
-                    }
-                    _ => {
-                        root_move.display_score = score;
-                    }
-                }
-
-                root_move.score = score;
-                root_move.sel_depth = td.sel_depth;
-                root_move.pv.commit_full_root_pv(&td.pv_table, 1);
-
-                if move_count > 1 && td.pv_index == 0 {
-                    td.best_move_changes += 1;
-                }
-            } else {
-                root_move.score = -Score::INFINITE;
-            }
+            update_root_move(td, mv, score, alpha, beta, move_count, initial_nodes);
         }
 
         if mv == tt_move {
@@ -1276,138 +1309,28 @@ fn search<NODE: NodeType>(
     }
 
     if best_move.is_present() {
-        let noisy_bonus = (96 * depth).min(885) - 43 - 87 * cut_node as i32;
-        let noisy_malus = (175 * depth).min(1252) - 58 - 16 * noisy_moves.len() as i32;
-
-        // At non-PV nodes, scale the bonus up by how many other moves were
-        // searched before this one proved best (as in Stockfish).
-        let quiet_bonus = (184 * depth).min(1742) - 72 - 42 * cut_node as i32
-            + (18 * (move_count as i32 - 1)).min(180) * !NODE::PV as i32;
-        let quiet_malus = (171 * depth).min(1099) - 46 - 31 * quiet_moves.len() as i32;
-
-        let cont_bonus = (97 * depth).min(1098) - 74 - 48 * cut_node as i32;
-        let cont_malus = (414 * depth).min(949) - 49 - 17 * quiet_moves.len() as i32;
-
-        if best_move.is_noisy() {
-            td.noisy_history.update(
-                td.board.all_threats(),
-                td.board.moved_piece(best_move),
-                best_move.to(),
-                td.board.type_on(best_move.capture_sq()),
-                noisy_bonus,
-            );
-        } else {
-            td.quiet_history.update(td.board.all_threats(), stm, best_move, quiet_bonus);
-            td.corrhist().pawn_history.update(
-                td.board.pawn_key(),
-                td.board.moved_piece(best_move),
-                best_move.to(),
-                quiet_bonus,
-            );
-            update_continuation_histories_in_check(
-                td,
+        update_best_move_histories::<NODE>(
+            td,
+            HistoryUpdate {
                 ply,
-                td.board.moved_piece(best_move),
-                best_move.to(),
-                cont_bonus,
+                depth,
+                beta,
+                best_move,
+                best_score,
+                tt_move,
+                stm,
+                cut_node,
                 in_check,
-            );
-
-            if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
-                td.low_ply_history.update(ply as usize, best_move, quiet_bonus);
-            }
-
-            for (i, &mv) in quiet_moves.iter().enumerate() {
-                let denom = 1024 + 45 * i as i32;
-                let scale = 1024_i32 * 1024 / (denom * denom / 1024);
-                td.quiet_history.update(td.board.all_threats(), stm, mv, -quiet_malus * scale / 1024);
-
-                if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
-                    td.low_ply_history.update(ply as usize, mv, -quiet_malus * scale / 1024);
-                }
-                td.corrhist().pawn_history.update(
-                    td.board.pawn_key(),
-                    td.board.moved_piece(mv),
-                    mv.to(),
-                    -quiet_malus * scale / 1024,
-                );
-                update_continuation_histories_in_check(
-                    td,
-                    ply,
-                    td.board.moved_piece(mv),
-                    mv.to(),
-                    -cont_malus * scale / 1024,
-                    in_check,
-                );
-            }
-        }
-
-        for &mv in noisy_moves.iter() {
-            let captured_type = td.board.type_on(mv.capture_sq());
-            td.noisy_history.update(
-                td.board.all_threats(),
-                td.board.moved_piece(mv),
-                mv.to(),
-                captured_type,
-                -noisy_malus,
-            );
-        }
-
-        // Track how often the TT move turns out to be the best move; feeds back
-        // into the singular double-extension margin (as in Stockfish).
-        if !NODE::PV && tt_move.is_present() {
-            update_tt_move_history(
-                td,
-                if best_move == tt_move { p::tt_move_history_best() } else { p::tt_move_history_not_best() },
-            );
-        }
-
-        if !NODE::ROOT && td.stack[ply - 1].mv.is_quiet() && td.stack[ply - 1].move_count < 2 {
-            let malus = (93 * depth - 52).min(935);
-            update_continuation_histories(td, ply - 1, td.stack[ply - 1].piece, td.stack[ply - 1].mv.to(), -malus);
-        }
-
-        if current_search_count > 1 && best_move.is_quiet() && best_score >= beta {
-            let bonus = (233 * depth - 86).min(1550);
-            update_continuation_histories_in_check(td, ply, td.stack[ply].piece, best_move.to(), bonus, in_check);
-        }
+                move_count,
+                current_search_count,
+            },
+            &quiet_moves,
+            &noisy_moves,
+        );
     }
 
     if !NODE::ROOT && bound == Bound::Upper && (cut_node || NODE::PV) {
-        let prior_move = td.stack[ply - 1].mv;
-        if prior_move.is_quiet() {
-            let factor = 88
-                + (17 * td.stack[ply - 1].move_count as i32).min(229)
-                + 110 * (prior_move == td.stack[ply - 1].tt_move) as i32
-                + 144 * (!in_check && best_score <= eval - 97) as i32
-                + 306 * (is_valid(td.stack[ply - 1].eval) && best_score <= -td.stack[ply - 1].eval - 136) as i32;
-
-            let scaled_bonus = factor * (180 * depth - 37).min(2414) / 128;
-
-            td.quiet_history.update(td.board.prior_threats(), !stm, prior_move, scaled_bonus);
-
-            let entry = &td.stack[ply - 2];
-            if entry.mv.is_present() {
-                let bonus = (152 * depth - 47).min(1379);
-                td.continuation_history.update(
-                    entry.conthist,
-                    td.stack[ply - 1].piece,
-                    prior_move.to(),
-                    bonus,
-                );
-            }
-        } else if prior_move.is_noisy() {
-            let captured_type = td.board.captured_piece().piece_type();
-            let bonus = (50 * depth).min(654);
-
-            td.noisy_history.update(
-                td.board.prior_threats(),
-                td.board.piece_on(prior_move.to()),
-                prior_move.to(),
-                captured_type,
-                bonus,
-            );
-        }
+        update_prior_move_histories(td, ply, depth, eval, best_score, stm, in_check);
     }
 
     tt_pv |= !NODE::ROOT && bound == Bound::Upper && move_count > 2 && td.stack[ply - 1].tt_pv;
@@ -1549,7 +1472,12 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut move_count = 0;
     let mut move_picker = MovePicker::new(Move::NULL, None);
 
-    let skip_quiets = !in_check || !is_loss(best_score);
+    // Quiets are only generated to serve as check evasions. The old spelling
+    // was `!in_check || !is_loss(best_score)`, but on the in-check path
+    // best_score is still -Score::INFINITE here (it is seeded that way above,
+    // and neither the stand-pat cutoff nor the alpha raise can move it), so
+    // the second term was always false and the whole expression was `!in_check`.
+    let skip_quiets = !in_check;
 
     while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets, ply) {
         move_count += 1;
@@ -1647,6 +1575,202 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     debug_assert!(-Score::INFINITE < best_score && best_score < Score::INFINITE);
 
     best_score
+}
+
+/// Records a root move's search result: the nodes it consumed, the score and
+/// bound UCI reporting will quote for it, and its principal variation.
+///
+/// A move that neither led the list nor beat alpha is marked `-INFINITE` so it
+/// sorts to the back without being confused for a real evaluation.
+fn update_root_move(
+    td: &mut ThreadData, mv: Move, score: i32, alpha: i32, beta: i32, move_count: u16, initial_nodes: u64,
+) {
+    let current_nodes = td.nodes();
+    let root_move = td.root_moves.iter_mut().find(|v| v.mv == mv).unwrap();
+
+    root_move.nodes += current_nodes - initial_nodes;
+
+    if !(move_count == 1 || score > alpha) {
+        root_move.score = -Score::INFINITE;
+        return;
+    }
+
+    root_move.upperbound = false;
+    root_move.lowerbound = false;
+
+    match score {
+        v if v <= alpha => {
+            root_move.display_score = alpha;
+            root_move.upperbound = true;
+        }
+        v if v >= beta => {
+            root_move.display_score = beta;
+            root_move.lowerbound = true;
+        }
+        _ => {
+            root_move.display_score = score;
+        }
+    }
+
+    root_move.score = score;
+    root_move.sel_depth = td.sel_depth;
+    root_move.pv.commit_full_root_pv(&td.pv_table, 1);
+
+    if move_count > 1 && td.pv_index == 0 {
+        td.best_move_changes += 1;
+    }
+}
+
+/// The node context the post-search history updates need. Bundled purely to
+/// keep the two update helpers from taking a dozen positional arguments.
+#[derive(Copy, Clone)]
+struct HistoryUpdate {
+    ply: isize,
+    depth: i32,
+    beta: i32,
+    best_move: Move,
+    best_score: i32,
+    tt_move: Move,
+    stm: Color,
+    cut_node: bool,
+    in_check: bool,
+    move_count: u16,
+    current_search_count: i32,
+}
+
+/// Credits the move that proved best at this node across every history table,
+/// and debits the moves that were searched ahead of it.
+fn update_best_move_histories<NODE: NodeType>(
+    td: &mut ThreadData, ctx: HistoryUpdate, quiet_moves: &ArrayVec<Move, 32>, noisy_moves: &ArrayVec<Move, 32>,
+) {
+    let HistoryUpdate { ply, depth, best_move, stm, cut_node, in_check, move_count, .. } = ctx;
+
+    let noisy_bonus = (96 * depth).min(885) - 43 - 87 * cut_node as i32;
+    let noisy_malus = (175 * depth).min(1252) - 58 - 16 * noisy_moves.len() as i32;
+
+    // At non-PV nodes, scale the bonus up by how many other moves were
+    // searched before this one proved best (as in Stockfish).
+    let quiet_bonus = (184 * depth).min(1742) - 72 - 42 * cut_node as i32
+        + (18 * (move_count as i32 - 1)).min(180) * !NODE::PV as i32;
+    let quiet_malus = (171 * depth).min(1099) - 46 - 31 * quiet_moves.len() as i32;
+
+    let cont_bonus = (97 * depth).min(1098) - 74 - 48 * cut_node as i32;
+    let cont_malus = (414 * depth).min(949) - 49 - 17 * quiet_moves.len() as i32;
+
+    if best_move.is_noisy() {
+        td.noisy_history.update(
+            td.board.all_threats(),
+            td.board.moved_piece(best_move),
+            best_move.to(),
+            td.board.type_on(best_move.capture_sq()),
+            noisy_bonus,
+        );
+    } else {
+        td.quiet_history.update(td.board.all_threats(), stm, best_move, quiet_bonus);
+        td.corrhist().pawn_history.update(
+            td.board.pawn_key(),
+            td.board.moved_piece(best_move),
+            best_move.to(),
+            quiet_bonus,
+        );
+        update_continuation_histories_in_check(
+            td,
+            ply,
+            td.board.moved_piece(best_move),
+            best_move.to(),
+            cont_bonus,
+            in_check,
+        );
+
+        if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
+            td.low_ply_history.update(ply as usize, best_move, quiet_bonus);
+        }
+
+        for (i, &mv) in quiet_moves.iter().enumerate() {
+            let denom = 1024 + 45 * i as i32;
+            let scale = 1024_i32 * 1024 / (denom * denom / 1024);
+            td.quiet_history.update(td.board.all_threats(), stm, mv, -quiet_malus * scale / 1024);
+
+            if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
+                td.low_ply_history.update(ply as usize, mv, -quiet_malus * scale / 1024);
+            }
+            td.corrhist().pawn_history.update(
+                td.board.pawn_key(),
+                td.board.moved_piece(mv),
+                mv.to(),
+                -quiet_malus * scale / 1024,
+            );
+            update_continuation_histories_in_check(
+                td,
+                ply,
+                td.board.moved_piece(mv),
+                mv.to(),
+                -cont_malus * scale / 1024,
+                in_check,
+            );
+        }
+    }
+
+    for &mv in noisy_moves.iter() {
+        let captured_type = td.board.type_on(mv.capture_sq());
+        td.noisy_history.update(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), captured_type, -noisy_malus);
+    }
+
+    // Track how often the TT move turns out to be the best move; feeds back
+    // into the singular double-extension margin (as in Stockfish).
+    if !NODE::PV && ctx.tt_move.is_present() {
+        update_tt_move_history(
+            td,
+            if best_move == ctx.tt_move { p::tt_move_history_best() } else { p::tt_move_history_not_best() },
+        );
+    }
+
+    if !NODE::ROOT && td.stack[ply - 1].mv.is_quiet() && td.stack[ply - 1].move_count < 2 {
+        let malus = (93 * depth - 52).min(935);
+        update_continuation_histories(td, ply - 1, td.stack[ply - 1].piece, td.stack[ply - 1].mv.to(), -malus);
+    }
+
+    if ctx.current_search_count > 1 && best_move.is_quiet() && ctx.best_score >= ctx.beta {
+        let bonus = (233 * depth - 86).min(1550);
+        update_continuation_histories_in_check(td, ply, td.stack[ply].piece, best_move.to(), bonus, in_check);
+    }
+}
+
+/// Rewards the opponent's previous move when this node failed low: whatever it
+/// was, it kept us from raising alpha here.
+fn update_prior_move_histories(
+    td: &mut ThreadData, ply: isize, depth: i32, eval: i32, best_score: i32, stm: Color, in_check: bool,
+) {
+    let prior_move = td.stack[ply - 1].mv;
+
+    if prior_move.is_quiet() {
+        let factor = 88
+            + (17 * td.stack[ply - 1].move_count as i32).min(229)
+            + 110 * (prior_move == td.stack[ply - 1].tt_move) as i32
+            + 144 * (!in_check && best_score <= eval - 97) as i32
+            + 306 * (is_valid(td.stack[ply - 1].eval) && best_score <= -td.stack[ply - 1].eval - 136) as i32;
+
+        let scaled_bonus = factor * (180 * depth - 37).min(2414) / 128;
+
+        td.quiet_history.update(td.board.prior_threats(), !stm, prior_move, scaled_bonus);
+
+        let entry = &td.stack[ply - 2];
+        if entry.mv.is_present() {
+            let bonus = (152 * depth - 47).min(1379);
+            td.continuation_history.update(entry.conthist, td.stack[ply - 1].piece, prior_move.to(), bonus);
+        }
+    } else if prior_move.is_noisy() {
+        let captured_type = td.board.captured_piece().piece_type();
+        let bonus = (50 * depth).min(654);
+
+        td.noisy_history.update(
+            td.board.prior_threats(),
+            td.board.piece_on(prior_move.to()),
+            prior_move.to(),
+            captured_type,
+            bonus,
+        );
+    }
 }
 
 fn eval_correction(td: &ThreadData, ply: isize) -> i32 {

@@ -78,7 +78,12 @@ impl Index<isize> for Stack {
     type Output = StackEntry;
 
     fn index(&self, index: isize) -> &Self::Output {
-        debug_assert!(index + 8 >= 0 && index < MAX_PLY as isize + 16);
+        // The assertion must bound the *shifted* index, which is what actually
+        // indexes `data`. Bounding the raw `index` against the array length
+        // instead left the top 8 slots of the permitted range past the end of
+        // `data` -- so the one guard backing this `get_unchecked` did not
+        // actually cover it. Matches the (already correct) `PlyArray` form.
+        debug_assert!(index + 8 >= 0 && ((index + 8) as usize) < MAX_PLY + 16);
         // SAFETY: the debug_assert above proves the index is in bounds.
         unsafe { self.data.get_unchecked((index + 8) as usize) }
     }
@@ -86,7 +91,7 @@ impl Index<isize> for Stack {
 
 impl IndexMut<isize> for Stack {
     fn index_mut(&mut self, index: isize) -> &mut Self::Output {
-        debug_assert!(index + 8 >= 0 && index < MAX_PLY as isize + 16);
+        debug_assert!(index + 8 >= 0 && ((index + 8) as usize) < MAX_PLY + 16);
         // SAFETY: see Index::index above.
         unsafe { self.data.get_unchecked_mut((index + 8) as usize) }
     }

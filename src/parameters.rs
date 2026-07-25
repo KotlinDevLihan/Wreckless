@@ -94,13 +94,21 @@ define! {
     i32 nmp_r_tt_history: 250;
 
     // ProbCut
-    // Speculative, low-confidence: a TT-only cutoff trusts a cached score
-    // with no fresh verification search at all, unlike regular ProbCut
-    // (probcut_base: 254, which still runs a live qsearch plus a reduced
-    // search before trusting its result). Pulled back from an earlier guess
-    // of 600 (~2.4x probcut_base) to a smaller increase over the original
-    // ~1.77x ratio -- still a directional guess, not a derived fix.
-    i32 probcut_tt_margin: 520;
+    // Matches Stockfish's actual live value (`probCutBeta = beta + 428`) for
+    // this exact mechanism. The guard around it in `search()` is a verbatim
+    // copy of Stockfish's "small ProbCut idea" -- same lower-bound/depth-4/
+    // not-decisive conditions, same raw-centipawn margin added to beta, same
+    // bare `return probCutBeta` -- so upstream's tuned constant transfers
+    // directly, with none of the rescaling that blocks the comparison for the
+    // /1024- and /128-normalised margins elsewhere in this file.
+    //
+    // Replaces 520, which the note here previously described as "a directional
+    // guess, not a derived fix" (itself walked back from an earlier 600). Same
+    // reasoning that already settled tt_move_history_* and qs_delta_margin:
+    // prefer the value upstream actually measured over this fork's estimate of
+    // it. Still wants an SPRT like any other change, but it is no longer a
+    // number nobody has tested.
+    i32 probcut_tt_margin: 428;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
     i32 probcut_score_div: 319;

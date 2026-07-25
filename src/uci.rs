@@ -123,10 +123,14 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
             let mut message = String::new();
 
             if std::io::stdin().read_line(&mut message).unwrap() == 0 {
-                // EOF received
-                if shared.status.get() != Status::RUNNING {
-                    let _ = tx.send("quit".to_string());
-                }
+                // EOF: no further command can ever arrive, so queue the quit and
+                // stop reading. Previously the "quit" was only sent when a search
+                // was *not* running, and the loop kept going either way -- with
+                // stdin at EOF, read_line returns 0 immediately every time, so
+                // closing the pipe mid-search spun a full core against the search
+                // itself until the search happened to finish.
+                let _ = tx.send("quit".to_string());
+                break;
             }
 
             match message.trim_end() {
@@ -322,6 +326,11 @@ fn position(board: &mut Board, settings: &Settings, mut tokens: &[&str]) {
         match tokens {
             ["startpos", rest @ ..] => {
                 *board = Board::starting_position();
+                // Applied here too, not just in the `fen` branch: without it a
+                // Chess960 game reaching the board via `position startpos`
+                // emits castling moves in standard notation rather than the
+                // king-takes-rook notation UCI_Chess960 requires.
+                board.set_frc(settings.frc);
                 tokens = rest;
             }
             ["fen", rest @ ..] => {
@@ -362,16 +371,25 @@ fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<Sh
             println!("info string Hash cleared");
         }
         ["name", "Hash", "value", v] => {
-            shared.tt.resize(threads.len(), v.parse().unwrap());
-            println!("info string set Hash to {v} MB");
+            // Must be clamped, not just parsed: a 0 MB table has zero clusters,
+            // and every probe would index into a zero-length (on Windows, null)
+            // allocation.
+            if let Some(megabytes) = parse_spin("Hash", v, 1, 262_144) {
+                shared.tt.resize(threads.len(), megabytes);
+                println!("info string set Hash to {megabytes} MB");
+            }
         }
         ["name", "Threads", "value", v] => {
-            threads.set_count(v.parse().unwrap_or(1));
-            println!("info string set Threads to {}", threads.len());
+            if let Some(count) = parse_spin("Threads", v, 1, ThreadPool::available_threads()) {
+                threads.set_count(count);
+                println!("info string set Threads to {}", threads.len());
+            }
         }
         ["name", "MoveOverhead", "value", v] => {
-            settings.move_overhead = v.parse().unwrap();
-            println!("info string set MoveOverhead to {v} ms");
+            if let Some(overhead) = parse_spin("MoveOverhead", v, 0, 2000) {
+                settings.move_overhead = overhead;
+                println!("info string set MoveOverhead to {overhead} ms");
+            }
         }
         #[cfg(feature = "syzygy")]
         ["name", "SyzygyPath", "value", v] => match crate::tb::initialize(v) {
@@ -380,13 +398,17 @@ fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<Sh
         },
         #[cfg(feature = "syzygy")]
         ["name", "SyzygyProbeDepth", "value", v] => {
-            shared.syzygy_probe_depth.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed);
-            println!("info string set SyzygyProbeDepth to {v}");
+            if let Some(depth) = parse_spin("SyzygyProbeDepth", v, 1, 100) {
+                shared.syzygy_probe_depth.store(depth, std::sync::atomic::Ordering::Relaxed);
+                println!("info string set SyzygyProbeDepth to {depth}");
+            }
         }
         #[cfg(feature = "syzygy")]
         ["name", "SyzygyProbeLimit", "value", v] => {
-            shared.syzygy_probe_limit.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed);
-            println!("info string set SyzygyProbeLimit to {v}");
+            if let Some(limit) = parse_spin("SyzygyProbeLimit", v, 0, 7) {
+                shared.syzygy_probe_limit.store(limit, std::sync::atomic::Ordering::Relaxed);
+                println!("info string set SyzygyProbeLimit to {limit}");
+            }
         }
         ["name", "UCI_Chess960", "value", v] => {
             settings.frc = v.parse().unwrap_or_default();
@@ -400,8 +422,15 @@ fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<Sh
             // The GUI only announces that it may send `go ponder`; nothing to configure.
         }
         ["name", "MultiPV", "value", v] => {
-            settings.multi_pv = v.parse().unwrap_or_default();
-            println!("info string set MultiPV to {v}");
+            // unwrap_or_default() here meant any unparseable value (or a literal
+            // "0") silently set MultiPV to 0, which makes the root loop
+            // `for index in 0..td.multi_pv` search nothing at all -- iterative
+            // deepening would spin through every depth instantly and the engine
+            // would answer with an unsearched, effectively random root move.
+            if let Some(count) = parse_spin("MultiPV", v, 1, MAX_MOVES) {
+                settings.multi_pv = count;
+                println!("info string set MultiPV to {count}");
+            }
         }
         #[cfg(feature = "spsa")]
         ["name", name, "value", v] => {
@@ -409,6 +438,23 @@ fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<Sh
             println!("info string set {name} to {v}");
         }
         _ => eprintln!("Unknown option: '{}'", tokens.join(" ").trim_end()),
+    }
+}
+
+/// Parses a `spin` option value and clamps it to the range advertised in the
+/// `uci` handshake, reporting (rather than panicking on) a malformed value.
+/// A GUI sending a value the engine never offered should not be able to take
+/// the process down in the middle of a game.
+fn parse_spin<T>(name: &str, value: &str, min: T, max: T) -> Option<T>
+where
+    T: std::str::FromStr + Ord,
+{
+    match value.parse::<T>() {
+        Ok(parsed) => Some(parsed.clamp(min, max)),
+        Err(_) => {
+            eprintln!("Invalid value for option '{name}': '{value}'");
+            None
+        }
     }
 }
 
@@ -495,7 +541,12 @@ fn parse_limits(color: Color, tokens: &[&str]) -> Limits {
                 "btime" if Color::Black == color => main = Some(value),
                 "winc" if Color::White == color => inc = Some(value),
                 "binc" if Color::Black == color => inc = Some(value),
-                "movestogo" => moves = Some(value),
+                // `movestogo 0` is sent by some GUIs to mean "sudden death".
+                // Taken literally it divides the remaining clock by zero in
+                // TimeManager (Limits::Cyclic), producing an infinite per-move
+                // allocation that collapses to "spend the entire clock on this
+                // move". Treat it as the absence of a move counter instead.
+                "movestogo" if value > 0 => moves = Some(value),
 
                 _ => continue,
             }

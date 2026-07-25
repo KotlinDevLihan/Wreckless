@@ -12,6 +12,19 @@ pub enum ParseFenError {
     InvalidPieceType,
     /// The FEN string contains an invalid active color.
     InvalidActiveColor,
+    /// The placement data addresses a square outside the board (too many
+    /// ranks, or a rank whose contents overflow eight files).
+    PlacementOutOfBounds,
+    /// The placement data does not describe exactly one king per side.
+    ///
+    /// The rest of the engine treats a king as a given: `king_square()` is
+    /// `(colors & kings).lsb()`, which yields `Square::None` (64) for an empty
+    /// board, and `Square::shift` on that immediately builds an out-of-range
+    /// `Square`. Since `Square::new` is a `transmute` into a `#[repr(u8)]`
+    /// enum guarded only by a `debug_assert`, that is undefined behaviour in a
+    /// release build. Rejecting the position here is what keeps every
+    /// downstream `king_square()` caller sound.
+    MissingKing,
 }
 
 impl Board {
@@ -27,21 +40,44 @@ impl Board {
 
         let rows = parts.next().ok_or(ParseFenError::MissingPlacementData)?.split('/');
 
+        // Leniency here stops at the point where it would be unsound: every
+        // square handed to `Square::from_rank_file` must be on the board,
+        // because `Square::new` transmutes into a `#[repr(u8)]` enum and only
+        // `debug_assert`s the range. Without these checks a placement field
+        // with a ninth rank, or one whose digits and pieces run past the h
+        // file, produced an invalid discriminant in release builds.
         for (rank, row) in rows.rev().enumerate() {
-            let mut file = 0;
+            if rank >= 8 {
+                return Err(ParseFenError::PlacementOutOfBounds);
+            }
+
+            let mut file: u8 = 0;
 
             for symbol in row.chars() {
                 if let Some(skip) = symbol.to_digit(10) {
-                    file += skip as u8;
+                    file = file.saturating_add(skip as u8);
                     continue;
                 }
 
                 let piece = symbol.try_into().map_err(|()| ParseFenError::InvalidPieceType)?;
+
+                if file >= 8 {
+                    return Err(ParseFenError::PlacementOutOfBounds);
+                }
+
                 let square = Square::from_rank_file(rank as u8, file);
 
                 board.add_piece(piece, square);
                 board.state.material += piece.value();
                 file += 1;
+            }
+        }
+
+        // Checked before `set_castling`, which is the first thing to call
+        // `king_square()` and would otherwise shift `Square::None` out of range.
+        for color in [Color::White, Color::Black] {
+            if board.colored_pieces(color, PieceType::King).popcount() != 1 {
+                return Err(ParseFenError::MissingKing);
             }
         }
 

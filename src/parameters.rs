@@ -44,15 +44,16 @@ define! {
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
-    // Speculative, low-confidence: both rfp_worsening and rfp_no_threats are
-    // flat boolean-gated subtractions in the same margin, so they're directly
-    // comparable (unlike rfp_corr, which is continuously scaled). Opponent-
-    // worsening is arguably the more information-rich signal of the two.
-    // Split evenly between the original 20 and full parity with
-    // rfp_no_threats (54), rather than favoring the (equally unproven)
-    // pullback toward the original. rfp_no_threats reverted to its original
-    // value -- no real evidence it needed changing.
-    i32 rfp_worsening: 46;
+    // Restored to 20, the value carried by 0.1.2 (`4135b69`). It had been
+    // raised to 46 by "splitting evenly" toward parity with rfp_no_threats --
+    // an admittedly speculative move with nothing measured behind it.
+    //
+    // 20 also happens to be what upstream works out to. Stockfish folds this
+    // signal in as `335 * opponentWorsening * futilityMult / 1024`, and with
+    // `futilityMult = min(45 + 4 * depth, 85)` that is ~21cp at mid depths and
+    // ~28cp at high ones. So 20 sits right on upstream's effective value and 46
+    // is roughly double it.
+    i32 rfp_worsening: 20;
     i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
 
@@ -128,8 +129,10 @@ define! {
     // (quad+lin+base), and an initial guess of 15 was only ~2.5% of that --
     // far weaker proportionally than lmr_cutoff/fds_cutoff are relative to
     // their own base terms (~80%). Raised to a still-modest but more
-    // meaningful fraction.
-    i32 see_q_cutoff: 60;
+    // meaningful fraction. Trimmed from 60 back toward the middle of that
+    // range on review, to keep quiet SEE pruning a little less eager at nodes
+    // whose children have been producing cutoffs; untested either way.
+    i32 see_q_cutoff: 48;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
@@ -145,7 +148,10 @@ define! {
     // move_count >= 2), never as a continuous scaling factor. Starting
     // magnitude mirrors lmr_ilog's own role as a log2-scaled base term;
     // genuinely untested and needs SPSA/SPRT before trusting the value.
-    i32 lmr_movecount_ilog: 220;
+    // Nudged up on review to let move count carry a little more of the
+    // reduction; still untested, and now actually reachable by SPSA (this
+    // parameter was missing from spsa.config entirely until recently).
+    i32 lmr_movecount_ilog: 240;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     i32 lmr_exact: 1412;
@@ -156,12 +162,26 @@ define! {
     i32 lmr_quiet_alpha: 418;
     // At 437, a queen capture (value 1242) alone contributed ~8483 to the
     // noisy `history` term feeding lmr_noisy_hist/1024 -- larger than
-    // lmr_noisy_base (1426) and comparable to NoisyHistory::MAX_HISTORY
-    // (12800), the clamp on the entire learned capture-history signal.
-    // Rescaled so a queen capture contributes ~600 (comparable to
-    // lmr_noisy_base), a supplementary nudge rather than a term that
-    // swamps the actual learned noisy-history signal it's meant to add to.
-    i32 lmr_capture_stat: 31;
+    // Restored to 437, the value carried by 0.1.2 (`4135b69`).
+    //
+    // It had been cut to ~31-36 on the reasoning that a queen capture
+    // contributing ~8483 "swamps" the learned noisy-history signal, since that
+    // dwarfs lmr_noisy_base (1426). That reasoning was wrong: dominating the
+    // capture statScore is exactly what the piece-value term is *for*
+    // upstream. Stockfish computes
+    //
+    //     ss->statScore = 873 * PieceValue[captured] / 128 + captureHistory[..]
+    //
+    // i.e. 6.82 x the captured piece's value. This engine computes
+    // `lmr_capture_stat * value / 64`, so 437 gives 6.83 x value -- upstream's
+    // coefficient to within 0.2%. 36 gives 0.56 x, twelve times too small, and
+    // the term stops doing its job. The consumer scaling matches too:
+    // Stockfish applies `r -= statScore * 439 / 4096` (~0.107) against this
+    // engine's `lmr_noisy_hist / 1024` (~0.127).
+    //
+    // In short, 437 was already correctly matched to upstream and the rescale
+    // broke it.
+    i32 lmr_capture_stat: 437;
     i32 lmr_noisy_base: 1426;
     i32 lmr_noisy_hist: 130;
     i32 lmr_pv_base: 519;
@@ -183,8 +203,10 @@ define! {
     i32 fds_ilog: 207;
     // Same missing move-count scaling as lmr_movecount_ilog above, same
     // caveat: untested starting value, scaled down from lmr_movecount_ilog
-    // by roughly the same ratio fds_ilog sits below lmr_ilog.
-    i32 fds_movecount_ilog: 170;
+    // by roughly the same ratio fds_ilog sits below lmr_ilog. Nudged up on
+    // review alongside lmr_movecount_ilog, preserving that ratio; likewise
+    // still untested and likewise only recently reachable by SPSA.
+    i32 fds_movecount_ilog: 185;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;
@@ -230,12 +252,46 @@ define! {
     i32 tt_move_history_not_best: -747;
 
     i32 corr_bonus_scale: 148;
-    i32 corr_bonus_min: 2496;
+    // Restored to 4678, the value carried by 0.1.2 (`4135b69`), where it is the
+    // clamp inherited from upstream Reckless rather than anything this fork
+    // chose. It had been pulled down to 2496 purely to make the pair symmetric,
+    // on the argument that every other history table in this codebase clamps
+    // symmetrically -- an a priori consistency claim with no test behind it,
+    // against a number that upstream had presumably tuned.
+    //
+    // Worth an isolated SPRT rather than treating as settled: Stockfish does
+    // clamp its own correction bonus symmetrically, so the symmetry argument
+    // is not baseless. But the asymmetric pair is the one with a measured
+    // result attached to it, and that outranks the tidier-looking one.
+    i32 corr_bonus_min: 4678;
     i32 corr_bonus_max: 2496;
-    i32 corr_weight_div: 102;      
-    i32 corr_minor_major: 128;     
+    // NOTE: these two are coupled. `eval_correction()` sums 5 upstream terms
+    // plus a minor/major/material group weighted by `corr_minor_major / 128`,
+    // so the normalizing divisor that keeps the blend on upstream's scale is
+    // `upstream_div * (5 + 3 * corr_minor_major / 128) / 5`. At
+    // corr_minor_major = 128 that is 8 effective terms and gives 102.
+    //
+    // Keep them coupled. Setting the divisor below that figure divides the
+    // blend by less than it sums, scaling every correction value up -- the
+    // same direction as the original normalization bug documented in the
+    // README, which silently inflated every RFP/FP/LMR/NMP margin that reads
+    // `eval_correction()`, since those margins all scale with
+    // `correction_value.abs()`. A 96 was tried here and reverted for exactly
+    // that reason: it is indistinguishable from the bug the fork already paid
+    // for once. If `corr_minor_major` changes, recompute this rather than
+    // nudging it by hand.
+    i32 corr_weight_div: 102;
+    i32 corr_minor_major: 128;
 
     // Continuation history
+    //
+    // Restored to 70000, the value carried by 0.1.2 (`4135b69`). It had been
+    // moved to 65536 on the claim that a power-of-two divisor is faster, which
+    // is not true here: `conthist_div` is a compile-time constant, so LLVM
+    // lowers the division to a multiply-and-shift at any value, and a signed
+    // power-of-two divide still needs a sign-correction rather than a bare
+    // shift. The change bought no speed and silently scaled every
+    // continuation-history bonus up by ~6.9%.
     i32 conthist_div: 70000;
     // Per-lag weights, previously hardcoded consts with no SPSA exposure at
     // all. Defaults unchanged (lags 1/2/4/6 at the original 700, lags 3/5 at
@@ -263,13 +319,18 @@ define! {
     i32 good_quiet_threshold: -14000;
 
     // Qsearch SEE pruning threshold -- previously hardcoded consts with no
-    // SPSA exposure at all. Defaults unchanged; exposed so SPSA can actually
-    // re-check qs_see_corr_cap now that corr_weight_div/corr_minor_major
-    // have shifted what typical correction_value magnitudes look like since
-    // this cap was last (informally) calibrated.
+    // SPSA exposure at all, exposed so SPSA can re-check qs_see_corr_cap now
+    // that corr_weight_div/corr_minor_major have shifted what typical
+    // correction_value magnitudes look like.
+    //
+    // The exposure was documented as "defaults unchanged", but two of the
+    // three had in fact moved: 0.1.2 (`4135b69`) computes the threshold as
+    // `(alpha - eval) / 8 - corr.abs().min(68) - 74`, against 75 and 70 here.
+    // Both restored to the 0.1.2 values, so this really is a pure exposure of
+    // the previous constants and nothing rides on it silently.
     i32 qs_see_div: 8;
-    i32 qs_see_corr_cap: 75;
-    i32 qs_see_base: 70;
+    i32 qs_see_corr_cap: 68;
+    i32 qs_see_base: 74;
 
     // Delta pruning margin: a standard qsearch technique (skip a capture
     // that can't plausibly reach alpha even crediting the full captured

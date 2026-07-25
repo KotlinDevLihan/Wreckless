@@ -144,11 +144,15 @@ if you're deciding whether to trust a "pending" item.
   persistent Elo losses that were, for a long time, mistakenly attributed to the qsearch-checks
   batch below. Fixed by folding material into the existing `corr_minor_major` weight
 - Untuned since: `corr_minor_major` and `corr_weight_div` have never had a real SPSA run against
-  this specific 8-term blend, so their current values (80 and 88) are a reasoned guess — the
-  minor/major/material group is treated as an unproven addition and damped to ~63% weight
-  (`corr_minor_major: 80`) rather than trusted equally with the terms upstream actually tuned, and
-  the divisor is rescaled by that group's *effective* contribution (~6.9 effective terms) rather
-  than its raw table count
+  this specific 8-term blend, so their current values (128 and 102) are a reasoned choice rather
+  than a measured one. The minor/major/material group carries full weight
+  (`corr_minor_major: 128`), which makes the blend 5 + 3 = 8 effective terms, so the divisor that
+  keeps it on upstream's scale is `upstream_div * (5 + 3 * corr_minor_major / 128) / 5` = 102.
+  **Keep the two coupled.** A divisor below that figure divides the blend by less than it sums and
+  inflates every RFP/FP/LMR/NMP margin that reads `eval_correction()` — the same failure as the
+  original normalization bug described above. A value of 96 was tried and reverted for precisely
+  that reason; it is indistinguishable from a bug this fork has already paid for once. If
+  `corr_minor_major` changes, recompute the divisor rather than nudging it
 - `corr_bonus_min`/`corr_bonus_max` (the update clamp shared by every correction table) were
   asymmetric (4678 / 2496) despite every other history table in the codebase clamping
   symmetrically — letting negative corrections swing ~2x larger than positive ones, a systematic
@@ -186,7 +190,7 @@ if you're deciding whether to trust a "pending" item.
   matching the exemption LMP/FP/HP already had — a static-exchange estimate can't see a check's
   follow-up tactical value, so it shouldn't prune one for looking like a bad trade
 - SEE pruning threshold now also responds to `cutoff_count` (`see_q_cutoff`/`see_n_cutoff`),
-  extending the same signal already used by `lmr_cutoff`/`fds_cutoff`/`razor_cutoff`
+  extending the same signal already used by `lmr_cutoff`/`fds_cutoff`
 - Qsearch delta pruning: a capture that can't plausibly reach alpha even crediting the full
   captured-piece value is skipped before the pricier SEE call (`qs_delta_margin`) — a standard
   technique, not previously present here
@@ -194,11 +198,6 @@ if you're deciding whether to trust a "pending" item.
   doesn't lose material itself, gets a full extra ply — compensates for the horizon effect at the
   end of a forced capture sequence. A different technique from the check extension tried and
   removed earlier (gated on square repetition and SEE, not on giving check)
-- Razoring margin widens with correction-history magnitude (`razor_corr`), matching the same
-  uncertainty-scaled-margin pattern already used by RFP, FP, and LMR/FDS — razoring was the one
-  early-pruning decision that read `correction_value` nowhere
-- Razoring margin also responds to opponent-worsening (`razor_worsening`), extending the same
-  signal RFP already uses
 - History Pruning now exempts quiet moves that give check, matching the exemption LMP and FP
   already had — HP was the one sibling pruning check that could discard a checking move on history
   alone
@@ -214,9 +213,6 @@ if you're deciding whether to trust a "pending" item.
 - RFP skipped when the TT move is quiet with strongly negative history
 - Correction history updated on confirmed null-move fail-highs
 - Far-from-root singular-extension margin damping
-- Null-move reduction depth also responds to `ttMoveHistory` (`nmp_r_tt_history`), on the theory
-  that a well-trusted TT move correlates with a more settled position — a plausible connection,
-  not a derived one, lower confidence than the fixes above
 - Pre-qsearch TT-move extension at PV nodes, gated by TT depth, that never overrides a negative
   (singular) extension decision
 
@@ -307,9 +303,13 @@ results against new ones.
 - **`searchmoves`** — root move filtering on the `go` command
 - **`UCI_ShowWDL`** — win/draw/loss estimates in `info` lines
 - **`SyzygyProbeDepth` / `SyzygyProbeLimit`** — user-tunable tablebase engagement
-- **SPSA tunables** — 124 search constants exposed as UCI options under the `spsa` cargo feature,
+- **SPSA tunables** — 122 search constants exposed as UCI options under the `spsa` cargo feature,
   for OpenBench SPSA tuning; identical compiled code in default (non-`spsa`) builds. A ready-to-use
-  OpenBench SPSA input file is provided in [`spsa.config`](spsa.config)
+  OpenBench SPSA input file is provided in [`spsa.config`](spsa.config). It is derived
+  mechanically from the defaults in `src/parameters.rs` (min/max at ±50%, step at 5% of the
+  magnitude, learning rate 0.002) and must be regenerated whenever a default changes or a parameter
+  is added or removed — it had previously drifted, leaving two parameters absent from it entirely
+  and one default outside the range the file offered for it
 
 ### Removed, and why
 
@@ -364,6 +364,22 @@ and doesn't get re-litigated by mistake.
   `(full search result − static eval)` samples correction history is built on elsewhere. Since
   correction history feeds every RFP/FP/LMR/NMP margin, this had unusually high leverage as a
   regression source.
+- **The three fork-original razoring margin terms** (`razor_corr`, `razor_cutoff`,
+  `razor_worsening`) were removed, restoring razoring to the `base + quad * depth^2` shape upstream
+  uses. None was ported or derived; each was introduced as an admitted guess, described in
+  `parameters.rs` as, respectively, a "rougher estimate ... needs SPSA/SPRT more than most values
+  here", "guessed, not just exposed", and "genuinely ambiguous how to scale". `razor_worsening` was
+  additionally suspect on its own terms: it made the engine razor *more* readily when the evaluation
+  had swung further in our favour than expected, inverting how the same opponent-worsening signal is
+  used in RFP, where good news supports trusting a fail-high rather than giving up on the node
+  earlier. Razoring is the cheapest and most aggressive early exit in the search — it abandons a
+  node to qsearch outright — so speculative widening of its margin has more downside than the same
+  guess would elsewhere.
+- **Null-move reduction responding to `ttMoveHistory`** (`nmp_r_tt_history`) was removed. It was the
+  one item this section's own notes ranked as "lower confidence than the fixes above": a plausible
+  correlation between a well-trusted TT move and a settled, less volatile position, never a derived
+  relationship. `ttMoveHistory` still feeds the singular double-extension margin, where there is an
+  actual mechanism behind it.
 - **History decay applied at the start of every search** (halving quiet/noisy/pawn history on every
   `go` command) was removed — it was stacking on top of an already-self-regulating gravity-decay
   mechanism built into every history table's update function, and fired far more often than

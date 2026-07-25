@@ -121,6 +121,50 @@ fn from_fen_accepts_missing_optional_fields() {
     assert!(Board::from_fen("4k3/8/8/8/8/8/8/4K3").is_err());
 }
 
+/// `Square::new` transmutes into a `#[repr(u8)]` enum behind only a
+/// `debug_assert`, so placement data that addresses a square off the board is
+/// undefined behaviour in a release build rather than a bad position. The
+/// parser is otherwise deliberately lenient, so these are the cases where that
+/// leniency has to stop.
+#[test]
+fn from_fen_rejects_out_of_bounds_placement() {
+    prepare_lut();
+
+    // A ninth rank: `rank << 3` alone reaches 64, past the last square.
+    assert!(Board::from_fen("4k3/8/8/8/8/8/8/4K3/8 w - - 0 1").is_err());
+
+    // Ranks whose contents run past the h file, via too many pieces and via a
+    // skip count that overshoots.
+    assert!(Board::from_fen("4k3/8/8/8/8/8/8/RRRRRRRRR w - - 0 1").is_err());
+    assert!(Board::from_fen("4k3/8/8/8/8/8/8/8R w - - 0 1").is_err());
+    assert!(Board::from_fen("4k3/8/8/8/8/8/8/999999999R w - - 0 1").is_err());
+
+    // A legal eight-file rank is still accepted.
+    assert!(Board::from_fen("4k3/8/8/8/8/8/8/RRRRKRRR w - - 0 1").is_ok());
+}
+
+/// Every `king_square()` caller assumes a king exists: it is `(colors &
+/// kings).lsb()`, which yields `Square::None` (64) on an empty board, and
+/// `Square::shift` on that builds an out-of-range `Square`. `set_castling` hits
+/// exactly that path, so a kingless position must never reach it.
+#[test]
+fn from_fen_rejects_positions_without_exactly_one_king_each() {
+    prepare_lut();
+
+    assert!(Board::from_fen("8/8/8/8/8/8/8/8 w - - 0 1").is_err());
+    assert!(Board::from_fen("4k3/8/8/8/8/8/8/8 w - - 0 1").is_err());
+    assert!(Board::from_fen("8/8/8/8/8/8/8/4K3 w - - 0 1").is_err());
+
+    // Two kings a side is equally unrepresentable downstream.
+    assert!(Board::from_fen("4k3/8/8/8/8/8/8/3KK3 w - - 0 1").is_err());
+
+    // The specific shape that used to reach `shift()` with Square::None:
+    // castling rights present, no king to anchor them to.
+    assert!(Board::from_fen("8/8/8/8/8/8/8/8 w KQkq - 0 1").is_err());
+
+    assert!(Board::from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1").is_ok());
+}
+
 #[test]
 fn halfmove_clock_saturates_instead_of_overflowing() {
     prepare_lut();

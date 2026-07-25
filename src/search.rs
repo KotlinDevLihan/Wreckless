@@ -1029,11 +1029,26 @@ fn search<NODE: NodeType>(
             // lmr_cutoff/fds_cutoff/razor_cutoff: many recent cutoffs at
             // this node's children is a signal to prune more freely here too.
             let threshold = if is_quiet {
-                // Linear term now matches the noisy branch's sign below:
-                // both the quadratic and linear terms push the threshold
-                // more negative (more permissive) as depth grows, instead
-                // of the linear term fighting its own quadratic term.
-                (-p::see_q_quad() * depth * depth - p::see_q_lin() * depth - p::see_q_hist() * history / 1024
+                // The linear term is ADDED here, unlike the noisy branch below.
+                // That asymmetry is deliberate, and 0.1.2 (`4135b69`) has it;
+                // it was flipped to a subtraction at some point on the reasoning
+                // that both branches should push the threshold the same way,
+                // which is wrong for two reasons.
+                //
+                // First, the `.min(0)` clamp is only meaningful if this can go
+                // positive. With the term added, the expression is positive
+                // through depth 5 and the clamp pins the threshold at 0 --
+                // "prune any quiet that loses material at all" -- before easing
+                // off from depth 6 as the quadratic takes over. With it
+                // subtracted the expression is negative at every depth (-41,
+                // -133, -249, -389, ...) and the clamp becomes dead code, which
+                // is the giveaway that the sign was not meant to be flipped.
+                //
+                // Second, the strength effect is large and in the wrong
+                // direction: at depth 4 it moves the threshold from 0 to -389,
+                // so instead of pruning every losing quiet the engine only
+                // prunes those dropping nearly four pawns.
+                (-p::see_q_quad() * depth * depth + p::see_q_lin() * depth - p::see_q_hist() * history / 1024
                     + p::see_q_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32
                     + p::see_q_base())
                 .min(0)
@@ -1157,6 +1172,23 @@ fn search<NODE: NodeType>(
                 reduction += p::lmr_prev_reduction();
             }
 
+            // Lazy-SMP reduction jitter, restored from 0.1.2 (`4135b69`), where
+            // it was dropped without a note in the README's "Removed, and why"
+            // section -- the only removal in this codebase's history that never
+            // got one, which is why it reads as collateral damage from a rework
+            // rather than a tested decision.
+            //
+            // Seeding on `td.id` desynchronises the helper threads: without it
+            // every thread reduces identically and re-explores the same lines,
+            // which is exactly the kind of loss that stays invisible at
+            // Threads=1 and only shows up in multi-threaded play. Note it also
+            // perturbs single-threaded search, since `td.nodes()` varies on its
+            // own, and the window is deliberately off-centre -- `(x % 128) - 59`
+            // has mean +4.5, not 0 -- so it carries a small reduction bias that
+            // the surrounding constants were tuned against. Restored verbatim
+            // for that reason rather than re-centred.
+            reduction += ((td.nodes() + td.id as u64 * 27) % 128) as i32 - 59;
+
             // The PV bonus was previously added after the clamp, letting
             // reduced_depth exceed its own new_depth+2 ceiling by up to 2
             // more plies for PV nodes. Applying it before clamping keeps the
@@ -1228,6 +1260,12 @@ fn search<NODE: NodeType>(
             if td.stack[ply - 1].reduction > reduction + 590 {
                 reduction += p::fds_prev_reduction();
             }
+
+            // Same Lazy-SMP jitter as in the LMR block above, restored from
+            // 0.1.2. Distinct multiplier and offset (26 / -56 against 27 / -59)
+            // so the two reduction paths do not share a jitter pattern; mean
+            // here is +7.5.
+            reduction += ((td.nodes() + td.id as u64 * 26) % 128) as i32 - 56;
 
             let reduced_depth = new_depth - (reduction >= 2621) as i32 - (reduction >= 5579) as i32;
 

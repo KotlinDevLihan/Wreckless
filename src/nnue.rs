@@ -373,13 +373,19 @@ impl Parameters {
     }
 
     fn allocate_owned() -> Arc<Self> {
-        let mut boxed = Box::<std::mem::MaybeUninit<Self>>::new(std::mem::MaybeUninit::uninit());
-        let ptr = boxed.as_mut_ptr();
-        std::mem::forget(boxed);
+        // `Box::new(MaybeUninit::uninit())` builds the MaybeUninit as a
+        // temporary and leans on the optimiser to elide the move into the box.
+        // `Parameters` is ~63 MB, so at low opt-levels that elision does not
+        // happen and the move is a 63 MB memcpy through the stack, which
+        // overflows it. `Box::new_uninit` allocates on the heap up front and
+        // never materialises a value, so it holds at any opt-level -- and it
+        // also retires the `mem::forget` / `from_raw` ownership dance, which
+        // leaked the allocation on any early return.
+        let mut boxed = Box::<Self>::new_uninit();
 
         unsafe {
-            std::ptr::copy_nonoverlapping(Self::embedded() as *const Self, ptr, 1);
-            Arc::from(Box::from_raw(ptr))
+            std::ptr::copy_nonoverlapping(Self::embedded() as *const Self, boxed.as_mut_ptr(), 1);
+            Arc::from(boxed.assume_init())
         }
     }
 }

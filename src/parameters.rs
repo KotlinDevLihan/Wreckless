@@ -38,26 +38,6 @@ define! {
     // Razoring
     i32 razor_base: 237;
     i32 razor_quad: 254;
-    // Rougher estimate than lmr_capture_stat's fix below: razoring's own
-    // terms (razor_base, razor_quad*depth^2) have no /1024 normalization to
-    // compare against directly, unlike RFP/FP's margins. Pulled back from an
-    // earlier 900 guess (too large a swing from the original 300) toward a
-    // more conservative increase -- needs SPSA/SPRT more than most values
-    // here.
-    i32 razor_corr: 612;
-    // Guessed, not just exposed: the same cutoff-count signal is already
-    // SPSA-tunable everywhere else it's used (lmr_cutoff: 1151, fds_cutoff:
-    // 1394). Re-checked against the established lmr_cutoff/lmr_noisy_base
-    // and fds_cutoff/fds_noisy_base ratios (~0.81x and ~1.48x) applied to
-    // razor_base (237), which suggests ~190-350 -- raised from an earlier,
-    // too-conservative 100 toward the low end of that range.
-    i32 razor_cutoff: 270;
-    // Extends opponent_worsening (already used in RFP's rfp_worsening) to
-    // razoring. Genuinely ambiguous how to scale between the two formulas'
-    // very different base magnitudes (razor_base is ~12x rfp_base) -- shifted
-    // toward the better-justified ratio-scaled anchor (~398) rather than
-    // splitting evenly with the weaker direct-copy anchor.
-    i32 razor_worsening: 320;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;

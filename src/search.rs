@@ -160,13 +160,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
                 match score {
                     s if s <= alpha => {
-                        // Collapse beta all the way to the failed window's
-                        // floor so the re-search stays narrow. Note: this is
-                        // a fuller collapse than Stockfish's own
-                        // beta = (alpha+beta)/2 midpoint -- an intentional
-                        // deviation as far as anyone has verified, but flag
-                        // it if re-tuning this: the two aren't equivalent.
-                        beta = alpha;
+                        beta = (alpha + beta) / 2;
                         alpha = (score - delta).max(-Score::INFINITE);
                         delta += 26 * delta / 128;
                     }
@@ -611,16 +605,23 @@ fn search<NODE: NodeType>(
     let opponent_worsening = !in_check && is_valid(td.stack[ply - 1].eval) && eval > -td.stack[ply - 1].eval;
 
     // Razoring
+    //
+    // The margin is `base + quad * depth^2`, which is the shape upstream uses.
+    // Three fork-original terms were removed from it -- a correction-history
+    // widening (`razor_corr`), a cutoff-count bonus (`razor_cutoff`) and an
+    // opponent-worsening bonus (`razor_worsening`) -- because each was
+    // introduced as an admitted guess rather than a derived or ported value:
+    // "rougher estimate ... needs SPSA/SPRT more than most values here",
+    // "guessed, not just exposed", and "genuinely ambiguous how to scale".
+    //
+    // The opponent-worsening term was the most suspect of the three on its own
+    // terms. It made the engine razor *more* readily when the evaluation had
+    // swung further in our favour than expected, which inverts how the same
+    // signal is used in RFP: there, good news supports trusting a fail-high,
+    // whereas here it was used to justify giving up on the node earlier.
     if !NODE::PV
         && !in_check
-        && estimated_score
-            < alpha - p::razor_base() - p::razor_quad() * depth * depth
-                - p::razor_corr() * correction_value.abs() / 1024
-                + p::razor_cutoff() * (td.cutoff_count[ply + 1] > 3) as i32
-                // Extends opponent_worsening (already used in RFP) to
-                // razoring too, same direction: prune more willingly when
-                // the position is trending our way more than expected.
-                + p::razor_worsening() * opponent_worsening as i32
+        && estimated_score < alpha - p::razor_base() - p::razor_quad() * depth * depth
         && alpha < 2048
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
@@ -677,13 +678,7 @@ fn search<NODE: NodeType>(
         let r = (p::nmp_r_base()
             + p::nmp_r_improving() * improving as i32
             + p::nmp_r_depth() * depth
-            + p::nmp_r_beta() * (estimated_score - beta).clamp(0, p::nmp_r_beta_max()) / 128
-            // Speculative, lower confidence than the fixes above: ttMoveHistory
-            // already tracks move-ordering reliability elsewhere (singular
-            // margins); extending it here on the theory that a well-trusted
-            // TT move correlates with a more settled, less tactically volatile
-            // position -- not a derived relationship, just a plausible one.
-            + p::nmp_r_tt_history() * td.tt_move_history / 8192)
+            + p::nmp_r_beta() * (estimated_score - beta).clamp(0, p::nmp_r_beta_max()) / 128)
             / 1024;
 
         td.stack[ply].conthist = td.stack.sentinel().conthist;
@@ -939,7 +934,9 @@ fn search<NODE: NodeType>(
             td.quiet_history.get(td.board.all_threats(), stm, mv)
                 + td.conthist(ply, 1, mv)
                 + td.conthist(ply, 2, mv)
+                + td.conthist(ply, 3, mv) * p::conthist_lag3() / 700
                 + td.conthist(ply, 4, mv)
+                + td.conthist(ply, 5, mv) * p::conthist_lag5() / 700
                 + td.conthist(ply, 6, mv) / 2
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
@@ -1160,8 +1157,6 @@ fn search<NODE: NodeType>(
                 reduction += p::lmr_prev_reduction();
             }
 
-            reduction += ((td.nodes() + td.id as u64 * 27) % 128) as i32 - 59;
-
             // The PV bonus was previously added after the clamp, letting
             // reduced_depth exceed its own new_depth+2 ceiling by up to 2
             // more plies for PV nodes. Applying it before clamping keeps the
@@ -1233,8 +1228,6 @@ fn search<NODE: NodeType>(
             if td.stack[ply - 1].reduction > reduction + 590 {
                 reduction += p::fds_prev_reduction();
             }
-
-            reduction += ((td.nodes() + td.id as u64 * 26) % 128) as i32 - 56;
 
             let reduced_depth = new_depth - (reduction >= 2621) as i32 - (reduction >= 5579) as i32;
 

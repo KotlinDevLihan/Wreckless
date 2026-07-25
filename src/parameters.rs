@@ -49,7 +49,7 @@ define! {
     i32 razor_cutoff: 65;
 
     // Reverse Futility Pruning
-    i32 rfp_depth_quad: 1140;
+    i32 rfp_depth_quad: 980;
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
@@ -64,7 +64,7 @@ define! {
     // is roughly double it.
     i32 rfp_worsening: 20;
     i32 rfp_no_threats: 54;
-    i32 rfp_base: 19;
+    i32 rfp_base: 14;
 
     // Null Move Pruning
     i32 nmp_depth: 9;
@@ -97,36 +97,36 @@ define! {
     // prefer the value upstream actually measured over this fork's estimate of
     // it. Still wants an SPRT like any other change, but it is no longer a
     // number nobody has tested.
-    i32 probcut_tt_margin: 428;
+    i32 probcut_tt_margin: 470;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
     i32 probcut_score_div: 319;
     i32 probcut_beta_step: 197;
 
     // Late Move Pruning
-    i32 lmp_base: 2650;
+    i32 lmp_base: 3000;
     i32 lmp_improvement: 78;
-    i32 lmp_quad: 1225;
-    i32 lmp_history: 74;
+    i32 lmp_quad: 1450;
+    i32 lmp_history: 60;
 
     // Futility Pruning
     i32 fp_depth: 79;
     i32 fp_history: 55;
-    i32 fp_beta_bonus: 77;
+    i32 fp_beta_bonus: 60;
     i32 fp_corr: 555;
-    i32 fp_base: 127;
+    i32 fp_base: 100;
 
     // Bad Noisy Futility Pruning
     i32 bnfp_depth: 80;
     i32 bnfp_history: 76;
-    i32 bnfp_base: 20;
+    i32 bnfp_base: 12;
 
     // History Pruning
-    i32 hp_margin: 875;
+    i32 hp_margin: 720;
     // New: history pruning extended to bad-SEE noisy moves, previously
     // quiet-only. Scaled up from hp_margin by noisy_history's larger range
     // (MAX_HISTORY 12800 vs quiet's 8192) rather than reused as-is.
-    i32 hp_noisy_margin: 1400;
+    i32 hp_noisy_margin: 1100;
 
     // SEE Pruning
     i32 see_q_quad: 12;
@@ -141,13 +141,13 @@ define! {
     // meaningful fraction. Trimmed from 60 back toward the middle of that
     // range on review, to keep quiet SEE pruning a little less eager at nodes
     // whose children have been producing cutoffs; untested either way.
-    i32 see_q_cutoff: 48;
-    i32 see_q_base: 27;
+    i32 see_q_cutoff: 28;
+    i32 see_q_base: 20;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
-    i32 see_n_cutoff: 37;
-    i32 see_n_base: 14;
+    i32 see_n_cutoff: 20;
+    i32 see_n_base: 10;
 
     // Late Move Reductions
     i32 lmr_ilog: 269;
@@ -172,7 +172,7 @@ define! {
     // mechanism doing real work while landing the tree back near 0.1.2's.
     // Still untested, and now actually reachable by SPSA -- this parameter
     // was missing from spsa.config entirely until recently.
-    i32 lmr_movecount_ilog: 64;
+    i32 lmr_movecount_ilog: 40;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     i32 lmr_exact: 1412;
@@ -210,10 +210,10 @@ define! {
     i32 lmr_ttpv: 333;
     i32 lmr_ttpv_score: 611;
     i32 lmr_ttpv_depth: 685;
-    i32 lmr_cutnode: 1725;
-    i32 lmr_cutnode_null: 2050;
+    i32 lmr_cutnode: 1550;
+    i32 lmr_cutnode_null: 1850;
     i32 lmr_check: 955;
-    i32 lmr_cutoff: 1151;
+    i32 lmr_cutoff: 950;
     i32 lmr_cutoff_node: 400;
     i32 lmr_singular: 496;
     i32 lmr_singular_margin: 185;
@@ -228,7 +228,7 @@ define! {
     // alongside lmr_movecount_ilog and for the same reason, preserving that
     // ratio; likewise still untested and likewise only recently reachable by
     // SPSA.
-    i32 fds_movecount_ilog: 52;
+    i32 fds_movecount_ilog: 34;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;
@@ -239,7 +239,7 @@ define! {
     i32 fds_ttpv_depth: 1129;
     i32 fds_cutnode: 1180;
     i32 fds_cutnode_null: 2050;
-    i32 fds_cutoff: 1394;
+    i32 fds_cutoff: 1180;
     i32 fds_cutoff_node: 258;
     i32 fds_singular: 351;
     i32 fds_singular_margin: 188;

@@ -71,7 +71,6 @@ define! {
     // signal) into the null-move reduction depth, on the theory that a
     // well-trusted TT move correlates with a more settled position -- a
     // plausible connection, not a derived one.
-    i32 nmp_r_tt_history: 250;
 
     // ProbCut
     // Matches Stockfish's actual live value (`probCutBeta = beta + 428`) for

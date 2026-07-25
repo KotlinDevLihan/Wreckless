@@ -57,26 +57,26 @@
         },
         {
             "name": "razor_corr",
-            "default": 600.0,
-            "min": 300.0,
-            "max": 900.0,
-            "ck": 30.0,
+            "default": 612.0,
+            "min": 306.0,
+            "max": 918.0,
+            "ck": 30.6,
             "rk": 0.002
         },
         {
             "name": "razor_cutoff",
-            "default": 100.0,
-            "min": 50.0,
-            "max": 150.0,
-            "ck": 5.0,
+            "default": 270.0,
+            "min": 135.0,
+            "max": 405.0,
+            "ck": 13.5,
             "rk": 0.002
         },
         {
             "name": "razor_worsening",
-            "default": 80.0,
-            "min": 40.0,
-            "max": 120.0,
-            "ck": 4.0,
+            "default": 320.0,
+            "min": 160.0,
+            "max": 480.0,
+            "ck": 16.0,
             "rk": 0.002
         },
         {
@@ -113,10 +113,10 @@
         },
         {
             "name": "rfp_worsening",
-            "default": 32.0,
-            "min": 16.0,
-            "max": 48.0,
-            "ck": 1.6,
+            "default": 46.0,
+            "min": 23.0,
+            "max": 69.0,
+            "ck": 2.3,
             "rk": 0.002
         },
         {
@@ -217,18 +217,18 @@
         },
         {
             "name": "nmp_r_tt_history",
-            "default": 300.0,
-            "min": 150.0,
-            "max": 450.0,
-            "ck": 15.0,
+            "default": 250.0,
+            "min": 125.0,
+            "max": 375.0,
+            "ck": 12.5,
             "rk": 0.002
         },
         {
             "name": "probcut_tt_margin",
-            "default": 500.0,
-            "min": 250.0,
-            "max": 750.0,
-            "ck": 25.0,
+            "default": 520.0,
+            "min": 260.0,
+            "max": 780.0,
+            "ck": 26.0,
             "rk": 0.002
         },
         {
@@ -369,9 +369,9 @@
         },
         {
             "name": "hp_noisy_margin",
-            "default": 1480.0,
-            "min": 740.0,
-            "max": 2220.0,
+            "default": 1481.0,
+            "min": 741.0,
+            "max": 2222.0,
             "ck": 74.0,
             "rk": 0.002
         },
@@ -401,10 +401,10 @@
         },
         {
             "name": "see_q_cutoff",
-            "default": 15.0,
-            "min": 8.0,
-            "max": 23.0,
-            "ck": 0.8,
+            "default": 60.0,
+            "min": 30.0,
+            "max": 90.0,
+            "ck": 3.0,
             "rk": 0.002
         },
         {
@@ -441,10 +441,10 @@
         },
         {
             "name": "see_n_cutoff",
-            "default": 10.0,
-            "min": 5.0,
-            "max": 15.0,
-            "ck": 0.5,
+            "default": 37.0,
+            "min": 19.0,
+            "max": 56.0,
+            "ck": 1.9,
             "rk": 0.002
         },
         {
@@ -809,34 +809,34 @@
         },
         {
             "name": "tt_move_history_multicut_base",
-            "default": -450.0,
-            "min": -675.0,
-            "max": -225.0,
-            "ck": 22.5,
+            "default": -480.0,
+            "min": -720.0,
+            "max": -240.0,
+            "ck": 24.0,
             "rk": 0.002
         },
         {
             "name": "tt_move_history_multicut_depth",
-            "default": 115.0,
-            "min": 58.0,
-            "max": 173.0,
-            "ck": 5.8,
+            "default": 122.0,
+            "min": 61.0,
+            "max": 183.0,
+            "ck": 6.1,
             "rk": 0.002
         },
         {
             "name": "tt_move_history_best",
-            "default": 918.0,
-            "min": 459.0,
-            "max": 1377.0,
-            "ck": 45.9,
+            "default": 850.0,
+            "min": 425.0,
+            "max": 1275.0,
+            "ck": 42.5,
             "rk": 0.002
         },
         {
             "name": "tt_move_history_not_best",
-            "default": -747.0,
-            "min": -1121.0,
-            "max": -374.0,
-            "ck": 37.4,
+            "default": -820.0,
+            "min": -1230.0,
+            "max": -410.0,
+            "ck": 41.0,
             "rk": 0.002
         },
         {
@@ -1009,26 +1009,26 @@
         },
         {
             "name": "qs_see_corr_cap",
-            "default": 68.0,
-            "min": 34.0,
-            "max": 102.0,
-            "ck": 3.4,
+            "default": 75.0,
+            "min": 38.0,
+            "max": 113.0,
+            "ck": 3.8,
             "rk": 0.002
         },
         {
             "name": "qs_see_base",
-            "default": 74.0,
-            "min": 37.0,
-            "max": 111.0,
-            "ck": 3.7,
+            "default": 70.0,
+            "min": 35.0,
+            "max": 105.0,
+            "ck": 3.5,
             "rk": 0.002
         },
         {
             "name": "qs_delta_margin",
-            "default": 200.0,
-            "min": 100.0,
-            "max": 300.0,
-            "ck": 10.0,
+            "default": 150.0,
+            "min": 75.0,
+            "max": 225.0,
+            "ck": 7.5,
             "rk": 0.002
         }
     ]

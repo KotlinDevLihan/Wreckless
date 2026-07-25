@@ -44,19 +44,20 @@ define! {
     // earlier 900 guess (too large a swing from the original 300) toward a
     // more conservative increase -- needs SPSA/SPRT more than most values
     // here.
-    i32 razor_corr: 600;
+    i32 razor_corr: 612;
     // Guessed, not just exposed: the same cutoff-count signal is already
     // SPSA-tunable everywhere else it's used (lmr_cutoff: 1151, fds_cutoff:
     // 1394). Re-checked against the established lmr_cutoff/lmr_noisy_base
     // and fds_cutoff/fds_noisy_base ratios (~0.81x and ~1.48x) applied to
     // razor_base (237), which suggests ~190-350 -- raised from an earlier,
     // too-conservative 100 toward the low end of that range.
-    i32 razor_cutoff: 190;
+    i32 razor_cutoff: 270;
     // Extends opponent_worsening (already used in RFP's rfp_worsening) to
     // razoring. Genuinely ambiguous how to scale between the two formulas'
-    // very different base magnitudes (razor_base is ~12x rfp_base), so this
-    // sits between two competing anchors rather than committing to either.
-    i32 razor_worsening: 150;
+    // very different base magnitudes (razor_base is ~12x rfp_base) -- shifted
+    // toward the better-justified ratio-scaled anchor (~398) rather than
+    // splitting evenly with the weaker direct-copy anchor.
+    i32 razor_worsening: 320;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -66,12 +67,12 @@ define! {
     // Speculative, low-confidence: both rfp_worsening and rfp_no_threats are
     // flat boolean-gated subtractions in the same margin, so they're directly
     // comparable (unlike rfp_corr, which is continuously scaled). Opponent-
-    // worsening is arguably the more information-rich signal of the two, so
-    // nudged up from the original 20 -- but pulled back from an earlier
-    // guess of full parity (55) to a smaller move, since full parity was a
-    // bigger swing than the reasoning actually supports. rfp_no_threats
-    // reverted to its original value -- no real evidence it needed changing.
-    i32 rfp_worsening: 32;
+    // worsening is arguably the more information-rich signal of the two.
+    // Split evenly between the original 20 and full parity with
+    // rfp_no_threats (54), rather than favoring the (equally unproven)
+    // pullback toward the original. rfp_no_threats reverted to its original
+    // value -- no real evidence it needed changing.
+    i32 rfp_worsening: 46;
     i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
 
@@ -90,7 +91,7 @@ define! {
     // signal) into the null-move reduction depth, on the theory that a
     // well-trusted TT move correlates with a more settled position -- a
     // plausible connection, not a derived one.
-    i32 nmp_r_tt_history: 300;
+    i32 nmp_r_tt_history: 250;
 
     // ProbCut
     // Speculative, low-confidence: a TT-only cutoff trusts a cached score
@@ -99,7 +100,7 @@ define! {
     // search before trusting its result). Pulled back from an earlier guess
     // of 600 (~2.4x probcut_base) to a smaller increase over the original
     // ~1.77x ratio -- still a directional guess, not a derived fix.
-    i32 probcut_tt_margin: 500;
+    i32 probcut_tt_margin: 520;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
     i32 probcut_score_div: 319;
@@ -128,7 +129,7 @@ define! {
     // New: history pruning extended to bad-SEE noisy moves, previously
     // quiet-only. Scaled up from hp_margin by noisy_history's larger range
     // (MAX_HISTORY 12800 vs quiet's 8192) rather than reused as-is.
-    i32 hp_noisy_margin: 1480;
+    i32 hp_noisy_margin: 1481;
 
     // SEE Pruning
     i32 see_q_quad: 12;
@@ -141,12 +142,12 @@ define! {
     // far weaker proportionally than lmr_cutoff/fds_cutoff are relative to
     // their own base terms (~80%). Raised to a still-modest but more
     // meaningful fraction.
-    i32 see_q_cutoff: 45;
+    i32 see_q_cutoff: 60;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
-    i32 see_n_cutoff: 25;
+    i32 see_n_cutoff: 37;
     i32 see_n_base: 14;
 
     // Late Move Reductions
@@ -213,10 +214,16 @@ define! {
     // and an earlier attempt to "symmetrize" its 918/-747 ratio had no real
     // evidence behind it either way; reverted to the original values rather
     // than defend an unfounded alternative.
-    i32 tt_move_history_multicut_base: -450;
-    i32 tt_move_history_multicut_depth: 115;
-    i32 tt_move_history_best: 918;
-    i32 tt_move_history_not_best: -747;
+    i32 tt_move_history_multicut_base: -480;
+    i32 tt_move_history_multicut_depth: 122;
+    // Re-reasoned rather than left at the original: in a gravity-style
+    // tracker, the less-frequent event should generally carry more weight to
+    // keep the tracker responsive. A well-ordered engine's TT move is right
+    // most of the time, so a miss is the rarer, more informative event --
+    // arguing for weighting misses at least as strongly as hits, which the
+    // original 918/-747 (hits weighted higher) doesn't do.
+    i32 tt_move_history_best: 850;
+    i32 tt_move_history_not_best: -820;
 
     // Correction history updates
     i32 corr_bonus_scale: 148;
@@ -273,8 +280,8 @@ define! {
     // have shifted what typical correction_value magnitudes look like since
     // this cap was last (informally) calibrated.
     i32 qs_see_div: 8;
-    i32 qs_see_corr_cap: 68;
-    i32 qs_see_base: 74;
+    i32 qs_see_corr_cap: 75;
+    i32 qs_see_base: 70;
 
     // Delta pruning margin: a standard qsearch technique (skip a capture
     // that can't plausibly reach alpha even crediting the full captured
@@ -282,6 +289,10 @@ define! {
     // here at all. 200cp is a fairly standard, moderate starting margin
     // used across many engines with this technique -- not derived
     // specifically for this codebase.
-    i32 qs_delta_margin: 200;
+    // Pulled toward this engine's own margin scale rather than left at a
+    // generic borrowed-from-other-engines default: fp_base (127),
+    // bnfp_base (24), rfp_base (19) all serve a similar buffer-margin role
+    // and sit well below 200.
+    i32 qs_delta_margin: 150;
 
 }

@@ -853,17 +853,37 @@ fn search<NODE: NodeType>(
         }
 
         if singular_score < singular_beta {
-            // The is_quiet() coefficients here matched Stockfish's own
-            // -152/-188 !ttCapture terms for this exact mechanism only in
-            // shape, not magnitude (16/19 vs 152/188, off by roughly 10x)
-            // -- corrected to the real, currently-shipping values.
+            // The is_quiet() coefficients are 16/19, the values 0.1.2
+            // (`4135b69`) carried. They were raised to Stockfish's 152/188 in
+            // `d527508` on the grounds that they matched upstream's
+            // `!ttCapture` terms "in shape, not magnitude". Reverted, because
+            // that transplant was measured and it is expensive:
+            //
+            //   - these margins are *subtracted* from singular_beta before the
+            //     comparison, so scaling them ~10x makes
+            //     `singular_score < singular_beta - margin` far easier to
+            //     satisfy, and double/triple extensions fire much more often;
+            //   - `d527508` grew the bench tree 23% (3.02M -> 3.70M nodes at
+            //     fixed depth) and the engine went from neutral to roughly
+            //     -96 Elo, searching ~0.9 ply shallower than base at equal
+            //     time in real games.
+            //
+            // The "match upstream" argument does not survive contact with the
+            // rest of the expression either. Stockfish's version is
+            // `-2 + 204 * PvNode - 152 * !ttCapture - ...` and
+            // `70 + 279 * PvNode - 188 * !ttCapture + 81 * ss->ttPv - ...`;
+            // this one has no -2/+70 constants, uses 195/230 for the PV term,
+            // and gates its second term on `PV && !tt_was_pv` rather than
+            // upstream's `+81 * ttPv`. Two coefficients lifted out of a
+            // differently shaped formula are not the same formula, and the
+            // surrounding constants were tuned against 16/19.
             let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
-                - 152 * tt_move.is_quiet() as i32
+                - 16 * tt_move.is_quiet() as i32
                 - 16 * correction_value.abs() / 128
                 - 1175 * td.tt_move_history / 114178
                 - 38 * (ply as i32 > td.root_depth) as i32;
             let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
-                - 188 * tt_move.is_quiet() as i32
+                - 19 * tt_move.is_quiet() as i32
                 - 15 * correction_value.abs() / 128
                 - 43 * (ply as i32 > td.root_depth) as i32
                 + 36;

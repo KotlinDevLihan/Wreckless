@@ -152,6 +152,13 @@ define! {
 
     // Late Move Reductions
     i32 lmr_ilog: 269;
+    // Missing entirely until now: Stockfish's reduction is fundamentally
+    // reductions[depth] * reductions[moveNumber] (both log-scaled), but this
+    // formula only ever used move_count as an on/off gate (depth >= 2 &&
+    // move_count >= 2), never as a continuous scaling factor. Starting
+    // magnitude mirrors lmr_ilog's own role as a log2-scaled base term;
+    // genuinely untested and needs SPSA/SPRT before trusting the value.
+    i32 lmr_movecount_ilog: 220;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     i32 lmr_exact: 1412;
@@ -187,6 +194,10 @@ define! {
 
     // Full Depth Search reductions
     i32 fds_ilog: 207;
+    // Same missing move-count scaling as lmr_movecount_ilog above, same
+    // caveat: untested starting value, scaled down from lmr_movecount_ilog
+    // by roughly the same ratio fds_ilog sits below lmr_ilog.
+    i32 fds_movecount_ilog: 170;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

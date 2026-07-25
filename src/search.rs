@@ -892,9 +892,10 @@ fn search<NODE: NodeType>(
             td.quiet_history.get(td.board.all_threats(), stm, mv)
                 + td.conthist(ply, 1, mv)
                 + td.conthist(ply, 2, mv)
+                + td.conthist(ply, 4, mv)
                 + td.conthist(ply, 6, mv) / 2
         } else {
-            let captured_type = td.board.type_on(mv.to());
+            let captured_type = td.board.type_on(mv.capture_sq());
             capture_stat = p::lmr_capture_stat() * captured_type.value() / 64;
             td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), captured_type)
         };
@@ -986,7 +987,11 @@ fn search<NODE: NodeType>(
             // lmr_cutoff/fds_cutoff/razor_cutoff: many recent cutoffs at
             // this node's children is a signal to prune more freely here too.
             let threshold = if is_quiet {
-                (-p::see_q_quad() * depth * depth + p::see_q_lin() * depth - p::see_q_hist() * history / 1024
+                // Linear term now matches the noisy branch's sign below:
+                // both the quadratic and linear terms push the threshold
+                // more negative (more permissive) as depth grows, instead
+                // of the linear term fighting its own quadratic term.
+                (-p::see_q_quad() * depth * depth - p::see_q_lin() * depth - p::see_q_hist() * history / 1024
                     + p::see_q_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32
                     + p::see_q_base())
                 .min(0)
@@ -1028,6 +1033,14 @@ fn search<NODE: NodeType>(
         // Late Move Reductions (LMR)
         if depth >= 2 && move_count >= 2 {
             let mut reduction = p::lmr_ilog() * depth.ilog2() as i32;
+
+            // Move-count scaling: later moves at this node get progressively
+            // reduced more, via log2(moveCount) (as in Stockfish's
+            // reductions[depth] * reductions[moveNumber] product -- kept
+            // additive here to match this formula's existing style). Move
+            // ordering already sorts likely-best moves first, so a later
+            // move index is itself evidence the move is less promising.
+            reduction += p::lmr_movecount_ilog() * (move_count as u32).ilog2() as i32;
 
             reduction -= (p::lmr_improvement() * improvement / 128).clamp(-241, 1155);
             reduction -= p::lmr_corr() * correction_value.abs() / 1024;
@@ -1109,6 +1122,11 @@ fn search<NODE: NodeType>(
         // Full Depth Search (FDS)
         else if !NODE::PV || move_count >= 2 {
             let mut reduction = p::fds_ilog() * depth.ilog2() as i32;
+
+            // Same move-count scaling as LMR above; FDS covers the
+            // move_count == 1 non-PV / move_count >= 2 case and had the same
+            // gap.
+            reduction += p::fds_movecount_ilog() * (move_count as u32).ilog2() as i32;
 
             reduction -= (p::fds_improvement() * improvement / 128).clamp(-206, 1370);
             reduction -= p::fds_corr() * correction_value.abs() / 1024;
@@ -1271,7 +1289,7 @@ fn search<NODE: NodeType>(
                 td.board.all_threats(),
                 td.board.moved_piece(best_move),
                 best_move.to(),
-                td.board.type_on(best_move.to()),
+                td.board.type_on(best_move.capture_sq()),
                 noisy_bonus,
             );
         } else {
@@ -1321,7 +1339,7 @@ fn search<NODE: NodeType>(
         }
 
         for &mv in noisy_moves.iter() {
-            let captured_type = td.board.type_on(mv.to());
+            let captured_type = td.board.type_on(mv.capture_sq());
             td.noisy_history.update(
                 td.board.all_threats(),
                 td.board.moved_piece(mv),
@@ -1544,15 +1562,17 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             // alpha even crediting the full value of the captured piece,
             // before the pricier SEE call below. Standard qsearch technique.
             // A non-capture promotion has nothing on the target square (so
-            // type_on(mv.to()) alone would credit zero material gain), so
-            // its own value swing is credited separately.
+            // type_on(mv.capture_sq()) alone would credit zero material
+            // gain), so its own value swing is credited separately. Uses
+            // capture_sq() rather than to() so en passant (whose captured
+            // pawn isn't on the destination square) is credited correctly.
             let promotion_gain =
                 if mv.is_promotion() { mv.promo_piece_type().value() - PieceType::Pawn.value() } else { 0 };
             if !in_check
                 && !is_direct_check
                 && !mv.is_quiet()
                 && is_valid(eval)
-                && eval + td.board.type_on(mv.to()).value() + promotion_gain + p::qs_delta_margin() < alpha
+                && eval + td.board.type_on(mv.capture_sq()).value() + promotion_gain + p::qs_delta_margin() < alpha
             {
                 continue;
             }
@@ -1607,7 +1627,7 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             td.board.all_threats(),
             td.board.moved_piece(best_move),
             best_move.to(),
-            td.board.type_on(best_move.to()),
+            td.board.type_on(best_move.capture_sq()),
             bonus,
         );
     }

@@ -129,6 +129,7 @@ impl<T> Index<Square> for [T] {
     type Output = T;
 
     fn index(&self, square: Square) -> &Self::Output {
+        debug_assert!((square as usize) < Square::NUM, "Square::None used to index a board-sized slice");
         // SAFETY: matches IndexMut<Square> below, which already assumes a
         // Square used for indexing is always a real board square.
         unsafe { self.get_unchecked(square as usize) }
@@ -137,6 +138,7 @@ impl<T> Index<Square> for [T] {
 
 impl<T> IndexMut<Square> for [T] {
     fn index_mut(&mut self, square: Square) -> &mut Self::Output {
+        debug_assert!((square as usize) < Square::NUM, "Square::None used to index a board-sized slice");
         unsafe { self.get_unchecked_mut(square as usize) }
     }
 }

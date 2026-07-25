@@ -104,17 +104,17 @@ define! {
     i32 probcut_beta_step: 197;
 
     // Late Move Pruning
-    i32 lmp_base: 2818;
+    i32 lmp_base: 3200;
     i32 lmp_improvement: 78;
     i32 lmp_quad: 1351;
-    i32 lmp_history: 74;
+    i32 lmp_history: 50;
 
     // Futility Pruning
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;
     i32 fp_corr: 555;
-    i32 fp_base: 127;
+    i32 fp_base: 100;
 
     // Bad Noisy Futility Pruning
     i32 bnfp_depth: 84;
@@ -142,12 +142,12 @@ define! {
     // range on review, to keep quiet SEE pruning a little less eager at nodes
     // whose children have been producing cutoffs; untested either way.
     i32 see_q_cutoff: 48;
-    i32 see_q_base: 27;
+    i32 see_q_base: 20;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
     i32 see_n_cutoff: 37;
-    i32 see_n_base: 14;
+    i32 see_n_base: 10;
 
     // Late Move Reductions
     i32 lmr_ilog: 269;

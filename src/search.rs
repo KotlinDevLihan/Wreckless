@@ -809,13 +809,17 @@ fn search<NODE: NodeType>(
         }
 
         if singular_score < singular_beta {
+            // The is_quiet() coefficients here matched Stockfish's own
+            // -152/-188 !ttCapture terms for this exact mechanism only in
+            // shape, not magnitude (16/19 vs 152/188, off by roughly 10x)
+            // -- corrected to the real, currently-shipping values.
             let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
-                - 16 * tt_move.is_quiet() as i32
+                - 152 * tt_move.is_quiet() as i32
                 - 16 * correction_value.abs() / 128
                 - 1175 * td.tt_move_history / 114178
                 - 38 * (ply as i32 > td.root_depth) as i32;
             let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
-                - 19 * tt_move.is_quiet() as i32
+                - 188 * tt_move.is_quiet() as i32
                 - 15 * correction_value.abs() / 128
                 - 43 * (ply as i32 > td.root_depth) as i32
                 + 36;

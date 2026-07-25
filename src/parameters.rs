@@ -225,16 +225,22 @@ define! {
     // and an earlier attempt to "symmetrize" its 918/-747 ratio had no real
     // evidence behind it either way; reverted to the original values rather
     // than defend an unfounded alternative.
-    i32 tt_move_history_multicut_base: -480;
-    i32 tt_move_history_multicut_depth: 122;
+    // Matches Stockfish's actual live value (`-421 - 110 * depth`) for this
+    // exact mechanism, rather than the fork's earlier unjustified "modest
+    // strengthening" guess.
+    i32 tt_move_history_multicut_base: -421;
+    i32 tt_move_history_multicut_depth: 110;
     // Re-reasoned rather than left at the original: in a gravity-style
     // tracker, the less-frequent event should generally carry more weight to
     // keep the tracker responsive. A well-ordered engine's TT move is right
     // most of the time, so a miss is the rarer, more informative event --
     // arguing for weighting misses at least as strongly as hits, which the
     // original 918/-747 (hits weighted higher) doesn't do.
-    i32 tt_move_history_best: 850;
-    i32 tt_move_history_not_best: -820;
+    // Matches Stockfish's actual live value (918 / -747) for this exact
+    // mechanism, rather than the fork's earlier unexplained "original"
+    // guess -- confirmed against current upstream source, not re-derived.
+    i32 tt_move_history_best: 918;
+    i32 tt_move_history_not_best: -747;
 
     // Correction history updates
     i32 corr_bonus_scale: 148;
@@ -304,6 +310,10 @@ define! {
     // generic borrowed-from-other-engines default: fp_base (127),
     // bnfp_base (24), rfp_base (19) all serve a similar buffer-margin role
     // and sit well below 200.
-    i32 qs_delta_margin: 150;
+    // Matches Stockfish's actual live futilityBase margin (staticEval + 306)
+    // for the direct analog of this technique, rather than the fork's guess
+    // pulled down toward its own smaller margins (fp_base, bnfp_base) with
+    // no real justification for treating this margin the same way.
+    i32 qs_delta_margin: 306;
 
 }

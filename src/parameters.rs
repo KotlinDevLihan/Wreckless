@@ -157,10 +157,22 @@ define! {
     // move_count >= 2), never as a continuous scaling factor. Starting
     // magnitude mirrors lmr_ilog's own role as a log2-scaled base term;
     // genuinely untested and needs SPSA/SPRT before trusting the value.
-    // Nudged up on review to let move count carry a little more of the
-    // reduction; still untested, and now actually reachable by SPSA (this
-    // parameter was missing from spsa.config entirely until recently).
-    i32 lmr_movecount_ilog: 240;
+    //
+    // Lowered from 240. At that value this single term was doing essentially
+    // all of the engine's over-pruning relative to 0.1.2: zeroing it alone
+    // moved the bench tree from 2.20M to 2.74M nodes, while zeroing
+    // hp_noisy_margin, qs_delta_margin and see_*_cutoff moved it by -19k,
+    // +54k and +51k respectively. That left the engine searching a tree ~16%
+    // *smaller* than the last build to measure neutral, at the same nominal
+    // depth -- same depth, thinner search, which is consistent with the
+    // engine matching base on depth in games while losing badly.
+    //
+    // It reduces every late move by `value * log2(move_count) / 1024`, so at
+    // move 32 it was removing over a full ply on its own. 90 keeps the
+    // mechanism doing real work while landing the tree back near 0.1.2's.
+    // Still untested, and now actually reachable by SPSA -- this parameter
+    // was missing from spsa.config entirely until recently.
+    i32 lmr_movecount_ilog: 90;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     i32 lmr_exact: 1412;
@@ -212,10 +224,11 @@ define! {
     i32 fds_ilog: 207;
     // Same missing move-count scaling as lmr_movecount_ilog above, same
     // caveat: untested starting value, scaled down from lmr_movecount_ilog
-    // by roughly the same ratio fds_ilog sits below lmr_ilog. Nudged up on
-    // review alongside lmr_movecount_ilog, preserving that ratio; likewise
-    // still untested and likewise only recently reachable by SPSA.
-    i32 fds_movecount_ilog: 185;
+    // by roughly the same ratio fds_ilog sits below lmr_ilog. Lowered from 185
+    // alongside lmr_movecount_ilog and for the same reason, preserving that
+    // ratio; likewise still untested and likewise only recently reachable by
+    // SPSA.
+    i32 fds_movecount_ilog: 69;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

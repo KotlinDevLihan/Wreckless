@@ -104,9 +104,9 @@ define! {
     i32 probcut_beta_step: 197;
 
     // Late Move Pruning
-    i32 lmp_base: 2818;
+    i32 lmp_base: 2700;
     i32 lmp_improvement: 78;
-    i32 lmp_quad: 1351;
+    i32 lmp_quad: 1280;
     i32 lmp_history: 74;
 
     // Futility Pruning
@@ -122,7 +122,7 @@ define! {
     i32 bnfp_base: 24;
 
     // History Pruning
-    i32 hp_margin: 948;
+    i32 hp_margin: 900;
     // New: history pruning extended to bad-SEE noisy moves, previously
     // quiet-only. Scaled up from hp_margin by noisy_history's larger range
     // (MAX_HISTORY 12800 vs quiet's 8192) rather than reused as-is.
@@ -172,7 +172,7 @@ define! {
     // mechanism doing real work while landing the tree back near 0.1.2's.
     // Still untested, and now actually reachable by SPSA -- this parameter
     // was missing from spsa.config entirely until recently.
-    i32 lmr_movecount_ilog: 90;
+    i32 lmr_movecount_ilog: 70;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     i32 lmr_exact: 1412;
@@ -228,7 +228,7 @@ define! {
     // alongside lmr_movecount_ilog and for the same reason, preserving that
     // ratio; likewise still untested and likewise only recently reachable by
     // SPSA.
-    i32 fds_movecount_ilog: 69;
+    i32 fds_movecount_ilog: 56;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

@@ -38,6 +38,15 @@ define! {
     // Razoring
     i32 razor_base: 237;
     i32 razor_quad: 254;
+    // Both of these are present in 0.1.2 (`4135b69`), the last build that
+    // measured neutral, so they are part of the baseline rather than
+    // speculative additions. They were removed alongside `razor_worsening`
+    // when the razoring extras were pruned; only `razor_worsening` was
+    // genuinely new, and only it stayed removed. `razor_cutoff` is 65 because
+    // that is the literal 0.1.2 used, not the 270 a later parameterization
+    // guessed at.
+    i32 razor_corr: 300;
+    i32 razor_cutoff: 65;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;

@@ -606,22 +606,25 @@ fn search<NODE: NodeType>(
 
     // Razoring
     //
-    // The margin is `base + quad * depth^2`, which is the shape upstream uses.
-    // Three fork-original terms were removed from it -- a correction-history
-    // widening (`razor_corr`), a cutoff-count bonus (`razor_cutoff`) and an
-    // opponent-worsening bonus (`razor_worsening`) -- because each was
-    // introduced as an admitted guess rather than a derived or ported value:
-    // "rougher estimate ... needs SPSA/SPRT more than most values here",
-    // "guessed, not just exposed", and "genuinely ambiguous how to scale".
+    // `razor_corr` and `razor_cutoff` are restored: both are present in 0.1.2
+    // (`4135b69`), the last build that measured neutral, so they belong to the
+    // baseline rather than being speculative extras. Removing them was a
+    // deviation from the tested configuration, and dropping the cutoff-count
+    // bonus in particular made the engine razor *less* often, which grows the
+    // tree.
     //
-    // The opponent-worsening term was the most suspect of the three on its own
-    // terms. It made the engine razor *more* readily when the evaluation had
-    // swung further in our favour than expected, which inverts how the same
-    // signal is used in RFP: there, good news supports trusting a fail-high,
-    // whereas here it was used to justify giving up on the node earlier.
+    // Only `razor_worsening` stays removed. It was genuinely new since 0.1.2,
+    // its own note called the scaling "genuinely ambiguous", and its direction
+    // is backwards: it made the engine razor *more* readily when the
+    // evaluation had swung further in our favour than expected, inverting how
+    // the same signal is used in RFP, where good news supports trusting a
+    // fail-high rather than giving up on the node earlier.
     if !NODE::PV
         && !in_check
-        && estimated_score < alpha - p::razor_base() - p::razor_quad() * depth * depth
+        && estimated_score
+            < alpha - p::razor_base() - p::razor_quad() * depth * depth
+                - p::razor_corr() * correction_value.abs() / 1024
+                + p::razor_cutoff() * (td.cutoff_count[ply + 1] > 3) as i32
         && alpha < 2048
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
@@ -951,12 +954,24 @@ fn search<NODE: NodeType>(
         let mut capture_stat = 0;
 
         let history = if is_quiet {
+            // Lags 1, 2 and 6 only, as in 0.1.2 (`4135b69`). Lags 3, 4 and 5
+            // were folded in later without touching anything downstream, which
+            // is the same defect as the `corr_weight_div` normalization bug
+            // documented in the README: this sum is not consumed on its own
+            // scale, it is consumed by seven separately tuned coefficients --
+            // lmp_history, fp_history, bnfp_history, hp_margin, see_q_hist,
+            // see_n_hist, lmr_quiet_hist/fds_quiet_hist. Adding ~40% more
+            // magnitude to `history` silently rescaled every one of them at
+            // once, so LMP, futility, history pruning, SEE pruning and both
+            // reduction formulas all started reacting far more strongly to
+            // history than the values they were tuned with assume.
+            //
+            // Adding lags back is fine, but only together with a divisor that
+            // holds the sum's scale fixed -- exactly the discipline
+            // `corr_weight_div` now documents for the correction blend.
             td.quiet_history.get(td.board.all_threats(), stm, mv)
                 + td.conthist(ply, 1, mv)
                 + td.conthist(ply, 2, mv)
-                + td.conthist(ply, 3, mv) * p::conthist_lag3() / 700
-                + td.conthist(ply, 4, mv)
-                + td.conthist(ply, 5, mv) * p::conthist_lag5() / 700
                 + td.conthist(ply, 6, mv) / 2
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
@@ -1026,7 +1041,9 @@ fn search<NODE: NodeType>(
             }
 
             // History Pruning (HP)
-            if !in_check && !is_direct_check && is_quiet && depth < 5 && history < -p::hp_margin() * depth {
+            // No check exemption, as in 0.1.2 (`4135b69`) -- same reasoning as
+            // the SEE-pruning guard below.
+            if !in_check && is_quiet && depth < 5 && history < -p::hp_margin() * depth {
                 continue;
             }
 
@@ -1079,11 +1096,19 @@ fn search<NODE: NodeType>(
                 .min(0)
             };
 
-            // Matches the check exemption LMP/FP/HP already have above: a
-            // move giving check can have follow-up tactical value a static
-            // exchange estimate can't see, so it shouldn't be pruned purely
-            // on looking like a bad trade.
-            if !in_check && !is_direct_check && !td.board.see(mv, threshold) {
+            // No check exemption here, as in 0.1.2 (`4135b69`). It was added
+            // later by analogy with LMP/FP/HP, on the reasoning that a static
+            // exchange estimate can't see a check's follow-up value.
+            //
+            // The analogy does not carry, because the exemptions are not the
+            // same size. LMP/FP/HP each decline to prune a narrow, already
+            // heavily qualified slice of quiet moves. SEE pruning is the
+            // engine's main filter for losing captures, and `is_direct_check`
+            // is broad -- so exempting it waves through every checking move at
+            // every depth however much material it drops, and those all get
+            // searched. That is one of the larger contributors to this
+            // engine's tree being ~47% bigger than 0.1.2's at fixed depth.
+            if !in_check && !td.board.see(mv, threshold) {
                 continue;
             }
         }
@@ -1561,8 +1586,13 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             }
 
             // Static Exchange Evaluation Pruning (SEE Pruning)
-            if !is_direct_check
-                && is_valid(eval)
+            //
+            // No check exemption, as in 0.1.2 (`4135b69`). It matters more here
+            // than in the main search: qsearch already generates checks and
+            // recaptures, so waving every checking move past the SEE filter
+            // leaves losing checks to be searched at every qsearch node, and
+            // qsearch nodes dominate the tree.
+            if is_valid(eval)
                 && !td.board.see(
                     mv,
                     (alpha - eval) / p::qs_see_div() - correction_value.abs().min(p::qs_see_corr_cap()) - p::qs_see_base(),

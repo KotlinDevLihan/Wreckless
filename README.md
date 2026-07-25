@@ -162,6 +162,13 @@ if you're deciding whether to trust a "pending" item.
 **Move ordering:**
 
 - Low-ply history: root-relative `[ply][from][to]` table for plies 0–4, carried over between searches
+- **`history` (the move-ordering/pruning sum) uses lags 1, 2 and 6 only, as in 0.1.2.** Lags 3, 4
+  and 5 were folded into it at one point without touching anything downstream, which is the same
+  defect as the `corr_weight_div` normalization bug above: this sum is not consumed on its own
+  scale, it feeds seven separately tuned coefficients (`lmp_history`, `fp_history`, `bnfp_history`,
+  `hp_margin`, `see_q_hist`, `see_n_hist`, `lmr_quiet_hist`/`fds_quiet_hist`). Adding ~40% of
+  magnitude to it silently rescaled all of them at once. Adding lags back is fine, but only
+  together with a divisor that holds the sum's scale fixed
 - Continuation history: all six lags updated with per-lag weights and a positive-consistency
   multiplier (as in Stockfish), near lags limited when in check, overall scale SPSA-tunable
   (`conthist_div`); per-thread, matching upstream (an attempt to share it across threads, the way
@@ -186,9 +193,14 @@ if you're deciding whether to trust a "pending" item.
   guard exists to catch — could pass a `material() > 491` threshold and get null-move pruned
   anyway. Now checks `non_pawn_material()` (a new `Board` accessor), the correct signal for "is
   this position bare enough that null-move's assumptions might not hold"
-- SEE pruning now exempts moves that give check, in both the main search and quiescence search,
-  matching the exemption LMP/FP/HP already had — a static-exchange estimate can't see a check's
-  follow-up tactical value, so it shouldn't prune one for looking like a bad trade
+- ~~SEE pruning exempts moves that give check~~ — **reverted.** This was extended by analogy with
+  LMP/FP, but the analogy does not carry: those decline to prune a narrow, heavily qualified slice
+  of quiet moves, whereas SEE pruning is the engine's main filter for losing captures and
+  `is_direct_check` is broad. Exempting it waved through every checking move at every depth however
+  much material it dropped, in both the main search and (worse) qsearch, where such nodes dominate.
+  Along with the `history` inflation and the singular-margin change below, it was a major
+  contributor to the tree growing 47% against 0.1.2 at fixed depth. The check exemption remains
+  where 0.1.2 has it: LMP, FP and BNFP only
 - SEE pruning threshold now also responds to `cutoff_count` (`see_q_cutoff`/`see_n_cutoff`),
   extending the same signal already used by `lmr_cutoff`/`fds_cutoff`
 - Qsearch delta pruning: a capture that can't plausibly reach alpha even crediting the full
@@ -198,7 +210,8 @@ if you're deciding whether to trust a "pending" item.
   doesn't lose material itself, gets a full extra ply — compensates for the horizon effect at the
   end of a forced capture sequence. A different technique from the check extension tried and
   removed earlier (gated on square repetition and SEE, not on giving check)
-- History Pruning now exempts quiet moves that give check, matching the exemption LMP and FP
+- ~~History Pruning exempts quiet moves that give check~~ — **reverted** for the same reason as the
+  SEE exemption above; 0.1.2 does not have it. Superseded text: matching the exemption LMP and FP
   already had — HP was the one sibling pruning check that could discard a checking move on history
   alone
 - TT-only ProbCut check: a lower-bound TT entry from a near-full-depth search, comfortably above
@@ -303,7 +316,7 @@ results against new ones.
 - **`searchmoves`** — root move filtering on the `go` command
 - **`UCI_ShowWDL`** — win/draw/loss estimates in `info` lines
 - **`SyzygyProbeDepth` / `SyzygyProbeLimit`** — user-tunable tablebase engagement
-- **SPSA tunables** — 122 search constants exposed as UCI options under the `spsa` cargo feature,
+- **SPSA tunables** — 124 search constants exposed as UCI options under the `spsa` cargo feature,
   for OpenBench SPSA tuning; identical compiled code in default (non-`spsa`) builds. A ready-to-use
   OpenBench SPSA input file is provided in [`spsa.config`](spsa.config). It is derived
   mechanically from the defaults in `src/parameters.rs` (min/max at ±50%, step at 5% of the
@@ -364,17 +377,16 @@ and doesn't get re-litigated by mistake.
   `(full search result − static eval)` samples correction history is built on elsewhere. Since
   correction history feeds every RFP/FP/LMR/NMP margin, this had unusually high leverage as a
   regression source.
-- **The three fork-original razoring margin terms** (`razor_corr`, `razor_cutoff`,
-  `razor_worsening`) were removed, restoring razoring to the `base + quad * depth^2` shape upstream
-  uses. None was ported or derived; each was introduced as an admitted guess, described in
-  `parameters.rs` as, respectively, a "rougher estimate ... needs SPSA/SPRT more than most values
-  here", "guessed, not just exposed", and "genuinely ambiguous how to scale". `razor_worsening` was
-  additionally suspect on its own terms: it made the engine razor *more* readily when the evaluation
-  had swung further in our favour than expected, inverting how the same opponent-worsening signal is
-  used in RFP, where good news supports trusting a fail-high rather than giving up on the node
-  earlier. Razoring is the cheapest and most aggressive early exit in the search — it abandons a
-  node to qsearch outright — so speculative widening of its margin has more downside than the same
-  guess would elsewhere.
+- **The opponent-worsening razoring term** (`razor_worsening`) was removed. It was new since 0.1.2,
+  its own note called the scaling "genuinely ambiguous", and its direction is backwards: it made the
+  engine razor *more* readily when the evaluation had swung further in our favour than expected,
+  inverting how the same signal is used in RFP, where good news supports trusting a fail-high rather
+  than giving up on the node earlier.
+  - `razor_corr` and `razor_cutoff` were removed alongside it and then **restored**. Both are
+    present in 0.1.2, the last build that measured neutral, so they belong to the tested baseline
+    rather than being speculative extras — dropping the cutoff-count bonus in particular made the
+    engine razor *less* often, which grows the tree. `razor_cutoff` is back at 0.1.2's literal 65,
+    not the 270 a later parameterization guessed at.
 - **Null-move reduction responding to `ttMoveHistory`** (`nmp_r_tt_history`) was removed. It was the
   one item this section's own notes ranked as "lower confidence than the fixes above": a plausible
   correlation between a well-trusted TT move and a settled, less volatile position, never a derived

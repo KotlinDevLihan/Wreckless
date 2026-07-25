@@ -104,9 +104,9 @@ define! {
     i32 probcut_beta_step: 197;
 
     // Late Move Pruning
-    i32 lmp_base: 2700;
+    i32 lmp_base: 2650;
     i32 lmp_improvement: 78;
-    i32 lmp_quad: 1280;
+    i32 lmp_quad: 1225;
     i32 lmp_history: 74;
 
     // Futility Pruning
@@ -117,16 +117,16 @@ define! {
     i32 fp_base: 127;
 
     // Bad Noisy Futility Pruning
-    i32 bnfp_depth: 84;
-    i32 bnfp_history: 82;
-    i32 bnfp_base: 24;
+    i32 bnfp_depth: 80;
+    i32 bnfp_history: 76;
+    i32 bnfp_base: 20;
 
     // History Pruning
-    i32 hp_margin: 900;
+    i32 hp_margin: 875;
     // New: history pruning extended to bad-SEE noisy moves, previously
     // quiet-only. Scaled up from hp_margin by noisy_history's larger range
     // (MAX_HISTORY 12800 vs quiet's 8192) rather than reused as-is.
-    i32 hp_noisy_margin: 1481;
+    i32 hp_noisy_margin: 1400;
 
     // SEE Pruning
     i32 see_q_quad: 12;
@@ -172,7 +172,7 @@ define! {
     // mechanism doing real work while landing the tree back near 0.1.2's.
     // Still untested, and now actually reachable by SPSA -- this parameter
     // was missing from spsa.config entirely until recently.
-    i32 lmr_movecount_ilog: 70;
+    i32 lmr_movecount_ilog: 64;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     i32 lmr_exact: 1412;
@@ -210,15 +210,15 @@ define! {
     i32 lmr_ttpv: 333;
     i32 lmr_ttpv_score: 611;
     i32 lmr_ttpv_depth: 685;
-    i32 lmr_cutnode: 1852;
-    i32 lmr_cutnode_null: 2204;
+    i32 lmr_cutnode: 1725;
+    i32 lmr_cutnode_null: 2050;
     i32 lmr_check: 955;
     i32 lmr_cutoff: 1151;
     i32 lmr_cutoff_node: 400;
     i32 lmr_singular: 496;
     i32 lmr_singular_margin: 185;
     i32 lmr_singular_max: 2021;
-    i32 lmr_prev_reduction: 136;
+    i32 lmr_prev_reduction: 118;
 
     // Full Depth Search reductions
     i32 fds_ilog: 207;
@@ -228,7 +228,7 @@ define! {
     // alongside lmr_movecount_ilog and for the same reason, preserving that
     // ratio; likewise still untested and likewise only recently reachable by
     // SPSA.
-    i32 fds_movecount_ilog: 56;
+    i32 fds_movecount_ilog: 52;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;
@@ -237,15 +237,15 @@ define! {
     i32 fds_noisy_hist: 63;
     i32 fds_ttpv: 844;
     i32 fds_ttpv_depth: 1129;
-    i32 fds_cutnode: 1260;
-    i32 fds_cutnode_null: 2168;
+    i32 fds_cutnode: 1180;
+    i32 fds_cutnode_null: 2050;
     i32 fds_cutoff: 1394;
     i32 fds_cutoff_node: 258;
     i32 fds_singular: 351;
     i32 fds_singular_margin: 188;
     i32 fds_singular_max: 2167;
     i32 fds_ttmove: 3002;
-    i32 fds_prev_reduction: 130;
+    i32 fds_prev_reduction: 115;
 
     // TT-move reliability tracking (ttMoveHistory) -- fork addition, never
     // tuned. Multicut is rare but fairly strong evidence (the TT move wasn't

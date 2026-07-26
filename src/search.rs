@@ -607,11 +607,23 @@ fn search<NODE: NodeType>(
 
     let improving = improvement > 0;
 
+    // Restored: present in 0.1.2 (`4135b69`), silently dropped since with no
+    // comment anywhere explaining the removal -- out of step with every other
+    // change in this file, which documents even single-constant tweaks at
+    // length. Feeds the RFP `rfp_worsening` term below, which was dropped
+    // alongside it for the same reason.
+    let opponent_worsening = !in_check && is_valid(td.stack[ply - 1].eval) && eval > -td.stack[ply - 1].eval;
 
     // Razoring
+    // Restored the `razor_corr` eval-correction term and the `cutoff_count[ply
+    // + 1] > 3` bonus, both present in 0.1.2 and both silently dropped since
+    // with no comment justifying the removal.
     if !NODE::PV
         && !in_check
-        && estimated_score < alpha - p::razor_base() - p::razor_quad() * depth * depth
+        && estimated_score
+            < alpha - p::razor_base() - p::razor_quad() * depth * depth
+                - p::razor_corr() * correction_value.abs() / 1024
+                + 65 * (td.cutoff_count[ply + 1] > 3) as i32
         && alpha < 2048
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
@@ -620,15 +632,24 @@ fn search<NODE: NodeType>(
     }
 
     // Reverse Futility Pruning (RFP)
+    // Restored the TT-move quiet-history guard and the `rfp_worsening` term,
+    // both present in 0.1.2 and both silently dropped since with no comment
+    // justifying the removal. The guard specifically stops RFP from firing
+    // when the TT move is a quiet move already known to be bad
+    // (quiet_history < -2048) -- without it RFP can return early based on a
+    // static margin even when search already has evidence the position's
+    // best-looking move doesn't hold up.
     if !tt_pv
         && !in_check
         && !excluded
+        && (!tt_move.is_quiet() || td.quiet_history.get(td.board.all_threats(), stm, tt_move) >= -2048)
         && estimated_score
             >= beta
                 + (p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
                     - p::rfp_no_threats() * (td.board.all_threats() & td.board.colors(stm)).is_empty() as i32
+                    - p::rfp_worsening() * opponent_worsening as i32
                     - p::rfp_base())
                 .max(2)
         && !is_loss(beta)

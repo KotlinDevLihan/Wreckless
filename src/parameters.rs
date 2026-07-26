@@ -38,12 +38,19 @@ define! {
     // Razoring
     i32 razor_base: 237;
     i32 razor_quad: 254;
+    // Restored: present in 0.1.2 (`4135b69`), silently dropped since with no
+    // comment explaining the removal.
+    i32 razor_corr: 300;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
+    // Restored: present in 0.1.2 (`4135b69`), silently dropped since with no
+    // comment explaining the removal. Feeds the RFP `opponent_worsening`
+    // term restored alongside it in search.rs.
+    i32 rfp_worsening: 20;
     i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
 
@@ -321,8 +328,21 @@ define! {
     // land in the same bucket. Rescaling fixes the blend's magnitude, not
     // whether a term carries information -- which is why the earlier divisor
     // fix, correct as it was, could only ever have been half the story.
-    i32 corr_weight_div: 76;
-    i32 corr_minor_major: 40;
+    // Reverted to 102/128, the coupled pair carried by 0.1.2 (`4135b69`).
+    // The 76/40 pair below this comment was a deliberate, reasoned damping
+    // (128 -> 40 for corr_minor_major, divisor recomputed to keep the blend's
+    // scale consistent) but by the surrounding comment's own admission was
+    // never itself measured, and is described there as "the highest-leverage
+    // untested thing in the engine" -- correction_value feeds razoring, RFP,
+    // both singular margins, futility pruning, LMR, FDS, qsearch SEE, and
+    // through `eval` also null move, stand-pat, improving,
+    // opponent-worsening, LMP and BNFP, in both search and qsearch. Given
+    // that reach, an unmeasured deviation from the last verified pair is a
+    // bigger risk than the mistuning it was trying to fix. Revert first,
+    // then let SPSA re-explore from the verified baseline rather than from
+    // an untested guess.
+    i32 corr_weight_div: 102;
+    i32 corr_minor_major: 128;
 
     // Continuation history
     //

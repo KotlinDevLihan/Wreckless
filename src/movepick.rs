@@ -1,8 +1,7 @@
 use crate::{
-    parameters as p,
     search::NodeType,
     thread::ThreadData,
-    types::{MAX_MOVES, Move, MoveList, PieceType, Score},
+    types::{MAX_MOVES, Move, MoveList},
 };
 
 /// Search stages for MovePicker
@@ -13,9 +12,8 @@ pub enum Stage {
     GoodCaptures,
     GenerateQuiets,
     GoodQuiets,
-    BadCaptures,
-    BadQuiets,
     BadNoisy,
+    BadQuiets,
     QSearchCaptures,
     Evasions,
     Done,
@@ -31,6 +29,9 @@ pub struct ScoredMove {
 pub struct MovePicker {
     stage: Stage,
     tt_move: Move,
+    /// SEE threshold used to split captures into "good" (>= threshold, tried
+    /// first) and "bad noisy" (below threshold, tried last / prunable) pools.
+    /// `None` means the default threshold of 0.
     threshold: Option<i32>,
     moves: [ScoredMove; MAX_MOVES],
     bad_captures: [ScoredMove; MAX_MOVES],
@@ -61,15 +62,13 @@ impl MovePicker {
         }
     }
 
-    /// Set whether quiet moves should be skipped (e.g. during late move pruning)
-    pub fn set_skip_quiets(&mut self, skip: bool) {
-        self.skip_quiets = skip;
-    }
-
     pub fn stage(&self) -> Stage {
         self.stage
     }
-    
+
+    /// Skip whatever bad noisy moves remain (e.g. once BNFP/HP-noisy decides
+    /// the rest aren't worth trying), while still allowing any deferred bad
+    /// quiets to be searched afterwards.
     pub fn skip_bad_noisy(&mut self) {
         self.bad_cur = self.bad_end;
     }
@@ -80,10 +79,15 @@ impl MovePicker {
         while self.stage != Stage::Done {
             match self.stage {
                 Stage::HashMove => {
-                    self.stage = if self.skip_quiets {
-                        Stage::QSearchCaptures
-                    } else if td.board.in_check() {
+                    // In-check nodes always go through the dedicated evasion
+                    // generator (king retreats, blocks, and captures), even
+                    // when quiets are being skipped (qsearch/ProbCut) --
+                    // otherwise a node in check can be left with no legal
+                    // reply generated at all.
+                    self.stage = if td.board.in_check() {
                         Stage::Evasions
+                    } else if self.skip_quiets {
+                        Stage::QSearchCaptures
                     } else {
                         Stage::GenerateCaptures
                     };
@@ -110,7 +114,7 @@ impl MovePicker {
 
                 Stage::GenerateQuiets => {
                     if self.skip_quiets {
-                        self.stage = Stage::BadCaptures;
+                        self.stage = Stage::BadNoisy;
                     } else {
                         self.generate_and_score_quiets(td, ply);
                         self.stage = Stage::GoodQuiets;
@@ -122,21 +126,9 @@ impl MovePicker {
                         if mv == self.tt_move {
                             continue;
                         }
-                        // Defer quiets with bad history scores until after bad captures
+                        // Defer quiets with bad history scores until after bad noisy moves
                         if self.moves[self.cur - 1].score < Self::GOOD_QUIET_THRESHOLD {
-                            self.stage = Stage::BadCaptures;
-                            continue;
-                        }
-                        return Some(mv);
-                    }
-                    self.stage = Stage::BadCaptures;
-                }
-
-                Stage::BadCaptures => {
-                    if self.bad_cur < self.bad_end {
-                        let mv = self.bad_captures[self.bad_cur].mv;
-                        self.bad_cur += 1;
-                        if mv == self.tt_move {
+                            self.stage = Stage::BadNoisy;
                             continue;
                         }
                         return Some(mv);
@@ -146,7 +138,6 @@ impl MovePicker {
 
                 Stage::BadNoisy => {
                     if self.bad_cur < self.bad_end {
-                        // Logic for bad noisy moves
                         let mv = self.bad_captures[self.bad_cur].mv;
                         self.bad_cur += 1;
                         if mv == self.tt_move {
@@ -177,7 +168,7 @@ impl MovePicker {
                         }
                         return Some(mv);
                     }
-                    self.stage = Stage::Done;
+                    self.stage = Stage::BadNoisy;
                 }
 
                 Stage::Evasions => {
@@ -217,6 +208,24 @@ impl MovePicker {
         Some(mv)
     }
 
+    fn score_capture(&self, td: &ThreadData, mv: Move) -> (bool, i32) {
+        let threshold = self.threshold.unwrap_or(0);
+        let is_good = td.board.see(mv, threshold);
+        let score = (if is_good { 1000 } else { -1000 })
+            + td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), td.board.type_on(mv.capture_sq()));
+        (is_good, score)
+    }
+
+    fn score_quiet(&self, td: &ThreadData, ply: isize, mv: Move) -> i32 {
+        td.quiet_history.get(td.board.all_threats(), td.board.side_to_move(), mv)
+            + 1479 * td.conthist(ply, 1, mv) / 1024
+            + 977 * td.conthist(ply, 2, mv) / 1024
+            + 277 * td.conthist(ply, 3, mv) / 1024
+            + 995 * td.conthist(ply, 4, mv) / 1024
+            + 126 * td.conthist(ply, 5, mv) / 1024
+            + 963 * td.conthist(ply, 6, mv) / 1024
+    }
+
     fn generate_and_score_captures(&mut self, td: &ThreadData) {
         let mut move_list = MoveList::new();
         td.board.append_noisy_moves(&mut move_list);
@@ -228,8 +237,7 @@ impl MovePicker {
 
         for entry in move_list.iter() {
             let mv = entry.mv;
-            let is_good = td.board.see(mv, 0);
-            let score = (if is_good { 1000 } else { -1000 }) + td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), td.board.type_on(mv.capture_sq()));
+            let (is_good, score) = self.score_capture(td, mv);
 
             if is_good {
                 self.moves[self.end] = ScoredMove { mv, score };
@@ -250,13 +258,7 @@ impl MovePicker {
 
         for entry in move_list.iter() {
             let mv = entry.mv;
-            let score = td.quiet_history.get(td.board.all_threats(), td.board.side_to_move(), mv)
-                + 1479 * td.conthist(ply, 1, mv) / 1024
-                + 977 * td.conthist(ply, 2, mv) / 1024
-                + 277 * td.conthist(ply, 3, mv) / 1024
-                + 995 * td.conthist(ply, 4, mv) / 1024
-                + 126 * td.conthist(ply, 5, mv) / 1024
-                + 963 * td.conthist(ply, 6, mv) / 1024;
+            let score = self.score_quiet(td, ply, mv);
             self.moves[self.end] = ScoredMove { mv, score };
             self.end += 1;
         }
@@ -272,15 +274,10 @@ impl MovePicker {
         for entry in move_list.iter() {
             let mv = entry.mv;
             let score = if mv.is_capture() {
-                10000 + if td.board.see(mv, 0) { 1000 } else { -1000 } + td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), td.board.type_on(mv.capture_sq()))
+                let (_, capture_score) = self.score_capture(td, mv);
+                10000 + capture_score
             } else {
-                td.quiet_history.get(td.board.all_threats(), td.board.side_to_move(), mv)
-                + 1479 * td.conthist(ply, 1, mv) / 1024
-                + 977 * td.conthist(ply, 2, mv) / 1024
-                + 277 * td.conthist(ply, 3, mv) / 1024
-                + 995 * td.conthist(ply, 4, mv) / 1024
-                + 126 * td.conthist(ply, 5, mv) / 1024
-                + 963 * td.conthist(ply, 6, mv) / 1024
+                self.score_quiet(td, ply, mv)
             };
             self.moves[self.end] = ScoredMove { mv, score };
             self.end += 1;

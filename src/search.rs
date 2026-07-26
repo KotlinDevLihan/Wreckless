@@ -609,18 +609,6 @@ fn search<NODE: NodeType>(
 
 
     // Razoring
-    //
-    // Byte-for-byte upstream Reckless: `alpha - 237 - 254 * depth * depth`,
-    // with no correction-history widening, no cutoff-count bonus and no
-    // opponent-worsening term. All three were fork additions.
-    //
-    // `razor_corr` and `razor_cutoff` had briefly been restored here on the
-    // grounds that 0.1.2 carried them and 0.1.2 "measured neutral". That
-    // premise was wrong: the SPRT base is upstream Reckless, not 0.1.2, and
-    // 0.1.2 is itself a fork build carrying the same stack of unverified
-    // changes. Measuring one unverified build against another proves nothing,
-    // so the only meaningful reference for a block like this is upstream's
-    // own -- and upstream has none of these terms.
     if !NODE::PV
         && !in_check
         && estimated_score < alpha - p::razor_base() - p::razor_quad() * depth * depth
@@ -635,11 +623,6 @@ fn search<NODE: NodeType>(
     if !tt_pv
         && !in_check
         && !excluded
-        // Two fork additions removed so this block is upstream Reckless's
-        // again: an opponent-worsening term in the margin, and a guard that
-        // skipped RFP entirely when the TT move was a quiet with history
-        // below -2048. Every constant here (1140/120/22/669/54/19) already
-        // matched upstream exactly; those two were the only differences.
         && estimated_score
             >= beta
                 + (p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
@@ -1013,17 +996,17 @@ fn search<NODE: NodeType>(
             // Both are fixed by reading the lags that are written, at the same
             // relative strengths the update uses (lag3 = 195/700 ~ 2/7,
             // lag5 = 89/700 ~ 1/8, lag6 = 1/2), and then normalising the group
-            // back onto upstream's two units: the raw sum is 2.911 units, so
-            // 11/16 (0.6875) restores 2.0. The extra lags now contribute their
-            // information and nothing downstream is silently rescaled.
+            // back onto upstream's two units: the raw sum is 3.911 units, so
+            // dividing by 2 (0.50) restores 1.95. The extra lags now contribute
+            // their information and nothing downstream is silently rescaled.
             td.quiet_history.get(td.board.all_threats(), stm, mv)
                 + (td.conthist(ply, 1, mv)
                     + td.conthist(ply, 2, mv)
                     + td.conthist(ply, 3, mv) * 2 / 7
+                    + td.conthist(ply, 4, mv)
                     + td.conthist(ply, 5, mv) / 8
                     + td.conthist(ply, 6, mv) / 2)
-                    * 11
-                    / 16
+                    / 2
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
             capture_stat = p::lmr_capture_stat() * captured_type.value() / 64;

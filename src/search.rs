@@ -657,18 +657,23 @@ fn search<NODE: NodeType>(
         // Zugzwang guard. Upstream gates on `material() > 491`, which counts
         // pawns; this fork switched to `non_pawn_material()` -- the correct
         // signal, since zugzwang risk is about having no useful *piece* moves
-        // -- but kept upstream's threshold, and the two quantities differ by
-        // the whole pawn mass (16 * 109 = 1744 at the start). Against
-        // non-pawn material, 491 is a much stricter gate: upstream permits
-        // null-move pruning in pawn-only and single-minor endgames, this
-        // forbids it there.
+        // -- and non_pawn_material() already nets out the board's actual
+        // current pawn count (see board.rs), so no compensating offset is
+        // needed here at all. The previous `1744 +` term assumed a full
+        // 16-pawn set regardless of how many pawns remain, which double-
+        // subtracts pawn mass as pawns come off the board: in a 4-pawns-a-
+        // side endgame it demanded total material above ~3100 before NMP was
+        // even considered, against upstream's 491, effectively disabling NMP
+        // for most of the game -- backwards for a guard whose whole point is
+        // to stay enabled through material simplification and only bite in
+        // truly bare, piece-empty positions. Comparing non_pawn_material()
+        // straight against nmp_material() matches the semantic fix this
+        // comment already argued for, without the extra offset.
         //
-        // Exposed as a tunable rather than silently re-guessed. The semantic
-        // fix is right and worth keeping; the constant that goes with it has
-        // never been measured, and this is the same "changed what it measures,
-        // kept the constant" pattern as the `history` and `corr_weight_div`
-        // bugs. Let SPSA settle it.
-        && td.board.non_pawn_material() > 1744 + 491
+        // The 491 magnitude itself is still unverified against this
+        // (corrected) quantity -- exposed as a tunable rather than silently
+        // re-guessed. Let SPSA settle it.
+        && td.board.non_pawn_material() > p::nmp_material()
         && !is_loss(beta)
         && !is_win(estimated_score)
         && !(tt_bound == Bound::Lower

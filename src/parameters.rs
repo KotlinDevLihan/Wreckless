@@ -163,7 +163,14 @@ define! {
     // Move-count scaling is a real technique and upstream uses it; this is not
     // a verdict on the idea, only on shipping an untested magnitude for it.
     // Re-introduce it as its own SPRT, not bundled with anything else.
-    i32 lmr_movecount_ilog: 6;
+    // Zeroed rather than left at the "parked" 6. 6 was picked only to match
+    // 0.1.2's bench tree size, not because it was measured neutral or good --
+    // the comment above documents the response as badly non-monotonic
+    // (240 -> 2.20M nodes, 90 -> 2.25M, 40 -> 2.50M, 22 -> 2.41M, 12 -> 2.71M,
+    // 6 -> 2.64M, 0 -> 2.74M). 6 is untested, not safe; 0 is the one point on
+    // that curve that is actually verified (it's simply the term switched
+    // off). Re-enable only behind its own isolated SPRT, per the note above.
+    i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     i32 lmr_exact: 1412;
@@ -217,7 +224,11 @@ define! {
     // alongside lmr_movecount_ilog and for the same reason, preserving that
     // ratio; likewise still untested and likewise only recently reachable by
     // SPSA.
-    i32 fds_movecount_ilog: 5;
+    // Zeroed for the same reason as lmr_movecount_ilog above: this is its
+    // untested FDS twin, scaled down by the same ratio but never itself
+    // measured at any nonzero value. Re-enable only behind its own isolated
+    // SPRT.
+    i32 fds_movecount_ilog: 0;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

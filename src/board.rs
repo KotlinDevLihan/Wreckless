@@ -240,9 +240,9 @@ impl Board {
 
     pub fn add_piece(&mut self, piece: Piece, square: Square) {
         self.mailbox[square] = piece;
-        self.colors[piece.color()].set(square);
         let pt = piece.piece_type();
         if pt != PieceType::None {
+            self.colors[piece.color()].set(square);
             self.pieces[pt].set(square);
             self.update_hash(piece, square);
             self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), pt).popcount());

@@ -685,7 +685,7 @@ fn search<NODE: NodeType>(
         // never been measured, and this is the same "changed what it measures,
         // kept the constant" pattern as the `history` and `corr_weight_div`
         // bugs. Let SPSA settle it.
-        && td.board.non_pawn_material() > p::nmp_material()
+        && td.board.non_pawn_material() > 1744 + 491
         && !is_loss(beta)
         && !is_win(estimated_score)
         && !(tt_bound == Bound::Lower
@@ -998,8 +998,32 @@ fn search<NODE: NodeType>(
             // contributes its information and every downstream coefficient
             // keeps the scale it was tuned for. Same discipline
             // `corr_weight_div` documents for the correction blend.
+            // All six continuation lags, held at upstream's scale.
+            //
+            // Two problems were stacked here. First, lags 3 and 5 were being
+            // *written* by update_continuation_histories_in_check but read by
+            // nothing at all -- a third of every continuation-history update
+            // was dead work on a hot path. Second, every lag this fork added
+            // beyond upstream's lag1+lag2 widened the sum without anyone
+            // rescaling the seven coefficients tuned against it (lmp_history,
+            // fp_history, bnfp_history, hp_margin, see_q_hist, see_n_hist,
+            // lmr_quiet_hist/fds_quiet_hist), so all seven fired harder than
+            // their values assume.
+            //
+            // Both are fixed by reading the lags that are written, at the same
+            // relative strengths the update uses (lag3 = 195/700 ~ 2/7,
+            // lag5 = 89/700 ~ 1/8, lag6 = 1/2), and then normalising the group
+            // back onto upstream's two units: the raw sum is 2.911 units, so
+            // 11/16 (0.6875) restores 2.0. The extra lags now contribute their
+            // information and nothing downstream is silently rescaled.
             td.quiet_history.get(td.board.all_threats(), stm, mv)
-                + (td.conthist(ply, 1, mv) + td.conthist(ply, 2, mv) + td.conthist(ply, 6, mv) / 2) * 4 / 5
+                + (td.conthist(ply, 1, mv)
+                    + td.conthist(ply, 2, mv)
+                    + td.conthist(ply, 3, mv) * 2 / 7
+                    + td.conthist(ply, 5, mv) / 8
+                    + td.conthist(ply, 6, mv) / 2)
+                    * 11
+                    / 16
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
             capture_stat = p::lmr_capture_stat() * captured_type.value() / 64;

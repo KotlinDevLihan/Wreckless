@@ -241,18 +241,24 @@ impl Board {
     pub fn add_piece(&mut self, piece: Piece, square: Square) {
         self.mailbox[square] = piece;
         self.colors[piece.color()].set(square);
-        self.pieces[piece.piece_type()].set(square);
-        self.update_hash(piece, square);
-        self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), piece.piece_type()).popcount());
+        let pt = piece.piece_type();
+        if pt != PieceType::None {
+            self.pieces[pt].set(square);
+            self.update_hash(piece, square);
+            self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), pt).popcount());
+        }
     }
 
     pub fn remove_piece(&mut self, square: Square) -> Piece {
         let piece = self.mailbox[square];
-        self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), piece.piece_type()).popcount());
-        self.mailbox[square] = Piece::None;
-        self.colors[piece.color()].clear(square);
-        self.pieces[piece.piece_type()].clear(square);
-        self.update_hash(piece, square);
+        let pt = piece.piece_type();
+        if pt != PieceType::None {
+            self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), pt).popcount());
+            self.mailbox[square] = Piece::None;
+            self.colors[piece.color()].clear(square);
+            self.pieces[pt].clear(square);
+            self.update_hash(piece, square);
+        }
         piece
     }
 

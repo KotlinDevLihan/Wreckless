@@ -66,7 +66,7 @@ pub enum Bound {
 }
 
 /// Internal representation of a transposition table entry (8 bytes).
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct InternalEntry {
     mv: Move,         // 2 bytes
@@ -85,13 +85,6 @@ impl InternalEntry {
 pub enum TtDepth {}
 
 impl TtDepth {
-    // NONE must decode uniquely from the raw zero-initialized byte a
-    // genuinely never-written slot has (offset_depth == 0). The old
-    // depth+1 encoding put SOME (-1) at that same offset_depth == 0, so an
-    // empty slot was indistinguishable from a real SOME-depth write --
-    // silently disabling the "found a genuinely free slot" fast path in
-    // write()'s replacement logic, which could never trigger. Shifted the
-    // encoding by one more step so offset_depth == 0 uniquely means NONE.
     pub const NONE: i32 = -2;
     pub const SOME: i32 = -1;
 
@@ -112,36 +105,37 @@ impl InternalEntry {
 
 #[repr(align(32))]
 struct Cluster {
-    entries: [InternalEntry; ENTRIES_PER_CLUSTER],
-    // Packs all 3 entries' 16-bit verification keys into one word. Must be
-    // atomic: every lazy-SMP thread calls write() concurrently via a raw
-    // pointer (see TranspositionTable::write), and a plain read-modify-write
-    // here let one thread's set_key() clobber a *different* thread's update
-    // to a sibling slot's key with a stale read -- corrupting an entry the
-    // writing thread never touched, worse than the accepted "torn own
-    // entry" tradeoff this lock-free design otherwise relies on.
+    // Atomic entries to prevent data tearing during concurrent write/probe
+    entries: [AtomicU64; ENTRIES_PER_CLUSTER],
+    // Packs all 3 entries' 16-bit verification keys into one word.
     keys: AtomicU64,
 }
 
 impl Cluster {
     fn key(&self, index: usize) -> u16 {
-        verification_key(self.keys.load(Ordering::Relaxed) >> (index * 16))
+        verification_key(self.keys.load(Ordering::Acquire) >> (index * 16))
     }
 
     fn set_key(&self, index: usize, key: u16) {
         let mask = 0xFFFFu64 << (index * 16);
         let bits = (key as u64) << (index * 16);
-        // fetch_update's closure always returns Some, so this never fails
-        // and never needs a retry beyond the CAS loop it already performs.
-        let _ = self.keys.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| Some((old & !mask) | bits));
+        let _ = self.keys.fetch_update(Ordering::Release, Ordering::Acquire, |old| Some((old & !mask) | bits));
     }
 
     fn lookup_key(&self, key: u16) -> usize {
         let bits = 0x0001_0001_0001_0001;
         let needle = key as u64 * bits;
-        let zeros = self.keys.load(Ordering::Relaxed) ^ needle;
+        let zeros = self.keys.load(Ordering::Acquire) ^ needle;
         let matches = zeros.wrapping_sub(bits) & !zeros & (bits << 15);
         (matches.trailing_zeros() / 16) as usize
+    }
+
+    fn read_entry(&self, index: usize) -> InternalEntry {
+        unsafe { std::mem::transmute(self.entries[index].load(Ordering::Acquire)) }
+    }
+
+    fn write_entry(&self, index: usize, entry: InternalEntry) {
+        self.entries[index].store(unsafe { std::mem::transmute(entry) }, Ordering::Release);
     }
 }
 
@@ -155,13 +149,11 @@ pub struct TranspositionTable {
 unsafe impl Sync for TranspositionTable {}
 
 impl TranspositionTable {
-    /// Clears the transposition table. This will remove all entries but keep the allocated memory.
     pub fn clear(&self, threads: usize) {
         unsafe { parallel_clear(threads, self.ptr(), self.len()) };
         self.age.store(0, Ordering::Relaxed);
     }
 
-    /// Resizes the transposition table to the specified size in megabytes. This will clear all entries.
     pub fn resize(&self, threads: usize, megabytes: usize) {
         unsafe { deallocate(self.ptr(), self.len()) };
 
@@ -172,14 +164,14 @@ impl TranspositionTable {
         self.age.store(0, Ordering::Relaxed);
     }
 
-    /// Returns the approximate load factor of the transposition table in permille (on a scale of `0` to `1000`).
     pub fn hashfull(&self) -> usize {
         let age = self.age();
         let clusters = unsafe { std::slice::from_raw_parts(self.ptr(), self.len()) };
 
         let mut count = 0;
         for cluster in clusters.iter().take(1000) {
-            for entry in &cluster.entries {
+            for i in 0..ENTRIES_PER_CLUSTER {
+                let entry = cluster.read_entry(i);
                 count += (entry.flags.bound() != Bound::None && entry.flags.age() == age) as usize;
             }
         }
@@ -200,8 +192,8 @@ impl TranspositionTable {
         let key = verification_key(hash);
         let index = cluster.lookup_key(key);
 
-        if index < cluster.entries.len() {
-            let entry = &cluster.entries[index];
+        if index < ENTRIES_PER_CLUSTER {
+            let entry = cluster.read_entry(index);
 
             let hit = Entry {
                 depth: entry.depth(),
@@ -223,7 +215,6 @@ impl TranspositionTable {
         &self, hash: u64, depth: i32, raw_eval: i32, mut score: i32, bound: Bound, mv: Move, ply: isize, tt_pv: bool,
         force: bool,
     ) {
-        // Used for checking if an entry exists
         debug_assert!(depth != TtDepth::NONE);
 
         let cluster = {
@@ -236,13 +227,14 @@ impl TranspositionTable {
 
         let replacement_index = {
             let lookup_index = cluster.lookup_key(key);
-            if lookup_index < cluster.entries.len() {
+            if lookup_index < ENTRIES_PER_CLUSTER {
                 lookup_index
             } else {
                 let mut replacement_index = None;
                 let mut lowest_quality = i32::MAX;
 
-                for (index, candidate) in cluster.entries.iter().enumerate() {
+                for index in 0..ENTRIES_PER_CLUSTER {
+                    let candidate = cluster.read_entry(index);
                     if candidate.depth() == TtDepth::NONE {
                         replacement_index = Some(index);
                         break;
@@ -260,7 +252,7 @@ impl TranspositionTable {
         };
 
         let entry_key = cluster.key(replacement_index);
-        let entry = &mut cluster.entries[replacement_index];
+        let mut entry = cluster.read_entry(replacement_index);
 
         if !(entry_key == key && mv.is_null()) {
             entry.mv = mv;
@@ -270,7 +262,6 @@ impl TranspositionTable {
             return;
         }
 
-        // Adjust mate distance from "plies from the root" to "plies from the current position"
         if is_decisive(score) && is_valid(score) {
             score += score.signum() * ply as i32;
         }
@@ -279,6 +270,8 @@ impl TranspositionTable {
         entry.score = score as i16;
         entry.raw_eval = raw_eval as i16;
         entry.flags = Flags::new(bound, tt_pv, tt_age);
+        
+        cluster.write_entry(replacement_index, entry);
         cluster.set_key(replacement_index, key);
     }
 
@@ -292,7 +285,6 @@ impl TranspositionTable {
             _mm_prefetch::<_MM_HINT_T0>(ptr);
         }
 
-        // No prefetching for non-x86_64 architectures
         #[cfg(not(target_arch = "x86_64"))]
         let _ = hash;
     }
@@ -311,49 +303,35 @@ impl TranspositionTable {
 }
 
 const fn index(hash: u64, len: usize) -> usize {
-    // Fast hash table index calculation
-    // For details, see: https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction
     (((hash as u128) * (len as u128)) >> 64) as usize
 }
 
-/// Returns the verification key of the hash (bottom 16 bits).
 const fn verification_key(hash: u64) -> u16 {
     hash as u16
 }
 
-/// Adjust mate distance from "plies from the root" to "plies from the current position".
 const fn score_from_tt(score: i32, ply: isize, halfmove_clock: u8) -> i32 {
     if score == Score::NONE {
         return Score::NONE;
     }
 
-    // Handle TB win or better
     if is_win(score) {
-        // Downgrade a potentially false mate score
         if score >= Score::MATE_IN_MAX && Score::MATE - score > 100 - halfmove_clock as i32 {
             return Score::TB_WIN_IN_MAX - 1;
         }
-
-        // Downgrade a potentially false TB score.
         if Score::TB_WIN - score > 100 - halfmove_clock as i32 {
             return Score::TB_WIN_IN_MAX - 1;
         }
-
         return score - ply as i32;
     }
 
-    // Handle TB loss or worse
     if is_loss(score) {
-        // Downgrade a potentially false mate score.
         if score <= -Score::MATE_IN_MAX && Score::MATE + score > 100 - halfmove_clock as i32 {
             return -Score::TB_WIN_IN_MAX + 1;
         }
-
-        // Downgrade a potentially false TB score.
         if Score::TB_WIN + score > 100 - halfmove_clock as i32 {
             return -Score::TB_WIN_IN_MAX + 1;
         }
-
         return score + ply as i32;
     }
 
@@ -423,10 +401,6 @@ unsafe fn deallocate(ptr: *mut Cluster, len: usize) {
     }
 }
 
-/// Large-page allocation on Windows: enabling `SeLockMemoryPrivilege` and committing
-/// with `MEM_LARGE_PAGES` maps the table with 2 MB pages, which greatly reduces TLB
-/// misses on probes. Falls back to a regular `VirtualAlloc` when the privilege is not
-/// held (it requires "Lock pages in memory" rights or an elevated prompt).
 #[cfg(target_os = "windows")]
 pub(crate) mod windows {
     type Handle = *mut std::ffi::c_void;

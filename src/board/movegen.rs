@@ -37,6 +37,44 @@ impl super::Board {
         self.generate_moves(list, MovegenKind::Noisy);
     }
 
+    pub fn append_evasions(&self, list: &mut MoveList) {
+        let stm = self.side_to_move();
+        let king_sq = self.king_square(stm);
+        let checkers = self.checkers();
+
+        // 1. King evasions
+        list.push_setwise(king_sq, king_attacks(king_sq) & !self.all_threats() & !self.colors(stm), MoveKind::Normal);
+
+        // If in check by multiple pieces, only king moves are legal
+        if checkers.is_multiple() {
+            return;
+        }
+
+        // 2. Block or capture the checker
+        let checker_sq = checkers.lsb();
+        let target = between(king_sq, checker_sq) | checkers;
+        let kind_target = target & !self.occupancies() | (target & self.colors(!stm));
+        
+        // Pawn evasions
+        self.collect_pawn_moves(list, target, self.pinned(stm), MovegenKind::Noisy);
+        
+        // Piece evasions
+        let pinned = self.pinned(stm);
+        let occupancies = self.occupancies();
+        
+        for knight in self.colored_pieces(stm, PieceType::Knight) & !pinned {
+            list.push_setwise(knight, knight_attacks(knight) & kind_target, MoveKind::Capture);
+        }
+        
+        let bishops = self.colored_pieces(stm, PieceType::Bishop);
+        let rooks = self.colored_pieces(stm, PieceType::Rook);
+        let queens = self.colored_pieces(stm, PieceType::Queen);
+
+        self.collect::<_>(list, target, bishops, MoveKind::Capture, pinned, |sq| bishop_attacks(sq, occupancies));
+        self.collect::<_>(list, target, rooks, MoveKind::Capture, pinned, |sq| rook_attacks(sq, occupancies));
+        self.collect::<_>(list, target, queens, MoveKind::Capture, pinned, |sq| queen_attacks(sq, occupancies));
+    }
+
     fn generate_moves(&self, list: &mut MoveList, mgkind: MovegenKind) {
         let stm = self.side_to_move();
         let occupancies = self.occupancies();

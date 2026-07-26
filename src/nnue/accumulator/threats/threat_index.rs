@@ -104,8 +104,8 @@ pub fn threat_index(piece: Piece, from: Square, attacked: Piece, to: Square, mir
     let from = from.relative_to(pov) ^ (7 * (mirrored as u8));
     let to = to.relative_to(pov) ^ (7 * (mirrored as u8));
 
-    let attacking = (piece as usize) ^ (pov as usize);
-    let attacked = (attacked as usize) ^ (pov as usize);
+    let attacking = ((piece as usize) ^ (pov as usize)).clamp(0, 11);
+    let attacked = ((attacked as usize) ^ (pov as usize)).clamp(0, 11);
 
     unsafe {
         let pair = PIECE_PAIR_LOOKUP[attacking][attacked];

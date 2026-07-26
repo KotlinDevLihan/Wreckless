@@ -143,11 +143,20 @@ impl PstAccumulator {
         let vacc = self.values[pov].as_mut_ptr();
         let vprev = prev.values[pov].as_ptr();
 
-        let adds = adds.map(|add| parameters.ft_piece_weights[add as usize].as_ptr());
-        let subs = subs.map(|sub| parameters.ft_piece_weights[sub as usize].as_ptr());
+        let adds = adds.map(|add| {
+            let idx = (add as usize) % parameters.ft_piece_weights.len();
+            parameters.ft_piece_weights[idx].as_ptr()
+        });
+        let subs = subs.map(|sub| {
+            let idx = (sub as usize) % parameters.ft_piece_weights.len();
+            parameters.ft_piece_weights[idx].as_ptr()
+        });
 
         for i in (0..L1_SIZE).step_by(simd::I16_LANES) {
-            // SAFETY: the loop walks the fixed L1 buffer in lane-sized steps.
+            // SAFETY: Ensure we do not access memory out of bounds.
+            if i + simd::I16_LANES > L1_SIZE {
+                break;
+            }
             unsafe {
                 let mut v = *vprev.add(i).cast();
                 for weights in adds {

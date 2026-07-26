@@ -104,17 +104,17 @@ define! {
     i32 probcut_beta_step: 197;
 
     // Late Move Pruning
-    i32 lmp_base: 3200;
+    i32 lmp_base: 2818;
     i32 lmp_improvement: 78;
     i32 lmp_quad: 1351;
-    i32 lmp_history: 50;
+    i32 lmp_history: 74;
 
     // Futility Pruning
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;
     i32 fp_corr: 555;
-    i32 fp_base: 100;
+    i32 fp_base: 127;
 
     // Bad Noisy Futility Pruning
     i32 bnfp_depth: 84;
@@ -142,12 +142,12 @@ define! {
     // range on review, to keep quiet SEE pruning a little less eager at nodes
     // whose children have been producing cutoffs; untested either way.
     i32 see_q_cutoff: 48;
-    i32 see_q_base: 20;
+    i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
     i32 see_n_cutoff: 37;
-    i32 see_n_base: 10;
+    i32 see_n_base: 14;
 
     // Late Move Reductions
     i32 lmr_ilog: 269;
@@ -158,21 +158,29 @@ define! {
     // magnitude mirrors lmr_ilog's own role as a log2-scaled base term;
     // genuinely untested and needs SPSA/SPRT before trusting the value.
     //
-    // Lowered from 240. At that value this single term was doing essentially
-    // all of the engine's over-pruning relative to 0.1.2: zeroing it alone
-    // moved the bench tree from 2.20M to 2.74M nodes, while zeroing
-    // hp_noisy_margin, qs_delta_margin and see_*_cutoff moved it by -19k,
-    // +54k and +51k respectively. That left the engine searching a tree ~16%
-    // *smaller* than the last build to measure neutral, at the same nominal
-    // depth -- same depth, thinner search, which is consistent with the
-    // engine matching base on depth in games while losing badly.
+    // PARKED LOW, not tuned. At 240 this single term was doing essentially all
+    // of the engine's over-pruning relative to 0.1.2: zeroing it alone moved
+    // the bench tree from 2.20M to 2.74M nodes, while zeroing hp_noisy_margin,
+    // qs_delta_margin and see_*_cutoff moved it by -19k, +54k and +51k. That
+    // left the engine searching a tree ~16% *smaller* than the last build to
+    // measure neutral, at the same nominal depth -- same depth, thinner
+    // search, which matches what the games showed: level on depth with base
+    // (20.41 vs 20.65) while losing at -87 Elo.
     //
     // It reduces every late move by `value * log2(move_count) / 1024`, so at
-    // move 32 it was removing over a full ply on its own. 90 keeps the
-    // mechanism doing real work while landing the tree back near 0.1.2's.
-    // Still untested, and now actually reachable by SPSA -- this parameter
-    // was missing from spsa.config entirely until recently.
-    i32 lmr_movecount_ilog: 90;
+    // move 32 and 240 it was removing over a full ply by itself. 6 was picked
+    // to put the bench tree back on 0.1.2's (2.64M against 2.61M); be honest
+    // about what that means -- at this magnitude the term is close to inert
+    // (0.03 ply at move 32). It is parked here rather than deleted so SPSA can
+    // still explore it, and because the response is badly non-monotonic
+    // (240 -> 2.20M, 90 -> 2.25M, 40 -> 2.50M, 22 -> 2.41M, 12 -> 2.71M,
+    // 6 -> 2.64M, 0 -> 2.74M), which is itself a reason not to trust any
+    // hand-picked value here.
+    //
+    // Move-count scaling is a real technique and upstream uses it; this is not
+    // a verdict on the idea, only on shipping an untested magnitude for it.
+    // Re-introduce it as its own SPRT, not bundled with anything else.
+    i32 lmr_movecount_ilog: 6;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     i32 lmr_exact: 1412;
@@ -228,7 +236,7 @@ define! {
     // alongside lmr_movecount_ilog and for the same reason, preserving that
     // ratio; likewise still untested and likewise only recently reachable by
     // SPSA.
-    i32 fds_movecount_ilog: 69;
+    i32 fds_movecount_ilog: 5;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

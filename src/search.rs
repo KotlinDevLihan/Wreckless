@@ -160,7 +160,14 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
                 match score {
                     s if s <= alpha => {
-                        beta = (alpha + beta) / 2;
+                        // Collapse beta all the way to the failed window's
+                        // floor so the re-search stays narrow, as in 0.1.2.
+                        // This had been changed to the `(alpha + beta) / 2`
+                        // midpoint; the full collapse is the documented
+                        // behaviour of this fork ("aspiration fail-low
+                        // rebound") and the form the neutral build carried, so
+                        // the midpoint was an untested deviation from both.
+                        beta = alpha;
                         alpha = (score - delta).max(-Score::INFINITE);
                         delta += 26 * delta / 128;
                     }

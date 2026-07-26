@@ -241,11 +241,17 @@ impl MovePicker {
                 } else {
                     0
                 }
+                // Lags 1, 2, 4 and 6 only, as in 0.1.2. Lags 3 and 5 were added
+                // here without touching `good_quiet_threshold`, which this
+                // score is compared against to split good quiets from bad ones
+                // -- the same defect as the `history` sum in search.rs and the
+                // `corr_weight_div` blend: extra terms widen the distribution
+                // while the cutoff it is measured against stays put, so the
+                // good/bad quiet split silently re-calibrates. The two terms
+                // contributed +/-6470 against a -14000 threshold.
                 + 1614 * td.conthist(ply, 1, mv) / 1024
                 + 1066 * td.conthist(ply, 2, mv) / 1024
-                + 1066 * p::conthist_lag3() * td.conthist(ply, 3, mv) / (700 * 1024)
                 + 1086 * td.conthist(ply, 4, mv) / 1024
-                + 1066 * p::conthist_lag5() * td.conthist(ply, 5, mv) / (700 * 1024)
                 + 1051 * td.conthist(ply, 6, mv) / 1024
                 + escape[pt] * threatened[pt].contains(mv.from()) as i32
                 + 10723 * td.board.checking_squares(pt).contains(mv.to()) as i32

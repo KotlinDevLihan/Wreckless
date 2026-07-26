@@ -151,6 +151,9 @@ impl Default for Status {
 pub struct SharedCorrectionHistory {
     pub pawn: CorrectionHistory,
     pub non_pawn: [CorrectionHistory; 2],
+    pub material: CorrectionHistory,
+    pub minor: CorrectionHistory,
+    pub major: CorrectionHistory,
     pub pawn_history: PawnHistory,
 }
 

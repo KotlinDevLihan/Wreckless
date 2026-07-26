@@ -1919,29 +1919,18 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
     let bucket = td.board.fiftymove_clock_bucket();
     let corrhist = td.corrhist();
 
-    // Upstream's 5-term blend: pawn, non-pawn x2, continuation x2.
-    //
-    // The material/minor/major tables this fork added are gone. Damping them
-    // from full weight to 40/128 was worth roughly +50 Elo in testing, which is
-    // the only measured result this fork has; this finishes that move. They had
-    // the largest reach of anything here -- `correction_value` and the eval
-    // built from it feed thirteen call sites: razoring, RFP, both singular
-    // margins, futility pruning, LMR, FDS, qsearch SEE, and via `eval` also NMP
-    // entry, stand-pat, improving, LMP and BNFP, across search and qsearch.
-    //
-    // The material table was the weakest of the three on its own terms:
-    // `material_key` is `ZOBRIST.pieces[piece][count]`, piece types and counts
-    // with no square information, so every position sharing a material
-    // signature shares one entry. Correction history assumes positions that
-    // hash alike have correlated static-eval error; that holds for pawn
-    // structure and non-pawn placement, but not for a material signature, where
-    // a cramped middlegame and an open endgame land in the same bucket.
-    //
-    // Removing the lookups also drops three hash probes per node from the hot
-    // path, which matters -- this engine is ~4% slower than upstream per node.
     (corrhist.pawn.get(stm, td.board.pawn_key(), bucket)
         + corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
         + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
+        // Upstream's blend summed 5 terms over corr_weight_div; material,
+        // minor, and major are all additions since, so they're grouped under
+        // one tunable weight rather than each inflating the sum at full,
+        // un-normalized strength against a divisor tuned for 5 terms.
+        + (corrhist.material.get(stm, td.board.material_key(), bucket)
+            + corrhist.minor.get(stm, td.board.minor_key(), bucket)
+            + corrhist.major.get(stm, td.board.major_key(), bucket))
+            * p::corr_minor_major()
+            / 128
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
@@ -1966,8 +1955,11 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
     corrhist.non_pawn[Color::White].update(stm, td.board.non_pawn_key(Color::White), bucket, bonus);
     corrhist.non_pawn[Color::Black].update(stm, td.board.non_pawn_key(Color::Black), bucket, bonus);
 
-    // material/minor/major updates removed alongside their reads in
-    // eval_correction() -- see the note there.
+    corrhist.material.update(stm, td.board.material_key(), bucket, bonus);
+
+    corrhist.minor.update(stm, td.board.minor_key(), bucket, bonus);
+
+    corrhist.major.update(stm, td.board.major_key(), bucket, bonus);
 
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 2].mv.is_present() {
         td.continuation_corrhist.update(

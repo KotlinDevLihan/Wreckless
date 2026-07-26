@@ -671,7 +671,21 @@ fn search<NODE: NodeType>(
         // pawn-heavy, piece-empty endgame (the textbook zugzwang scenario
         // this check exists to catch) could pass a material()-based
         // threshold. non_pawn_material() is the correct signal here.
-        && td.board.non_pawn_material() > 491
+        // Zugzwang guard. Upstream gates on `material() > 491`, which counts
+        // pawns; this fork switched to `non_pawn_material()` -- the correct
+        // signal, since zugzwang risk is about having no useful *piece* moves
+        // -- but kept upstream's threshold, and the two quantities differ by
+        // the whole pawn mass (16 * 109 = 1744 at the start). Against
+        // non-pawn material, 491 is a much stricter gate: upstream permits
+        // null-move pruning in pawn-only and single-minor endgames, this
+        // forbids it there.
+        //
+        // Exposed as a tunable rather than silently re-guessed. The semantic
+        // fix is right and worth keeping; the constant that goes with it has
+        // never been measured, and this is the same "changed what it measures,
+        // kept the constant" pattern as the `history` and `corr_weight_div`
+        // bugs. Let SPSA settle it.
+        && td.board.non_pawn_material() > p::nmp_material()
         && !is_loss(beta)
         && !is_win(estimated_score)
         && !(tt_bound == Bound::Lower
@@ -971,10 +985,21 @@ fn search<NODE: NodeType>(
             // Adding lags back is fine, but only together with a divisor that
             // holds the sum's scale fixed -- exactly the discipline
             // `corr_weight_div` now documents for the correction blend.
+            // Upstream Reckless sums `quiet_history + conthist(1) + conthist(2)`
+            // and tuned seven coefficients against that magnitude:
+            // lmp_history, fp_history, bnfp_history, hp_margin, see_q_hist,
+            // see_n_hist and lmr_quiet_hist/fds_quiet_hist. This fork adds a
+            // lag-6 term, which is worth keeping -- but it made the
+            // continuation part of the sum 2.5 units instead of 2, ~20% wider,
+            // so all seven fired harder than their tuned values assume.
+            //
+            // Normalized rather than dropped: scaling the continuation group by
+            // 4/5 puts 2.5 units back on upstream's 2, so lag 6 still
+            // contributes its information and every downstream coefficient
+            // keeps the scale it was tuned for. Same discipline
+            // `corr_weight_div` documents for the correction blend.
             td.quiet_history.get(td.board.all_threats(), stm, mv)
-                + td.conthist(ply, 1, mv)
-                + td.conthist(ply, 2, mv)
-                + td.conthist(ply, 6, mv) / 2
+                + (td.conthist(ply, 1, mv) + td.conthist(ply, 2, mv) + td.conthist(ply, 6, mv) / 2) * 4 / 5
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
             capture_stat = p::lmr_capture_stat() * captured_type.value() / 64;

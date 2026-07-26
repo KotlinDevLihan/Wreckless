@@ -58,6 +58,12 @@ define! {
     i32 nmp_r_depth: 265;
     i32 nmp_r_beta: 477;
     i32 nmp_r_beta_max: 1187;
+    // Zugzwang-guard threshold on non-pawn material. Upstream gates on
+    // `material() > 491`, which includes pawns; this fork uses
+    // `non_pawn_material()` -- the right signal -- but inherited upstream's
+    // constant unchanged, and the two quantities differ by the full pawn mass.
+    // Never measured against the quantity it now guards.
+    i32 nmp_material: 491;
 
     // ProbCut
     // Matches Stockfish's actual live value (`probCutBeta = beta + 428`) for
@@ -340,6 +346,11 @@ define! {
     i32 conthist_mult6: 121;
 
     // Move ordering
+    // Weight of the fork's low-ply-history term in score_quiet. Anchored so
+    // its ply-0 ceiling matches continuation-history lag 1 (1614 * 15320 /
+    // 8192 = 3018); at the previous 7052 it was 2.34x the next-largest
+    // ordering signal and dominated root move choice.
+    i32 lowply_weight: 3018;
     i32 good_quiet_threshold: -14000;
 
     // Qsearch SEE pruning threshold -- previously hardcoded consts with no

@@ -236,8 +236,25 @@ impl MovePicker {
 
             entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
                 + 1024 * td.corrhist().pawn_history.get(pawn_key, td.board.moved_piece(mv), mv.to()) / 1024
+                // Low-ply history is a fork addition -- upstream's score_quiet
+                // has no such term, and with the lag-3/lag-5 terms removed this
+                // is now the only difference between the two orderings.
+                //
+                // At 7052 it dominated: LowPlyHistory saturates at +/-8192, so
+                // at ply 0 this contributed up to +/-56416 against 24146 for
+                // continuation-history lag 1, 20357 for the escape bonus and
+                // 14104 for quiet history -- 2.34x the next-largest signal. Ply
+                // 0 is the root, where ordering matters most, so root move
+                // choice was being driven largely by a coarse [ply][from][to]
+                // table that knows nothing about piece type, threats or
+                // captures, ahead of the context-conditioned continuation
+                // history.
+                //
+                // Re-anchored so its ply-0 ceiling equals continuation-history
+                // lag 1 (1614 * 15320 / 8192 = 3018): still a strong signal at
+                // the plies it covers, no longer the loudest voice at the root.
                 + if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
-                    7052 * td.low_ply_history.get(ply as usize, mv) / (1024 * (1 + 2 * ply as i32))
+                    p::lowply_weight() * td.low_ply_history.get(ply as usize, mv) / (1024 * (1 + 2 * ply as i32))
                 } else {
                     0
                 }

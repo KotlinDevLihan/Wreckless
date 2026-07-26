@@ -113,18 +113,6 @@ impl Board {
         self.state.keys.non_pawn(color)
     }
 
-    pub const fn material_key(&self) -> u64 {
-        self.state.keys.material()
-    }
-
-    pub const fn minor_key(&self) -> u64 {
-        self.state.keys.minor()
-    }
-
-    pub const fn major_key(&self) -> u64 {
-        self.state.keys.major()
-    }
-
     pub const fn pinned(&self, color: Color) -> Bitboard {
         self.state.pinned[color as usize]
     }
@@ -243,12 +231,10 @@ impl Board {
         self.colors[piece.color()].set(square);
         self.pieces[piece.piece_type()].set(square);
         self.update_hash(piece, square);
-        self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), piece.piece_type()).popcount());
     }
 
     pub fn remove_piece(&mut self, square: Square) -> Piece {
         let piece = self.mailbox[square];
-        self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), piece.piece_type()).popcount());
         self.mailbox[square] = Piece::None;
         self.colors[piece.color()].clear(square);
         self.pieces[piece.piece_type()].clear(square);
@@ -533,7 +519,6 @@ impl Board {
             for square in self.colored_pieces(piece.color(), piece.piece_type()) {
                 self.update_hash(piece, square);
                 count += 1;
-                self.state.keys.toggle_material(piece, count);
             }
         }
 

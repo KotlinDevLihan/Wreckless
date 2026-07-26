@@ -295,64 +295,19 @@ define! {
     // result attached to it, and that outranks the tidier-looking one.
     i32 corr_bonus_min: 2496;
     i32 corr_bonus_max: 2496;
-    // NOTE: these two are coupled. `eval_correction()` sums 5 upstream terms
-    // plus a minor/major/material group weighted by `corr_minor_major / 128`,
-    // so the normalizing divisor that keeps the blend on upstream's scale is
-    // `upstream_div * (5 + 3 * corr_minor_major / 128) / 5`. At
-    // corr_minor_major = 128 that is 8 effective terms and gives 102.
+    // The material/minor/major correction tables this fork added are removed
+    // entirely, so the blend is upstream's original five terms (pawn,
+    // non-pawn x2, continuation x2) and the divisor is upstream's 64.
     //
-    // Keep them coupled. Setting the divisor below that figure divides the
-    // blend by less than it sums, scaling every correction value up -- the
-    // same direction as the original normalization bug documented in the
-    // README, which silently inflated every RFP/FP/LMR/NMP margin that reads
-    // `eval_correction()`, since those margins all scale with
-    // `correction_value.abs()`. A 96 was tried here and reverted for exactly
-    // that reason: it is indistinguishable from the bug the fork already paid
-    // for once. If `corr_minor_major` changes, recompute this rather than
-    // nudging it by hand.
-    //
-    // Damped from 128 (37.5% of the blend) to 40 (15.8%), divisor recomputed
-    // from 102 to 64 * (5 + 3*40/128) / 5 = 76. This group is the highest-
-    // leverage untested thing in the engine: `correction_value` and the eval
-    // built from it feed razoring, RFP, both singular margins, futility
-    // pruning, LMR, FDS, qsearch SEE, and -- through `eval` -- null move,
-    // stand-pat, improving, opponent-worsening, LMP and BNFP, in both search
-    // and qsearch. Nothing else here reaches more than a couple of decisions.
-    //
-    // The material table is the weakest of the three on its own terms:
-    // `material_key` is `ZOBRIST.pieces[piece][count]`, piece types and counts
-    // with no square information at all, so every position sharing a material
-    // signature shares one entry. Correction history assumes positions that
-    // hash alike have correlated static-eval error; that holds for pawn
-    // structure and non-pawn placement (the tables upstream tuned) but not for
-    // a material signature, where a cramped middlegame and an open endgame
-    // land in the same bucket. Rescaling fixes the blend's magnitude, not
-    // whether a term carries information -- which is why the earlier divisor
-    // fix, correct as it was, could only ever have been half the story.
-    // Reverted to 102/128, the coupled pair carried by 0.1.2 (`4135b69`).
-    // The 76/40 pair below this comment was a deliberate, reasoned damping
-    // (128 -> 40 for corr_minor_major, divisor recomputed to keep the blend's
-    // scale consistent) but by the surrounding comment's own admission was
-    // never itself measured, and is described there as "the highest-leverage
-    // untested thing in the engine" -- correction_value feeds razoring, RFP,
-    // both singular margins, futility pruning, LMR, FDS, qsearch SEE, and
-    // through `eval` also null move, stand-pat, improving,
-    // opponent-worsening, LMP and BNFP, in both search and qsearch. Given
-    // that reach, an unmeasured deviation from the last verified pair is a
-    // bigger risk than the mistuning it was trying to fix. Revert first,
-    // then let SPSA re-explore from the verified baseline rather than from
-    // an untested guess.
-    // SPRT CANDIDATE B (untested): damps the material/minor/major
-    // correction group to 40 (~15.8% of the blend, divisor recomputed to
-    // 64 * (5 + 3*40/128) / 5 = 76) instead of trusting it at full weight
-    // (128/102) alongside the three terms upstream actually tuned.
-    // Rationale: material_key has no square information (piece types and
-    // counts only), so a cramped middlegame and open endgame sharing a
-    // material signature share one entry -- a weaker signal than
-    // pawn/non-pawn correction history. Isolated change -- corr_bonus_min/
-    // max left untouched.
-    i32 corr_weight_div: 76;
-    i32 corr_minor_major: 40;
+    // This finishes a move that was actually measured: damping that group from
+    // full weight (128, divisor 102) to 40 (divisor 76) was worth roughly
+    // +50 Elo -- the only measured result this fork has. The coupling rule was
+    // `corr_weight_div = 64 * (5 + 3 * corr_minor_major / 128) / 5`, so at
+    // weight 0 the divisor is 64. Keep that discipline if the tables ever come
+    // back: an undersized divisor divides the blend by less than it sums and
+    // inflates every margin reading `correction_value.abs()`, which the README
+    // identifies as the source of past Elo losses.
+    i32 corr_weight_div: 64;
 
     // Continuation history
     //

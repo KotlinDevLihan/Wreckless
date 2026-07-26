@@ -38,31 +38,12 @@ define! {
     // Razoring
     i32 razor_base: 237;
     i32 razor_quad: 254;
-    // Both of these are present in 0.1.2 (`4135b69`), the last build that
-    // measured neutral, so they are part of the baseline rather than
-    // speculative additions. They were removed alongside `razor_worsening`
-    // when the razoring extras were pruned; only `razor_worsening` was
-    // genuinely new, and only it stayed removed. `razor_cutoff` is 65 because
-    // that is the literal 0.1.2 used, not the 270 a later parameterization
-    // guessed at.
-    i32 razor_corr: 300;
-    i32 razor_cutoff: 65;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
-    // Restored to 20, the value carried by 0.1.2 (`4135b69`). It had been
-    // raised to 46 by "splitting evenly" toward parity with rfp_no_threats --
-    // an admittedly speculative move with nothing measured behind it.
-    //
-    // 20 also happens to be what upstream works out to. Stockfish folds this
-    // signal in as `335 * opponentWorsening * futilityMult / 1024`, and with
-    // `futilityMult = min(45 + 4 * depth, 85)` that is ~21cp at mid depths and
-    // ~28cp at high ones. So 20 sits right on upstream's effective value and 46
-    // is roughly double it.
-    i32 rfp_worsening: 20;
     i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
 
@@ -77,10 +58,6 @@ define! {
     i32 nmp_r_depth: 265;
     i32 nmp_r_beta: 477;
     i32 nmp_r_beta_max: 1187;
-    // Speculative: extends ttMoveHistory (an existing, already-tracked
-    // signal) into the null-move reduction depth, on the theory that a
-    // well-trusted TT move correlates with a more settled position -- a
-    // plausible connection, not a derived one.
 
     // ProbCut
     // Matches Stockfish's actual live value (`probCutBeta = beta + 428`) for
@@ -132,8 +109,8 @@ define! {
     i32 see_q_quad: 12;
     i32 see_q_lin: 56;
     i32 see_q_hist: 27;
-    // Extends the cutoff_count signal (already used in lmr_cutoff/fds_cutoff/
-    // razor_cutoff) to SEE pruning as well -- not previously used here.
+    // Extends the cutoff_count signal (already used in lmr_cutoff/fds_cutoff)
+    // to SEE pruning as well -- not previously used here.
     // Re-checked: at depth 5 the surrounding terms sum to roughly 600
     // (quad+lin+base), and an initial guess of 15 was only ~2.5% of that --
     // far weaker proportionally than lmr_cutoff/fds_cutoff are relative to
@@ -189,8 +166,6 @@ define! {
     i32 lmr_quiet_base: 2171;
     i32 lmr_quiet_hist: 179;
     i32 lmr_quiet_alpha: 418;
-    // At 437, a queen capture (value 1242) alone contributed ~8483 to the
-    // noisy `history` term feeding lmr_noisy_hist/1024 -- larger than
     // Restored to 437, the value carried by 0.1.2 (`4135b69`).
     //
     // It had been cut to ~31-36 on the reasoning that a queen capture
@@ -310,8 +285,27 @@ define! {
     // that reason: it is indistinguishable from the bug the fork already paid
     // for once. If `corr_minor_major` changes, recompute this rather than
     // nudging it by hand.
-    i32 corr_weight_div: 102;
-    i32 corr_minor_major: 128;
+    //
+    // Damped from 128 (37.5% of the blend) to 40 (15.8%), divisor recomputed
+    // from 102 to 64 * (5 + 3*40/128) / 5 = 76. This group is the highest-
+    // leverage untested thing in the engine: `correction_value` and the eval
+    // built from it feed razoring, RFP, both singular margins, futility
+    // pruning, LMR, FDS, qsearch SEE, and -- through `eval` -- null move,
+    // stand-pat, improving, opponent-worsening, LMP and BNFP, in both search
+    // and qsearch. Nothing else here reaches more than a couple of decisions.
+    //
+    // The material table is the weakest of the three on its own terms:
+    // `material_key` is `ZOBRIST.pieces[piece][count]`, piece types and counts
+    // with no square information at all, so every position sharing a material
+    // signature shares one entry. Correction history assumes positions that
+    // hash alike have correlated static-eval error; that holds for pawn
+    // structure and non-pawn placement (the tables upstream tuned) but not for
+    // a material signature, where a cramped middlegame and an open endgame
+    // land in the same bucket. Rescaling fixes the blend's magnitude, not
+    // whether a term carries information -- which is why the earlier divisor
+    // fix, correct as it was, could only ever have been half the story.
+    i32 corr_weight_div: 76;
+    i32 corr_minor_major: 40;
 
     // Continuation history
     //

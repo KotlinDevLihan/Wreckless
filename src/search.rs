@@ -607,31 +607,23 @@ fn search<NODE: NodeType>(
 
     let improving = improvement > 0;
 
-    // True when our static evaluation swung further in our favor than the
-    // opponent's symmetric expectation from one ply ago (as in Stockfish).
-    let opponent_worsening = !in_check && is_valid(td.stack[ply - 1].eval) && eval > -td.stack[ply - 1].eval;
 
     // Razoring
     //
-    // `razor_corr` and `razor_cutoff` are restored: both are present in 0.1.2
-    // (`4135b69`), the last build that measured neutral, so they belong to the
-    // baseline rather than being speculative extras. Removing them was a
-    // deviation from the tested configuration, and dropping the cutoff-count
-    // bonus in particular made the engine razor *less* often, which grows the
-    // tree.
+    // Byte-for-byte upstream Reckless: `alpha - 237 - 254 * depth * depth`,
+    // with no correction-history widening, no cutoff-count bonus and no
+    // opponent-worsening term. All three were fork additions.
     //
-    // Only `razor_worsening` stays removed. It was genuinely new since 0.1.2,
-    // its own note called the scaling "genuinely ambiguous", and its direction
-    // is backwards: it made the engine razor *more* readily when the
-    // evaluation had swung further in our favour than expected, inverting how
-    // the same signal is used in RFP, where good news supports trusting a
-    // fail-high rather than giving up on the node earlier.
+    // `razor_corr` and `razor_cutoff` had briefly been restored here on the
+    // grounds that 0.1.2 carried them and 0.1.2 "measured neutral". That
+    // premise was wrong: the SPRT base is upstream Reckless, not 0.1.2, and
+    // 0.1.2 is itself a fork build carrying the same stack of unverified
+    // changes. Measuring one unverified build against another proves nothing,
+    // so the only meaningful reference for a block like this is upstream's
+    // own -- and upstream has none of these terms.
     if !NODE::PV
         && !in_check
-        && estimated_score
-            < alpha - p::razor_base() - p::razor_quad() * depth * depth
-                - p::razor_corr() * correction_value.abs() / 1024
-                + p::razor_cutoff() * (td.cutoff_count[ply + 1] > 3) as i32
+        && estimated_score < alpha - p::razor_base() - p::razor_quad() * depth * depth
         && alpha < 2048
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
@@ -643,14 +635,17 @@ fn search<NODE: NodeType>(
     if !tt_pv
         && !in_check
         && !excluded
-        && (!tt_move.is_quiet() || td.quiet_history.get(td.board.all_threats(), stm, tt_move) >= -2048)
+        // Two fork additions removed so this block is upstream Reckless's
+        // again: an opponent-worsening term in the margin, and a guard that
+        // skipped RFP entirely when the TT move was a quiet with history
+        // below -2048. Every constant here (1140/120/22/669/54/19) already
+        // matched upstream exactly; those two were the only differences.
         && estimated_score
             >= beta
                 + (p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
                     - p::rfp_no_threats() * (td.board.all_threats() & td.board.colors(stm)).is_empty() as i32
-                    - p::rfp_worsening() * opponent_worsening as i32
                     - p::rfp_base())
                 .max(2)
         && !is_loss(beta)
@@ -1070,7 +1065,7 @@ fn search<NODE: NodeType>(
 
             // Static Exchange Evaluation Pruning (SEE Pruning)
             // The cutoff_count term matches the same signal already used in
-            // lmr_cutoff/fds_cutoff/razor_cutoff: many recent cutoffs at
+            // lmr_cutoff/fds_cutoff: many recent cutoffs at
             // this node's children is a signal to prune more freely here too.
             let threshold = if is_quiet {
                 // The linear term is ADDED here, unlike the noisy branch below.

@@ -382,11 +382,12 @@ and doesn't get re-litigated by mistake.
   engine razor *more* readily when the evaluation had swung further in our favour than expected,
   inverting how the same signal is used in RFP, where good news supports trusting a fail-high rather
   than giving up on the node earlier.
-  - `razor_corr` and `razor_cutoff` were removed alongside it and then **restored**. Both are
-    present in 0.1.2, the last build that measured neutral, so they belong to the tested baseline
-    rather than being speculative extras — dropping the cutoff-count bonus in particular made the
-    engine razor *less* often, which grows the tree. `razor_cutoff` is back at 0.1.2's literal 65,
-    not the 270 a later parameterization guessed at.
+  - `razor_corr` and `razor_cutoff` are removed too, and razoring now matches upstream Reckless
+    byte-for-byte (`alpha - 237 - 254 * depth * depth`). They were briefly restored on the grounds
+    that 0.1.2 carried them and 0.1.2 "measured neutral" — but the SPRT base is *upstream Reckless*,
+    not 0.1.2, and 0.1.2 is itself a fork build carrying the same stack of unverified changes.
+    Comparing one unverified build against another proves nothing, so upstream is the only
+    meaningful reference, and upstream has neither term.
 - **Null-move reduction responding to `ttMoveHistory`** (`nmp_r_tt_history`) was removed. It was the
   one item this section's own notes ranked as "lower confidence than the fixes above": a plausible
   correlation between a well-trusted TT move and a settled, less volatile position, never a derived

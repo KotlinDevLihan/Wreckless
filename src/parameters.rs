@@ -1,3 +1,4 @@
+
 #[allow(unused_macros)]
 #[cfg(not(feature = "spsa"))]
 macro_rules! define {
@@ -292,7 +293,7 @@ define! {
     // clamp its own correction bonus symmetrically, so the symmetry argument
     // is not baseless. But the asymmetric pair is the one with a measured
     // result attached to it, and that outranks the tidier-looking one.
-    i32 corr_bonus_min: 4678;
+    i32 corr_bonus_min: 2496;
     i32 corr_bonus_max: 2496;
     // NOTE: these two are coupled. `eval_correction()` sums 5 upstream terms
     // plus a minor/major/material group weighted by `corr_minor_major / 128`,
@@ -341,8 +342,17 @@ define! {
     // bigger risk than the mistuning it was trying to fix. Revert first,
     // then let SPSA re-explore from the verified baseline rather than from
     // an untested guess.
-    i32 corr_weight_div: 102;
-    i32 corr_minor_major: 128;
+    // SPRT CANDIDATE B (untested): damps the material/minor/major
+    // correction group to 40 (~15.8% of the blend, divisor recomputed to
+    // 64 * (5 + 3*40/128) / 5 = 76) instead of trusting it at full weight
+    // (128/102) alongside the three terms upstream actually tuned.
+    // Rationale: material_key has no square information (piece types and
+    // counts only), so a cramped middlegame and open endgame sharing a
+    // material signature share one entry -- a weaker signal than
+    // pawn/non-pawn correction history. Isolated change -- corr_bonus_min/
+    // max left untouched.
+    i32 corr_weight_div: 76;
+    i32 corr_minor_major: 40;
 
     // Continuation history
     //

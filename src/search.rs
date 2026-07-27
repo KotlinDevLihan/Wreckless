@@ -848,7 +848,29 @@ fn search<NODE: NodeType>(
     // near-full-depth search whose score comfortably exceeds beta is trusted
     // as a cutoff without any search.
     let probcut_beta_tt = beta + p::probcut_tt_margin();
-    if matches!(tt_bound, Bound::Lower | Bound::Exact)
+    //
+    // Gated to non-PV, non-excluded nodes. This is the only cutoff in the
+    // function that returns a score nothing ever searched -- it hands back
+    // `beta + margin` purely on the strength of a cached entry -- so it has to
+    // be held to at least the same standard as its neighbours: razoring is
+    // `!NODE::PV`, RFP is `!tt_pv && !excluded`, null move is `!excluded`.
+    //
+    // Ungated it could fire at PV nodes, which is how a fabricated score ends
+    // up in the principal variation and decides the move actually played. It
+    // was also the one early return reachable at the ROOT (root is a PV node),
+    // where it returns before any root move has been scored, leaving
+    // `root_moves` stale. And inside a singular verification search it could
+    // return a cutoff derived from the very TT entry whose move is being
+    // excluded, which defeats the point of the exclusion.
+    //
+    // This matters beyond tidiness: across 562 games the engine's own
+    // evaluation drifted +0.051 pawns per move against the opponent's reply
+    // (18.4 sigma; upstream drifts -0.024 the other way), i.e. its positions
+    // kept turning out worse than its search claimed. Unverified scores
+    // reaching the PV are a direct mechanism for that.
+    if !NODE::PV
+        && !excluded
+        && matches!(tt_bound, Bound::Lower | Bound::Exact)
         && tt_depth >= depth - 4
         && is_valid(tt_score)
         && tt_score >= probcut_beta_tt

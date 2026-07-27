@@ -234,8 +234,8 @@ if you're deciding whether to trust a "pending" item.
 - Internal Iterative Reductions restored in Stockfish's current form: PV and expected-cut nodes
   without a TT move are reduced by one ply from depth 6, exempting nodes on the previous
   iteration's principal variation
-- Aspiration fail-low rebound: beta collapses to the failed window's floor before alpha drops,
-  keeping re-searches narrow
+- Aspiration re-searches re-centre on the failing score, so a fail-low window is exactly `delta`
+  wide rather than reaching back up to the previous alpha
 - Correction values computed before the TT probe, overlapping the work with the prefetch
 
 **Time management:**

@@ -407,8 +407,12 @@ define! {
     i32 conthist_lag5: 89;
     i32 conthist_lag6: 700;
     // Positive-consistency multipliers, indexed by how many of the (up to 6)
-    // continuation entries checked so far were already positive. Same
-    // reasoning as the lag weights above: exposed, not re-guessed.
+    // continuation entries for this move are already positive -- counted
+    // across all of them before any bonus is applied, so every lag is scaled
+    // alike. (This used to index a running count taken mid-loop, which
+    // structurally damped the nearest lags regardless of the position; see
+    // `update_continuation_histories_in_check`.) Same reasoning as the lag
+    // weights above: exposed, not re-guessed.
     i32 conthist_mult0: 94;
     i32 conthist_mult1: 103;
     i32 conthist_mult2: 110;
@@ -460,5 +464,25 @@ define! {
     // pulled down toward its own smaller margins (fp_base, bnfp_base) with
     // no real justification for treating this margin the same way.
     i32 qs_delta_margin: 306;
+    // Time-manager "falling eval" trend factor, in fixed point (1e-4): the
+    // search spends longer when the root score is dropping and less when it
+    // is climbing. `base` is the value at a flat score, `diff` weights the
+    // drop since the previous completed depth, `recent` the drop since the
+    // same slot four iterations ago, and min/max clamp the result.
+    //
+    // The structure is Stockfish's and the diff:recent ratio is theirs
+    // (2.035:0.968), but the coefficients had been carried over against SF's
+    // Value scale, where a pawn is ~208 rather than our ~321-382. At the old
+    // 480/230 the sum cleared `max` after a 0.04-pawn drop and sat on `min`
+    // for any gain at all, so the factor was effectively a two-level switch
+    // and SPSA had no gradient to work with -- whatever it reported for these
+    // was noise. 56/27 puts the ceiling at ~0.37 pawns, matching SF's band
+    // once converted into our units. base/min/max are unchanged: those two
+    // saturated levels *were* tunable before and are kept as measured.
+    i32 tm_trend_base: 7426;
+    i32 tm_trend_diff: 56;
+    i32 tm_trend_recent: 27;
+    i32 tm_trend_min: 7214;
+    i32 tm_trend_max: 14031;
 
 }

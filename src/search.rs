@@ -302,17 +302,30 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             };
 
             let score_trend = {
-                let difference = (td.previous_best_score - td.root_moves[0].score) as f32;
-                let recent = (iter_value - td.root_moves[0].score) as f32;
-                // Coefficients are Stockfish's (their 2.035:0.968 ratio is
-                // preserved) but SF's Value scale puts a pawn at ~208, while
-                // ours is ~321-382. Carried over unscaled, 0.0480 saturated
-                // the clamp after a 0.04-pawn drop and pinned it to the floor
-                // on any gain at all -- a bang-bang switch with no
-                // proportional band, so SPSA saw no gradient here either.
-                // Rescaled so the ceiling is reached at ~0.37 pawns, matching
-                // SF's band in pawn terms.
-                (0.7426 + 0.0056 * difference + 0.0027 * recent).clamp(0.7214, 1.4031)
+                let difference = td.previous_best_score - td.root_moves[0].score;
+                let recent = iter_value - td.root_moves[0].score;
+
+                // The linear structure is Stockfish's (their 2.035:0.968
+                // coefficient ratio is preserved), but SF's Value scale puts a
+                // pawn at ~208 where ours is ~321-382. Carried over unscaled,
+                // the old 0.0480 saturated the ceiling after a 0.04-pawn drop
+                // and pinned the result to the floor on any gain at all: a
+                // bang-bang switch with no proportional band, which is also
+                // why SPSA never found signal in these constants. Rescaled so
+                // the ceiling is reached at ~0.37 pawns, matching SF's band in
+                // pawn terms.
+                //
+                // Held in fixed point (1e-4) rather than f32 so the constants
+                // can live in `parameters.rs` and actually be tuned now that
+                // there is a gradient to tune against. The integer values are
+                // exactly the old floats' digits, so this reintroduces no
+                // rounding of its own.
+                let trend = (p::tm_trend_base()
+                    + p::tm_trend_diff() * difference
+                    + p::tm_trend_recent() * recent)
+                    .clamp(p::tm_trend_min(), p::tm_trend_max());
+
+                trend as f32 / 10000.0
             };
 
             let pv_stability = (1.2881 - 0.0440 * pv_stability as f32).max(0.7160);
@@ -2102,47 +2115,51 @@ fn update_continuation_histories_in_check(
         p::conthist_mult6(),
     ];
 
-    // Count the positive entries across every lag this call will touch
-    // *before* applying any update. "How many of this move's continuation
-    // entries already favour it" is a property of the move, so all six lags
-    // have to be scaled by the same multiplier.
+    // "How many of this move's continuation entries already favour it" is a
+    // property of the move, so the count has to be complete before any bonus
+    // is applied and every lag has to be scaled by the same multiplier.
     //
     // This used to increment and index `multipliers` inside the update loop,
-    // which made it a running prefix count instead: lag 1 could only ever
-    // reach multipliers[1] and lag 6 could reach multipliers[6], so the
-    // nearest lags were damped (94-103) relative to the distant ones
-    // (121-126) purely by their position in the loop rather than by anything
-    // about the position on the board -- and lags 1/2 are precisely the ones
-    // move ordering leans on hardest.
+    // making it a running prefix count instead: lag 1 could only ever reach
+    // multipliers[1] and lag 6 could reach multipliers[6], so the nearest
+    // lags were damped (94-103) relative to the distant ones (121-126) purely
+    // by their position in the loop rather than by anything about the
+    // position on the board -- and lags 1/2 are the ones move ordering leans
+    // on hardest.
+    //
+    // Needing the total up front would normally mean walking the stack twice,
+    // which this function -- called on every cutoff -- should not pay for. So
+    // the first pass caches each eligible entry's subtable pointer and the
+    // second reuses them, leaving exactly one stack traversal as before.
+    let mut targets = [(std::ptr::null_mut::<[[i16; 64]; 13]>(), 0i32, 0isize); 6];
+    let mut len = 0;
     let mut positive_count = 0;
 
-    for (offset, _) in conthist_bonuses {
+    for (offset, weight) in conthist_bonuses {
         // Only update the nearest two continuation histories when in check.
         if in_check && offset > 2 {
             break;
         }
 
         let entry = &td.stack[ply - offset];
-        if entry.mv.is_present() && td.continuation_history.get(entry.conthist, piece, sq) > 0 {
-            positive_count += 1;
+        if entry.mv.is_present() {
+            if td.continuation_history.get(entry.conthist, piece, sq) > 0 {
+                positive_count += 1;
+            }
+
+            targets[len] = (entry.conthist, weight, offset);
+            len += 1;
         }
     }
 
     let multiplier = multipliers[positive_count];
 
-    for (offset, weight) in conthist_bonuses {
-        if in_check && offset > 2 {
-            break;
-        }
-
-        let entry = &td.stack[ply - offset];
-        if entry.mv.is_present() {
-            // Overall scale is SPSA-tunable since the right magnitude for this
-            // 6-lag scheme relative to the original 4-lag baseline is an
-            // empirical question, not one to guess at.
-            let scaled = bonus * weight * multiplier / p::conthist_div() + 73 * (offset < 2) as i32;
-            td.continuation_history.update(entry.conthist, piece, sq, scaled);
-        }
+    for &(conthist, weight, offset) in &targets[..len] {
+        // Overall scale is SPSA-tunable since the right magnitude for this
+        // 6-lag scheme relative to the original 4-lag baseline is an
+        // empirical question, not one to guess at.
+        let scaled = bonus * weight * multiplier / p::conthist_div() + 73 * (offset < 2) as i32;
+        td.continuation_history.update(conthist, piece, sq, scaled);
     }
 }
 

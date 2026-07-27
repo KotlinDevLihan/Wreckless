@@ -129,6 +129,12 @@ define! {
     // 948 * 12800/38148 = 318 puts the two on equal footing.
     //
     // Untested either way; this only removes an arithmetic mismatch.
+    // Safety margin on the eval check that now gates hp_noisy_margin. The
+    // move is pruned only if `eval + captured_material + this <= alpha`, i.e.
+    // only if it falls short even crediting the full piece it takes. Matches
+    // qs_delta_margin, the qsearch analogue of the same test. Larger is safer
+    // (prunes less).
+    i32 hp_noisy_eval_margin: 306;
     i32 hp_noisy_margin: 318;
 
     // SEE Pruning
@@ -200,24 +206,25 @@ define! {
     i32 lmr_quiet_hist: 179;
     i32 lmr_quiet_alpha: 418;
     // Credits the captured piece's value in noisy reductions (LMR and FDS).
+    // A fork addition; upstream Reckless has no such term.
     //
-    // A fork addition: upstream Reckless has no such term at all, and
-    // `lmr_noisy_hist`/`fds_noisy_hist` were tuned against `history` alone,
-    // a single noisy_history lookup spanning +/-12800.
+    // Set back to 437 on evidence, reversing an earlier change of mine to 73.
+    // I had argued that at 437 a queen capture adds ~8483 to a +/-12800 signal
+    // and swamps the learned noisy history. The hole in that argument is that
+    // for captures the piece value *should* dominate -- a queen capture matters
+    // more than a pawn capture whatever the history says, which is why
+    // Stockfish lets its own piece-value term dominate captureHistory.
     //
-    // This was briefly set to 437 on the grounds that 437/64 = 6.83x piece
-    // value matches Stockfish's `873 * PieceValue / 128`. That reasoning was
-    // wrong: in Stockfish the piece-value term *is* the statScore, consumed by
-    // its own scaling (`r -= statScore * 439 / 4096`), whereas here it is added
-    // on top of a history signal whose coefficient assumes the +/-12800 range.
-    // At 437 a queen capture contributed 8483 -- two thirds of that range again
-    // -- so the tuned coefficient was operating on an input two thirds wider
-    // than it was tuned for. Same scale-drift mistake this file documents
-    // elsewhere, just made in the other direction.
+    // Two measurements point the same way. In 250 games the engine was
+    // surprised by non-checking opponent captures at 3.54% against upstream's
+    // 1.70%, a capture-specific weakness; `capture_stat` is exactly the term
+    // that buys captures extra depth in LMR/FDS, and at 73 a queen capture gets
+    // roughly 0.9 ply less than at 437. Separately, 437 produces the smallest
+    // bench tree of any value tried (2.39M against 2.88M at 73), i.e. better
+    // ordering and more cutoffs.
     //
-    // 73 anchors a queen capture at ~1416, a peer of lmr_noisy_base (1426):
-    // a supplementary nudge rather than a term that swamps the learned signal.
-    i32 lmr_capture_stat: 73;
+    // Still untested in games as an isolated change.
+    i32 lmr_capture_stat: 437;
     i32 lmr_noisy_base: 1426;
     i32 lmr_noisy_hist: 130;
     i32 lmr_pv_base: 519;

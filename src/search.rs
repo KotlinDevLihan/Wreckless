@@ -965,14 +965,32 @@ fn search<NODE: NodeType>(
     let mut quiet_moves = ArrayVec::<Move, 32>::new();
     let mut noisy_moves = ArrayVec::<Move, 32>::new();
 
-    // Depth-indexed divisor for history contributions to quiet pruning
-    // (Stockfish's lmrDivisor table, renormalized around a 1024 base) so
-    // history weighs in non-uniformly per depth. Depends only on `depth`,
-    // which is final by this point, so it is looked up once rather than once
-    // per move.
-    const HISTORY_DIVISORS: [i32; 16] =
-        [1221, 936, 927, 987, 1065, 1124, 1057, 927, 931, 1043, 1043, 1027, 1045, 1004, 1037, 1189];
-    let history_divisor = HISTORY_DIVISORS[(depth.min(16) - 1) as usize];
+    // Flat divisor for the history contribution to LMP and futility pruning,
+    // matching upstream Reckless.
+    //
+    // A fork-only depth-indexed table sat here:
+    //
+    //   [1221, 936, 927, 987, 1065, 1124, 1057, 927,
+    //     931, 1043, 1043, 1027, 1045, 1004, 1037, 1189]
+    //
+    // borrowed in spirit from Stockfish's lmrDivisor. Its mean is 1035, so it
+    // looked harmless, but the per-depth swing is +19% at depth 1 and -9.5% at
+    // depths 3/8/9 -- and LMP and futility pruning are its only consumers, both
+    // gated to low depth.
+    //
+    // The games say that is where this engine loses. Across 2008 games the
+    // per-move eval drift gap against upstream is +0.045 at root depth 9,
+    // +0.033 at 11, +0.010 at 13, and then 0.0005 at depth 14 -- vanishing
+    // exactly at the futility-pruning cutoff, with depths 15+ statistically
+    // identical to upstream. At low root depth a far larger share of the tree
+    // is FP/LMP-eligible, so a mistuned divisor there is felt across the whole
+    // search; deeper searches simply outgrow it.
+    //
+    // Restoring 1024 removes the only fork-specific term in those two prunes.
+    // The table is kept above rather than deleted: it may well be fine once
+    // SPSA has seen it, but it has never been tested and it is the best
+    // remaining explanation for a depth-localised deficit.
+    let history_divisor = 1024;
 
     let mut move_count = 0;
     let mut move_picker = MovePicker::new(tt_move, None);

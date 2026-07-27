@@ -239,26 +239,34 @@ impl Board {
     }
 
     pub fn add_piece(&mut self, piece: Piece, square: Square) {
+        // No `if pt != PieceType::None` guard. One was added to suppress an
+        // "index 6 into len 6" crash whose real cause was an illegal-move bug
+        // in the evasion generator, and it made things worse: `mailbox` was
+        // assigned outside the guard while the bitboards were skipped inside
+        // it, so a `Piece::None` add left mailbox and bitboards disagreeing --
+        // silent board corruption in place of a loud panic. No caller passes
+        // `None`: the promotion path always finds the pawn it just moved, and
+        // the undo path is gated by `mv.is_capture()`.
+        debug_assert!(piece != Piece::None, "add_piece called with Piece::None");
         self.mailbox[square] = piece;
-        let pt = piece.piece_type();
-        if pt != PieceType::None {
-            self.colors[piece.color()].set(square);
-            self.pieces[pt].set(square);
-            self.update_hash(piece, square);
-            self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), pt).popcount());
-        }
+        self.colors[piece.color()].set(square);
+        self.pieces[piece.piece_type()].set(square);
+        self.update_hash(piece, square);
+        self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), piece.piece_type()).popcount());
     }
 
     pub fn remove_piece(&mut self, square: Square) -> Piece {
         let piece = self.mailbox[square];
-        let pt = piece.piece_type();
-        if pt != PieceType::None {
-            self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), pt).popcount());
-            self.mailbox[square] = Piece::None;
-            self.colors[piece.color()].clear(square);
-            self.pieces[pt].clear(square);
-            self.update_hash(piece, square);
-        }
+        // Unguarded for the same reason as `add_piece` above: the guarded
+        // version silently did nothing when handed an empty square and still
+        // returned, leaving the caller to proceed as though a piece had been
+        // removed.
+        debug_assert!(piece != Piece::None, "remove_piece called on an empty square");
+        self.state.keys.toggle_material(piece, self.colored_pieces(piece.color(), piece.piece_type()).popcount());
+        self.mailbox[square] = Piece::None;
+        self.colors[piece.color()].clear(square);
+        self.pieces[piece.piece_type()].clear(square);
+        self.update_hash(piece, square);
         piece
     }
 

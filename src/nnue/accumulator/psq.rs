@@ -144,12 +144,21 @@ impl PstAccumulator {
         let vprev = prev.values[pov].as_ptr();
 
         let adds = adds.map(|add| {
-            let idx = (add as usize) % parameters.ft_piece_weights.len();
-            parameters.ft_piece_weights[idx].as_ptr()
+            // Direct index. A `% len()` wrap used to sit here, added to
+            // suppress a crash whose real cause was an illegal-move bug in the
+            // evasion generator. It never triggers (verified by running bench,
+            // perft and a full search with it replaced by a hard assertion),
+            // it costs a multiply-and-shift per feature on the hottest path in
+            // the engine, and if it ever did trigger it would silently select
+            // the *wrong* NNUE weight rather than fault -- corrupting the
+            // evaluation with no symptom. A debug assertion catches a
+            // regression; release keeps Rust's own bounds check.
+            debug_assert!((add as usize) < parameters.ft_piece_weights.len());
+            parameters.ft_piece_weights[add as usize].as_ptr()
         });
         let subs = subs.map(|sub| {
-            let idx = (sub as usize) % parameters.ft_piece_weights.len();
-            parameters.ft_piece_weights[idx].as_ptr()
+            debug_assert!((sub as usize) < parameters.ft_piece_weights.len());
+            parameters.ft_piece_weights[sub as usize].as_ptr()
         });
 
         for i in (0..L1_SIZE).step_by(simd::I16_LANES) {

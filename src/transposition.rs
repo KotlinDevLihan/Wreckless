@@ -254,11 +254,29 @@ impl TranspositionTable {
         let entry_key = cluster.key(replacement_index);
         let mut entry = cluster.read_entry(replacement_index);
 
-        if !(entry_key == key && mv.is_null()) {
+        let refreshed_move = !(entry_key == key && mv.is_null());
+        if refreshed_move {
             entry.mv = mv;
         }
 
         if !force && key == entry_key && depth + 4 + 2 * tt_pv as i32 <= entry.depth() && entry.flags.age() == tt_age {
+            // Keep the existing deeper entry's score/depth/flags, but persist
+            // the refreshed best move.
+            //
+            // Before the entries became atomic, `entry` was a `&mut` directly
+            // into the cluster, so the `entry.mv = mv` above had already landed
+            // in the table by the time this early return fired. It is now a
+            // local copy, so returning here would silently drop the move
+            // update. This path is taken whenever we re-reach a position we
+            // already hold a deeper entry for -- common -- and the TT move is
+            // tried first at every node, so losing those refreshes quietly
+            // degrades move ordering everywhere.
+            //
+            // No `set_key` needed: this branch only runs when `key ==
+            // entry_key`, so the verification key is already correct.
+            if refreshed_move {
+                cluster.write_entry(replacement_index, entry);
+            }
             return;
         }
 

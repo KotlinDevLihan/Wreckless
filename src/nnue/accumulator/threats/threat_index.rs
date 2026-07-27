@@ -104,8 +104,13 @@ pub fn threat_index(piece: Piece, from: Square, attacked: Piece, to: Square, mir
     let from = from.relative_to(pov) ^ (7 * (mirrored as u8));
     let to = to.relative_to(pov) ^ (7 * (mirrored as u8));
 
-    let attacking = ((piece as usize) ^ (pov as usize)).clamp(0, 11);
-    let attacked = ((attacked as usize) ^ (pov as usize)).clamp(0, 11);
+    // Not clamped. A `.clamp(0, 11)` used to sit on both of these, added to
+    // suppress a crash caused elsewhere (an illegal-move bug in the evasion
+    // generator). Verified never to trigger, and clamping an out-of-range
+    // feature index silently picks the wrong threat feature instead of
+    // faulting -- corrupting the accumulator invisibly.
+    let attacking = (piece as usize) ^ (pov as usize);
+    let attacked = (attacked as usize) ^ (pov as usize);
 
     unsafe {
         let pair = PIECE_PAIR_LOOKUP[attacking][attacked];

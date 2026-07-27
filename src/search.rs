@@ -1656,13 +1656,34 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             // gain), so its own value swing is credited separately. Uses
             // capture_sq() rather than to() so en passant (whose captured
             // pawn isn't on the destination square) is credited correctly.
-            let promotion_gain =
-                if mv.is_promotion() { mv.promo_piece_type().value() - PieceType::Pawn.value() } else { 0 };
+            // `eval` and `PieceType::value()` are on different scales, so the
+            // material gain has to be converted before it can be added to an
+            // evaluation.
+            //
+            // `value()` calls a pawn 109; the search's own units put a pawn at
+            // `normalization()`, which is 321 at the start and 361-382 through
+            // the middlegame and endgame -- a stable ~3x across the whole
+            // material range. Added raw, this credited a captured queen 1242
+            // where the same queen is worth ~3700-5300 to `eval`, understating
+            // every capture threefold and pruning ones that genuinely could
+            // reach alpha. In qsearch, which is most of the tree.
+            //
+            // Upstream converts in the other direction for its qsearch SEE
+            // threshold (`(alpha - eval) / qs_see_div`); this is the same
+            // conversion applied the other way. Tunable so SPSA can refine the
+            // factor rather than leaving 3 as another hand-picked constant.
+            let material_gain = {
+                let captured = td.board.type_on(mv.capture_sq()).value();
+                let promotion_gain =
+                    if mv.is_promotion() { mv.promo_piece_type().value() - PieceType::Pawn.value() } else { 0 };
+                (captured + promotion_gain) * p::qs_delta_piece_scale() / 64
+            };
+
             if !in_check
                 && !is_direct_check
                 && !mv.is_quiet()
                 && is_valid(eval)
-                && eval + td.board.type_on(mv.capture_sq()).value() + promotion_gain + p::qs_delta_margin() < alpha
+                && eval + material_gain + p::qs_delta_margin() < alpha
             {
                 continue;
             }

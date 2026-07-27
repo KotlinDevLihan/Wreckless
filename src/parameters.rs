@@ -114,10 +114,22 @@ define! {
 
     // History Pruning
     i32 hp_margin: 948;
-    // New: history pruning extended to bad-SEE noisy moves, previously
-    // quiet-only. Scaled up from hp_margin by noisy_history's larger range
-    // (MAX_HISTORY 12800 vs quiet's 8192) rather than reused as-is.
-    i32 hp_noisy_margin: 1481;
+    // History pruning extended to bad-SEE noisy moves (quiet-only upstream).
+    //
+    // Scale-matched to hp_margin, not to MAX_HISTORY. The original 1481 came
+    // from scaling 948 by the two tables' MAX_HISTORY ratio (12800/8192), but
+    // that compares the wrong things: the quiet `history` this margin's twin
+    // gates on is a *sum* -- quiet_history plus the normalised six-lag
+    // continuation group, range ~+/-38148 -- while the noisy `history` is a
+    // single noisy_history lookup, range +/-12800.
+    //
+    // Measured against their own signals, 1481 pruned the bottom ~46% of the
+    // noisy range at depth 4 where 948 prunes the bottom ~10% of the quiet
+    // range: 4.7x more aggressive, on captures, which is where tactics live.
+    // 948 * 12800/38148 = 318 puts the two on equal footing.
+    //
+    // Untested either way; this only removes an arithmetic mismatch.
+    i32 hp_noisy_margin: 318;
 
     // SEE Pruning
     i32 see_q_quad: 12;
@@ -187,26 +199,25 @@ define! {
     i32 lmr_quiet_base: 2171;
     i32 lmr_quiet_hist: 179;
     i32 lmr_quiet_alpha: 418;
-    // Restored to 437, the value carried by 0.1.2 (`4135b69`).
+    // Credits the captured piece's value in noisy reductions (LMR and FDS).
     //
-    // It had been cut to ~31-36 on the reasoning that a queen capture
-    // contributing ~8483 "swamps" the learned noisy-history signal, since that
-    // dwarfs lmr_noisy_base (1426). That reasoning was wrong: dominating the
-    // capture statScore is exactly what the piece-value term is *for*
-    // upstream. Stockfish computes
+    // A fork addition: upstream Reckless has no such term at all, and
+    // `lmr_noisy_hist`/`fds_noisy_hist` were tuned against `history` alone,
+    // a single noisy_history lookup spanning +/-12800.
     //
-    //     ss->statScore = 873 * PieceValue[captured] / 128 + captureHistory[..]
+    // This was briefly set to 437 on the grounds that 437/64 = 6.83x piece
+    // value matches Stockfish's `873 * PieceValue / 128`. That reasoning was
+    // wrong: in Stockfish the piece-value term *is* the statScore, consumed by
+    // its own scaling (`r -= statScore * 439 / 4096`), whereas here it is added
+    // on top of a history signal whose coefficient assumes the +/-12800 range.
+    // At 437 a queen capture contributed 8483 -- two thirds of that range again
+    // -- so the tuned coefficient was operating on an input two thirds wider
+    // than it was tuned for. Same scale-drift mistake this file documents
+    // elsewhere, just made in the other direction.
     //
-    // i.e. 6.82 x the captured piece's value. This engine computes
-    // `lmr_capture_stat * value / 64`, so 437 gives 6.83 x value -- upstream's
-    // coefficient to within 0.2%. 36 gives 0.56 x, twelve times too small, and
-    // the term stops doing its job. The consumer scaling matches too:
-    // Stockfish applies `r -= statScore * 439 / 4096` (~0.107) against this
-    // engine's `lmr_noisy_hist / 1024` (~0.127).
-    //
-    // In short, 437 was already correctly matched to upstream and the rescale
-    // broke it.
-    i32 lmr_capture_stat: 437;
+    // 73 anchors a queen capture at ~1416, a peer of lmr_noisy_base (1426):
+    // a supplementary nudge rather than a term that swamps the learned signal.
+    i32 lmr_capture_stat: 73;
     i32 lmr_noisy_base: 1426;
     i32 lmr_noisy_hist: 130;
     i32 lmr_pv_base: 519;
@@ -421,6 +432,12 @@ define! {
     i32 qs_see_corr_cap: 68;
     i32 qs_see_base: 74;
 
+    // Converts `PieceType::value()` into the search's own evaluation units for
+    // qsearch delta pruning. A pawn is 109 to `value()` but `normalization()`
+    // puts it at 321-382 in eval units depending on material -- a stable ~3x --
+    // so 192/64 = 3.0. Without this the captured-piece credit was understated
+    // threefold. Expressed as x/64 so SPSA can move it in fine steps.
+    i32 qs_delta_piece_scale: 192;
     // Delta pruning margin: a standard qsearch technique (skip a capture
     // that can't plausibly reach alpha even crediting the full captured
     // piece value, before the pricier SEE call), not previously present

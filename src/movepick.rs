@@ -1,286 +1,275 @@
 use crate::{
+    history::LowPlyHistory,
+    lookup::king_attacks,
+    parameters as p,
     search::NodeType,
+    setwise::{bishop_attacks_setwise, knight_attacks_setwise, pawn_attacks_setwise, rook_attacks_setwise},
     thread::ThreadData,
-    types::{MAX_MOVES, Move, MoveList},
+    types::{ArrayVec, Bitboard, MAX_MOVES, Move, MoveEntry, MoveList, PieceType},
 };
 
-/// Search stages for MovePicker
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Copy, Clone, Eq, PartialEq, PartialOrd)]
 pub enum Stage {
     HashMove,
-    GenerateCaptures,
-    GoodCaptures,
-    GenerateQuiets,
-    GoodQuiets,
+    GenerateNoisy,
+    GoodNoisy,
+    Quiet,
     BadNoisy,
-    BadQuiets,
-    QSearchCaptures,
-    Evasions,
-    Done,
-}
-
-/// A move paired with its move-ordering score
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ScoredMove {
-    pub mv: Move,
-    pub score: i32,
+    BadQuiet,
 }
 
 pub struct MovePicker {
-    stage: Stage,
+    list: MoveList,
     tt_move: Move,
-    /// SEE threshold used to split captures into "good" (>= threshold, tried
-    /// first) and "bad noisy" (below threshold, tried last / prunable) pools.
-    /// `None` means the default threshold of 0.
     threshold: Option<i32>,
-    moves: [ScoredMove; MAX_MOVES],
-    bad_captures: [ScoredMove; MAX_MOVES],
-    cur: usize,
-    end: usize,
-    bad_cur: usize,
-    bad_end: usize,
-    skip_quiets: bool,
+    stage: Stage,
+    bad_noisy: ArrayVec<Move, MAX_MOVES>,
+    bad_noisy_idx: usize,
+    noisy_count: usize,
+    first_bad_quiet: Move,
 }
 
 impl MovePicker {
-    /// Threshold score to distinguish good quiet moves from bad quiet moves
-    const GOOD_QUIET_THRESHOLD: i32 = -14000;
-
-    /// Create a new MovePicker for main search
-    pub fn new(tt_move: Move, threshold: Option<i32>) -> Self {
+    pub const fn new(tt_move: Move, threshold: Option<i32>) -> Self {
         Self {
-            stage: Stage::HashMove,
+            list: MoveList::new(),
             tt_move,
             threshold,
-            moves: [ScoredMove::default(); MAX_MOVES],
-            bad_captures: [ScoredMove::default(); MAX_MOVES],
-            cur: 0,
-            end: 0,
-            bad_cur: 0,
-            bad_end: 0,
-            skip_quiets: false,
+            stage: if tt_move.is_present() { Stage::HashMove } else { Stage::GenerateNoisy },
+            bad_noisy: ArrayVec::new(),
+            bad_noisy_idx: 0,
+            noisy_count: 0,
+            first_bad_quiet: Move::NULL,
         }
     }
 
-    pub fn stage(&self) -> Stage {
+    /// Skips the remaining bad noisy moves, continuing with deferred bad quiets.
+    pub fn skip_bad_noisy(&mut self) {
+        self.bad_noisy_idx = self.bad_noisy.len();
+    }
+
+    pub const fn stage(&self) -> Stage {
         self.stage
     }
 
-    /// Skip whatever bad noisy moves remain (e.g. once BNFP/HP-noisy decides
-    /// the rest aren't worth trying), while still allowing any deferred bad
-    /// quiets to be searched afterwards.
-    pub fn skip_bad_noisy(&mut self) {
-        self.bad_cur = self.bad_end;
-    }
-
-    /// Select and return the next best pseudo-legal move
     pub fn next<NODE: NodeType>(&mut self, td: &ThreadData, skip_quiets: bool, ply: isize) -> Option<Move> {
-        self.skip_quiets = skip_quiets;
-        while self.stage != Stage::Done {
-            match self.stage {
-                Stage::HashMove => {
-                    // In-check nodes always go through the dedicated evasion
-                    // generator (king retreats, blocks, and captures), even
-                    // when quiets are being skipped (qsearch/ProbCut) --
-                    // otherwise a node in check can be left with no legal
-                    // reply generated at all.
-                    self.stage = if td.board.in_check() {
-                        Stage::Evasions
-                    } else if self.skip_quiets {
-                        Stage::QSearchCaptures
-                    } else {
-                        Stage::GenerateCaptures
-                    };
+        if self.stage == Stage::HashMove {
+            self.stage = Stage::GenerateNoisy;
 
-                    if self.tt_move != Move::NULL && td.board.is_legal(self.tt_move) {
-                        return Some(self.tt_move);
-                    }
-                }
-
-                Stage::GenerateCaptures => {
-                    self.generate_and_score_captures(td);
-                    self.stage = Stage::GoodCaptures;
-                }
-
-                Stage::GoodCaptures => {
-                    if let Some(mv) = self.pick_best() {
-                        if mv == self.tt_move {
-                            continue;
-                        }
-                        return Some(mv);
-                    }
-                    self.stage = Stage::GenerateQuiets;
-                }
-
-                Stage::GenerateQuiets => {
-                    if self.skip_quiets {
-                        self.stage = Stage::BadNoisy;
-                    } else {
-                        self.generate_and_score_quiets(td, ply);
-                        self.stage = Stage::GoodQuiets;
-                    }
-                }
-
-                Stage::GoodQuiets => {
-                    if let Some(mv) = self.pick_best() {
-                        if mv == self.tt_move {
-                            continue;
-                        }
-                        // Defer quiets with bad history scores until after bad noisy moves
-                        if self.moves[self.cur - 1].score < Self::GOOD_QUIET_THRESHOLD {
-                            self.stage = Stage::BadNoisy;
-                            continue;
-                        }
-                        return Some(mv);
-                    }
-                    self.stage = Stage::BadNoisy;
-                }
-
-                Stage::BadNoisy => {
-                    if self.bad_cur < self.bad_end {
-                        let mv = self.bad_captures[self.bad_cur].mv;
-                        self.bad_cur += 1;
-                        if mv == self.tt_move {
-                            continue;
-                        }
-                        return Some(mv);
-                    }
-                    self.stage = Stage::BadQuiets;
-                }
-
-                Stage::BadQuiets => {
-                    if let Some(mv) = self.pick_best() {
-                        if mv == self.tt_move {
-                            continue;
-                        }
-                        return Some(mv);
-                    }
-                    self.stage = Stage::Done;
-                }
-
-                Stage::QSearchCaptures => {
-                    if self.cur == 0 && self.end == 0 {
-                        self.generate_and_score_captures(td);
-                    }
-                    if let Some(mv) = self.pick_best() {
-                        if mv == self.tt_move {
-                            continue;
-                        }
-                        return Some(mv);
-                    }
-                    self.stage = Stage::BadNoisy;
-                }
-
-                Stage::Evasions => {
-                    if self.cur == 0 && self.end == 0 {
-                        self.generate_evasions(td, ply);
-                    }
-                    if let Some(mv) = self.pick_best() {
-                        if mv == self.tt_move {
-                            continue;
-                        }
-                        return Some(mv);
-                    }
-                    self.stage = Stage::Done;
-                }
-
-                Stage::Done => break,
+            if td.board.is_legal(self.tt_move) {
+                return Some(self.tt_move);
             }
         }
+
+        if self.stage == Stage::GenerateNoisy {
+            self.stage = Stage::GoodNoisy;
+            td.board.append_noisy_moves(&mut self.list);
+            self.remove_tt();
+            self.score_noisy(td);
+        }
+
+        if self.stage == Stage::GoodNoisy {
+            while !self.list.is_empty() {
+                let entry = self.get_best_entry();
+                let threshold = self.threshold.unwrap_or_else(|| {
+                    if self.tt_move.is_quiet() && self.noisy_count > 2 { 1 } else { -entry.score / 47 + 116 }
+                });
+                if !td.board.see(entry.mv, threshold) {
+                    self.bad_noisy.push(entry.mv);
+                    continue;
+                }
+
+                if NODE::ROOT {
+                    self.score_noisy(td);
+                }
+
+                self.noisy_count += 1;
+                return Some(entry.mv);
+            }
+
+            if skip_quiets {
+                self.stage = Stage::BadNoisy;
+            } else {
+                self.stage = Stage::Quiet;
+                td.board.append_quiet_moves(&mut self.list);
+                self.remove_tt();
+                self.score_quiet(td, ply);
+            }
+        }
+
+        if self.stage == Stage::Quiet {
+            if !skip_quiets && !self.list.is_empty() {
+                if NODE::ROOT {
+                    self.score_quiet(td, ply);
+                }
+
+                let entry = self.get_best_entry();
+                if entry.score > p::good_quiet_threshold() {
+                    return Some(entry.mv);
+                }
+
+                // Every remaining quiet scores at or below the threshold:
+                // defer them all until after the bad noisy moves.
+                self.first_bad_quiet = entry.mv;
+            }
+
+            self.stage = Stage::BadNoisy;
+        }
+
+        if self.stage == Stage::BadNoisy {
+            if self.bad_noisy_idx < self.bad_noisy.len() {
+                let mv = self.bad_noisy[self.bad_noisy_idx];
+                self.bad_noisy_idx += 1;
+                return Some(mv);
+            }
+
+            self.stage = Stage::BadQuiet;
+        }
+
+        // Stage::BadQuiet
+        if !skip_quiets {
+            if self.first_bad_quiet.is_present() {
+                let mv = self.first_bad_quiet;
+                self.first_bad_quiet = Move::NULL;
+                return Some(mv);
+            }
+
+            if !self.list.is_empty() {
+                return Some(self.get_best_entry().mv);
+            }
+        }
+
         None
     }
 
-    fn pick_best(&mut self) -> Option<Move> {
-        if self.cur >= self.end {
-            return None;
-        }
+    fn get_best_entry(&mut self) -> MoveEntry {
+        let mut best_index = 0;
+        let mut best_score = i32::MIN;
 
-        let mut best_idx = self.cur;
-        for i in (self.cur + 1)..self.end {
-            if self.moves[i].score > self.moves[best_idx].score {
-                best_idx = i;
+        for (index, entry) in self.list.iter().enumerate() {
+            if entry.score >= best_score {
+                best_index = index;
+                best_score = entry.score;
             }
         }
-
-        self.moves.swap(self.cur, best_idx);
-        let mv = self.moves[self.cur].mv;
-        self.cur += 1;
-        Some(mv)
+        self.list.remove(best_index)
     }
 
-    fn score_capture(&self, td: &ThreadData, mv: Move) -> (bool, i32) {
-        let threshold = self.threshold.unwrap_or(0);
-        let is_good = td.board.see(mv, threshold);
-        let score = (if is_good { 1000 } else { -1000 })
-            + td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), td.board.type_on(mv.capture_sq()));
-        (is_good, score)
-    }
-
-    fn score_quiet(&self, td: &ThreadData, ply: isize, mv: Move) -> i32 {
-        td.quiet_history.get(td.board.all_threats(), td.board.side_to_move(), mv)
-            + 1479 * td.conthist(ply, 1, mv) / 1024
-            + 977 * td.conthist(ply, 2, mv) / 1024
-            + 277 * td.conthist(ply, 3, mv) / 1024
-            + 995 * td.conthist(ply, 4, mv) / 1024
-            + 126 * td.conthist(ply, 5, mv) / 1024
-            + 963 * td.conthist(ply, 6, mv) / 1024
-    }
-
-    fn generate_and_score_captures(&mut self, td: &ThreadData) {
-        let mut move_list = MoveList::new();
-        td.board.append_noisy_moves(&mut move_list);
-
-        self.cur = 0;
-        self.end = 0;
-        self.bad_cur = 0;
-        self.bad_end = 0;
-
-        for entry in move_list.iter() {
-            let mv = entry.mv;
-            let (is_good, score) = self.score_capture(td, mv);
-
-            if is_good {
-                self.moves[self.end] = ScoredMove { mv, score };
-                self.end += 1;
-            } else {
-                self.bad_captures[self.bad_end] = ScoredMove { mv, score };
-                self.bad_end += 1;
-            }
+    fn remove_tt(&mut self) {
+        if let Some(pos) = self.list.iter().position(|&e| e.mv == self.tt_move) {
+            self.list.remove(pos);
         }
     }
 
-    fn generate_and_score_quiets(&mut self, td: &ThreadData, ply: isize) {
-        let mut move_list = MoveList::new();
-        td.board.append_quiet_moves(&mut move_list);
+    fn score_noisy(&mut self, td: &ThreadData) {
+        let threats = td.board.all_threats();
 
-        self.cur = 0;
-        self.end = 0;
-
-        for entry in move_list.iter() {
+        for entry in self.list.iter_mut() {
             let mv = entry.mv;
-            let score = self.score_quiet(td, ply, mv);
-            self.moves[self.end] = ScoredMove { mv, score };
-            self.end += 1;
+            let captured = td.board.type_on(mv.capture_sq());
+            let pt = td.board.type_on(mv.from());
+
+            entry.score = 14232 * captured.value() / 1024
+                + td.noisy_history.get(threats, td.board.moved_piece(mv), mv.to(), captured)
+                + 4558 * (mv.is_promotion() && mv.promo_piece_type() == PieceType::Queen) as i32
+                + (200000 - 20000 * pt as i32) * td.board.in_check() as i32;
         }
     }
 
-    fn generate_evasions(&mut self, td: &ThreadData, ply: isize) {
-        let mut move_list = MoveList::new();
-        td.board.append_evasions(&mut move_list);
+    fn score_quiet(&mut self, td: &ThreadData, ply: isize) {
+        let threats = td.board.all_threats();
+        let side = td.board.side_to_move();
+        let pawn_key = td.board.pawn_key();
+        let occupancies = td.board.occupancies();
+        let pawn_threats = td.board.piece_threats(PieceType::Pawn);
 
-        self.cur = 0;
-        self.end = 0;
+        let non_pawn_threats = td.board.piece_threats(PieceType::Knight)
+            | td.board.piece_threats(PieceType::Bishop)
+            | td.board.piece_threats(PieceType::Rook)
+            | td.board.piece_threats(PieceType::Queen)
+            | td.board.piece_threats(PieceType::King);
 
-        for entry in move_list.iter() {
+        let threatened = {
+            let minor_threats =
+                pawn_threats | td.board.piece_threats(PieceType::Knight) | td.board.piece_threats(PieceType::Bishop);
+            let rook_threats = minor_threats | td.board.piece_threats(PieceType::Rook);
+            [Bitboard(0), pawn_threats, pawn_threats, minor_threats, rook_threats, Bitboard(0)]
+        };
+
+        let escape = [0, 8854, 8170, 14051, 20357, 0];
+
+        // safe squares where we can attack an opponent piece
+        let offense = {
+            let knight_vulnerable = (td.board.colored_pieces(!side, PieceType::Bishop) & !threats)
+                | td.board.colored_pieces(!side, PieceType::Rook)
+                | td.board.colored_pieces(!side, PieceType::Queen);
+            let bishop_vulnerable = td.board.colored_pieces(!side, PieceType::Rook);
+            let queen_orth_vulnerable = td.board.colored_pieces(!side, PieceType::Bishop) & !threats;
+            let queen_diag_vulnerable = td.board.colored_pieces(!side, PieceType::Rook) & !threats;
+
+            let mut p = pawn_attacks_setwise(td.board.colors(!side), !side) & !threats;
+
+            // Add advanced pawn attacks to pawn offense
+            p |= pawn_threats & Bitboard::LEVER_RANKS[side] & !non_pawn_threats;
+
+            let n = knight_attacks_setwise(knight_vulnerable) & !threats;
+            let b = bishop_attacks_setwise(bishop_vulnerable, occupancies) & !threats;
+            let r = Bitboard::file(td.board.king_square(!side).file()) & !threats;
+            let q = (rook_attacks_setwise(queen_orth_vulnerable, occupancies)
+                | bishop_attacks_setwise(queen_diag_vulnerable, occupancies))
+                & !threats;
+
+            [p, n, b, r, q, Bitboard(0)]
+        };
+
+        // don't move king wall pawns
+        let my_king = td.board.king_square(side);
+        let wall_pawns = if Bitboard::HOME_ROWS[side].contains(my_king) {
+            king_attacks(my_king) & td.board.pieces(PieceType::Pawn)
+        } else {
+            Bitboard(0)
+        };
+
+        for entry in self.list.iter_mut() {
             let mv = entry.mv;
-            let score = if mv.is_capture() {
-                let (_, capture_score) = self.score_capture(td, mv);
-                10000 + capture_score
-            } else {
-                self.score_quiet(td, ply, mv)
-            };
-            self.moves[self.end] = ScoredMove { mv, score };
-            self.end += 1;
+            let pt = td.board.type_on(mv.from());
+
+            entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
+                + 1024 * td.corrhist().pawn_history.get(pawn_key, td.board.moved_piece(mv), mv.to()) / 1024
+                // Low-ply history is a fork addition -- upstream's score_quiet
+                // has no such term, and with the lag-3/lag-5 terms removed this
+                // is now the only difference between the two orderings.
+                //
+                // At 7052 it dominated: LowPlyHistory saturates at +/-8192, so
+                // at ply 0 this contributed up to +/-56416 against 24146 for
+                // continuation-history lag 1, 20357 for the escape bonus and
+                // 14104 for quiet history -- 2.34x the next-largest signal. Ply
+                // 0 is the root, where ordering matters most, so root move
+                // choice was being driven largely by a coarse [ply][from][to]
+                // table that knows nothing about piece type, threats or
+                // captures, ahead of the context-conditioned continuation
+                // history.
+                //
+                // Re-anchored so its ply-0 ceiling equals continuation-history
+                // lag 1 (1614 * 15320 / 8192 = 3018): still a strong signal at
+                // the plies it covers, no longer the loudest voice at the root.
+                + if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
+                    p::lowply_weight() * td.low_ply_history.get(ply as usize, mv) / (1024 * (1 + 2 * ply as i32))
+                } else {
+                    0
+                }
+                // Lags 1, 2, 3, 4, 5, 6, scaled down by 11/12 to maintain scale neutrality against good_quiet_threshold.
+                + 1479 * td.conthist(ply, 1, mv) / 1024
+                + 977 * td.conthist(ply, 2, mv) / 1024
+                + 277 * td.conthist(ply, 3, mv) / 1024
+                + 995 * td.conthist(ply, 4, mv) / 1024
+                + 126 * td.conthist(ply, 5, mv) / 1024
+                + 963 * td.conthist(ply, 6, mv) / 1024
+                + escape[pt] * threatened[pt].contains(mv.from()) as i32
+                + 10723 * td.board.checking_squares(pt).contains(mv.to()) as i32
+                - 8875 * threatened[pt].contains(mv.to()) as i32
+                + 3446 * offense[pt].contains(mv.to()) as i32
+                - 4494 * wall_pawns.contains(mv.from()) as i32;
         }
     }
 }

@@ -49,7 +49,6 @@ pub enum Stage {
     Quiet,
     BadNoisy,
     BadQuiet,
-    Done,
 }
 
 pub struct MovePicker {
@@ -191,8 +190,6 @@ impl MovePicker {
 
                     return None;
                 }
-
-                Stage::Done => return None,
             }
         }
     }

@@ -529,10 +529,8 @@ impl Board {
         for piece in 0..Piece::NUM {
             let piece = Piece::from_index(piece);
 
-            let mut count = 0;
             for square in self.colored_pieces(piece.color(), piece.piece_type()) {
                 self.update_hash(piece, square);
-                count += 1;
             }
         }
 

@@ -1948,11 +1948,6 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
         // minor, and major are all additions since, so they're grouped under
         // one tunable weight rather than each inflating the sum at full,
         // un-normalized strength against a divisor tuned for 5 terms.
-        + (corrhist.material.get(stm, td.board.material_key(), bucket)
-            + corrhist.minor.get(stm, td.board.minor_key(), bucket)
-            + corrhist.major.get(stm, td.board.major_key(), bucket))
-            * p::corr_minor_major()
-            / 128
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
@@ -1976,12 +1971,6 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
 
     corrhist.non_pawn[Color::White].update(stm, td.board.non_pawn_key(Color::White), bucket, bonus);
     corrhist.non_pawn[Color::Black].update(stm, td.board.non_pawn_key(Color::Black), bucket, bonus);
-
-    corrhist.material.update(stm, td.board.material_key(), bucket, bonus);
-
-    corrhist.minor.update(stm, td.board.minor_key(), bucket, bonus);
-
-    corrhist.major.update(stm, td.board.major_key(), bucket, bonus);
 
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 2].mv.is_present() {
         td.continuation_corrhist.update(

@@ -351,8 +351,21 @@ define! {
     // material signature share one entry -- a weaker signal than
     // pawn/non-pawn correction history. Isolated change -- corr_bonus_min/
     // max left untouched.
-    i32 corr_weight_div: 76;
-    i32 corr_minor_major: 40;
+
+    // Upstream's five-term correction blend: pawn, non-pawn x2, continuation x2.
+    //
+    // The material/minor/major tables this fork added are gone, so the divisor
+    // returns to upstream's 64. These two were always coupled by
+    // `corr_weight_div = 64 * (5 + 3 * corr_minor_major / 128) / 5` -- 128 gave
+    // 102, 40 gave 76, and with the group removed the multiplier is 1.
+    //
+    // If the tables ever come back, restore that coupling. A divisor below the
+    // figure the rule gives divides the blend by less than it sums and inflates
+    // every margin that reads `correction_value.abs()` -- razoring, RFP, both
+    // singular margins, futility, LMR, FDS, qsearch SEE, and via `eval` also
+    // null move, stand-pat, improving, LMP and BNFP. The README identifies
+    // exactly that as the source of past Elo losses.
+    i32 corr_weight_div: 64;
 
     // Continuation history
     //

@@ -8,15 +8,19 @@ Wreckless is a UCI chess engine, a fork of [Reckless](https://github.com/codedel
 by Arseniy Surkov, Shahin M. Shahin, and Styx — an open source competitive engine that consistently
 performs among the top engines in major tournaments including the
 [Chess.com Computer Chess Championship (CCC)][ccc] and [Top Chess Engine Championship (TCEC)][tcec].
-Wreckless inherits virtually all of its playing strength from Reckless, including its NNUE networks,
-and layers additional search techniques on top — see [Changes relative to upstream](#changes-relative-to-upstream)
-for what's different and how well-tested each change currently is.
+
+Wreckless inherits effectively all of its playing strength from Reckless, including its NNUE
+networks. It exists as a place to try search ideas against that baseline. See
+[Status](#status) for where it currently measures, and
+[Changes relative to upstream](#changes-relative-to-upstream) for what differs and how much
+evidence each change has behind it.
 
 [ccc]: https://www.chess.com/computer-chess-championship
 [tcec]: https://tcec-chess.com
 
 ## Contents
 
+- [Status](#status)
 - [Quick start](#quick-start)
 - [Building from source](#building-from-source)
 - [UCI options](#uci-options)
@@ -24,6 +28,25 @@ for what's different and how well-tested each change currently is.
 - [Changes relative to upstream](#changes-relative-to-upstream)
 - [Testing and tuning](#testing-and-tuning)
 - [Acknowledgements](#acknowledgements)
+
+## Status
+
+**Wreckless currently measures at parity with upstream Reckless.** Recent SPRT runs at 10+0.1,
+1 thread, 128 MB hash against the upstream baseline land between roughly −2 and +3 Elo, with 95%
+confidence intervals of ±10 to ±20 — that is, indistinguishable from zero in either direction.
+
+That is worth stating plainly because it is the honest reading, and because it has not always been
+true. Earlier states of this fork measured as much as 17 Elo *behind* upstream, and the work that
+closed that gap was almost entirely arithmetic and correctness repair rather than new ideas: unit
+mismatches between the evaluation scale and `PieceType::value()`, coefficients ported from another
+engine without rescaling, a fail-soft bound that was never raised, sums whose consumers were tuned
+against a narrower distribution. The
+[Correctness and scale fixes](#correctness-and-scale-fixes) section is the substantive part of this
+document.
+
+No search addition in this fork has been demonstrated to gain Elo over upstream. Several are
+plausible and none is currently known to lose; they are listed under
+[Unverified search changes](#unverified-search-changes) and should be treated as experiments.
 
 ## Quick start
 
@@ -88,6 +111,10 @@ cargo pgo optimize build --release --bin wreckless      # 3. rebuild using the c
 # binary lands under target/<your-target-triple>/release/wreckless
 ```
 
+> **When benchmarking, measure the optimized binary.** `cargo pgo run -- bench` executes the
+> *instrumented* build, which carries profiling counters on every branch. Its NPS figure is not
+> comparable to a normal build's.
+
 ## UCI options
 
 | Name | Default | Description |
@@ -104,6 +131,9 @@ cargo pgo optimize build --release --bin wreckless      # 3. rebuild using the c
 | `SyzygyPath` | — | Path to Syzygy endgame tablebases |
 | `SyzygyProbeDepth` | 1 | Minimum depth to probe tablebases at the piece-count boundary `[1–100]` |
 | `SyzygyProbeLimit` | 7 | Maximum number of pieces for tablebase probes `[0–7]` |
+
+`SyzygyProbeDepth` is specific to this fork; upstream probes unconditionally. At the default of 1 the
+two behave identically, since the main search never runs below depth 1.
 
 ## Custom commands
 
@@ -123,319 +153,284 @@ Beyond standard UCI, Wreckless supports commands useful for testing and debuggin
 
 ## Changes relative to upstream
 
-Every change below is labeled with how confident you should be in it. **Verified** means it passed
-SPRT testing against the upstream baseline. **Pending** means it's implemented and passes correctness
-checks (perft, bench, clippy) but hasn't cleared game testing yet — treat these as experimental.
-Reasoning for what was tried and removed is in [Removed](#removed-and-why) below; it's worth reading
-if you're deciding whether to trust a "pending" item.
+Grouped by what is actually known about each change:
 
-### Search (pending SPRT verification)
+- **[Correctness and scale fixes](#correctness-and-scale-fixes)** — defects with a demonstrable
+  wrong answer, independent of whether any feature helps or hurts. These are the changes worth
+  trusting.
+- **[Speed](#speed)** — behaviour-preserving. Verify with a node-identical `bench`.
+- **[Unverified search changes](#unverified-search-changes)** — implemented, correct as far as
+  testing shows, but never demonstrated to gain Elo. Experiments.
+- **[Protocol and usability](#protocol-and-usability)** — no effect on playing strength.
+- **[Removed, and why](#removed-and-why)** — worth reading before trusting anything above it.
 
-**Correction history** — additional tables beyond upstream's pawn/non-pawn/continuation set:
+### Correctness and scale fixes
 
-- Material-key table (piece-count-only Zobrist key)
-- Minor-piece table (knight/bishop/king placement, as in Stockfish)
-- Major-piece table (rook/queen/king placement, as in Stormphrax)
-- Minor/major/material blend weight is SPSA-tunable (`corr_minor_major`)
-- The blend's shared divisor (`corr_weight_div`) is rescaled to match: upstream tuned it for a
-  5-term sum (pawn, non-pawn ×2, continuation ×2), and this fork's 3 extra tables were originally
-  added at full strength on top of that sum without adjusting the divisor — silently inflating
-  every RFP/FP/LMR/NMP margin that reads `eval_correction()`. This was the actual source of the
-  persistent Elo losses that were, for a long time, mistakenly attributed to the qsearch-checks
-  batch below. Fixed by folding material into the existing `corr_minor_major` weight
-- Untuned since: `corr_minor_major` and `corr_weight_div` have never had a real SPSA run against
-  this specific 8-term blend, so their current values (128 and 102) are a reasoned choice rather
-  than a measured one. The minor/major/material group carries full weight
-  (`corr_minor_major: 128`), which makes the blend 5 + 3 = 8 effective terms, so the divisor that
-  keeps it on upstream's scale is `upstream_div * (5 + 3 * corr_minor_major / 128) / 5` = 102.
-  **Keep the two coupled.** A divisor below that figure divides the blend by less than it sums and
-  inflates every RFP/FP/LMR/NMP margin that reads `eval_correction()` — the same failure as the
-  original normalization bug described above. A value of 96 was tried and reverted for precisely
-  that reason; it is indistinguishable from a bug this fork has already paid for once. If
-  `corr_minor_major` changes, recompute the divisor rather than nudging it
-- `corr_bonus_min`/`corr_bonus_max` (the update clamp shared by every correction table) were
-  asymmetric (4678 / 2496) despite every other history table in the codebase clamping
-  symmetrically — letting negative corrections swing ~2x larger than positive ones, a systematic
-  pessimism bias with no documented rationale. Both now match the smaller, already-shipped bound
-  (2496)
+The recurring defect in this codebase has been **scale drift**: a heuristic is ported or a term is
+added to a sum, and the coefficients that consume it are never rescaled. Two unit systems collide
+constantly, and mixing them is silent:
 
-**Move ordering:**
+| quantity | a pawn is worth |
+| --- | --- |
+| evaluation / search scores | ~321 (startpos) to ~382 (middlegame), per `normalization()` |
+| `PieceType::value()` | 109 |
+| Stockfish `Value` (when porting constants) | ~208 material, ~328 eval-normalized |
 
-- Low-ply history: root-relative `[ply][from][to]` table for plies 0–4, carried over between searches
-- **`history` (the move-ordering/pruning sum) uses lags 1, 2 and 6 only, as in 0.1.2.** Lags 3, 4
-  and 5 were folded into it at one point without touching anything downstream, which is the same
-  defect as the `corr_weight_div` normalization bug above: this sum is not consumed on its own
-  scale, it feeds seven separately tuned coefficients (`lmp_history`, `fp_history`, `bnfp_history`,
-  `hp_margin`, `see_q_hist`, `see_n_hist`, `lmr_quiet_hist`/`fds_quiet_hist`). Adding ~40% of
-  magnitude to it silently rescaled all of them at once. Adding lags back is fine, but only
-  together with a divisor that holds the sum's scale fixed
-- Continuation history: all six lags updated with per-lag weights and a positive-consistency
-  multiplier (as in Stockfish), near lags limited when in check, overall scale SPSA-tunable
-  (`conthist_div`); per-thread, matching upstream (an attempt to share it across threads, the way
-  Stockfish shares its own `sharedHistory.continuationHistory`, is covered in
-  [Removed](#removed-and-why) below)
-- Good/bad quiet split: quiets with strongly negative history are deferred until after bad captures
-  (Stockfish's `GOOD_QUIET`/`BAD_QUIET` ordering); the threshold is SPSA-tunable (`good_quiet_threshold`)
-- Depth-indexed history divisors for late-move and futility pruning, replacing a flat divisor
-- TT-move reliability statistic (`ttMoveHistory`): a gravity-updated track record of how often the
-  TT move turns out best, feeding the singular double-extension margin
-- Best-move history bonus scaled by how many other moves were searched first, at non-PV nodes
-- Captured-piece value credited in noisy-move reductions (Stockfish's capture `statScore`),
-  strength SPSA-tunable (`lmr_capture_stat`)
-- History Pruning extended to already-bad-SEE noisy moves (`hp_noisy_margin`), not just quiets —
-  distinct from Bad Noisy Futility Pruning, which tests eval+history combined against alpha rather
-  than a raw history cutoff
+Before judging any margin in this engine, convert it to pawns. A threshold that saturates its clamp
+within a few hundredths of a pawn is a bug, not a tuning choice.
 
-**Pruning and extensions:**
+**Fixed:**
 
-- **Null-move zugzwang guard fixed**: `board.material()` sums every piece including pawns (see
-  `board/parser.rs`), so a pawn-heavy, piece-empty endgame — the textbook zugzwang scenario this
-  guard exists to catch — could pass a `material() > 491` threshold and get null-move pruned
-  anyway. Now checks `non_pawn_material()` (a new `Board` accessor), the correct signal for "is
-  this position bare enough that null-move's assumptions might not hold"
-- ~~SEE pruning exempts moves that give check~~ — **reverted.** This was extended by analogy with
-  LMP/FP, but the analogy does not carry: those decline to prune a narrow, heavily qualified slice
-  of quiet moves, whereas SEE pruning is the engine's main filter for losing captures and
-  `is_direct_check` is broad. Exempting it waved through every checking move at every depth however
-  much material it dropped, in both the main search and (worse) qsearch, where such nodes dominate.
-  Along with the `history` inflation and the singular-margin change below, it was a major
-  contributor to the tree growing 47% against 0.1.2 at fixed depth. The check exemption remains
-  where 0.1.2 has it: LMP, FP and BNFP only
-- SEE pruning threshold now also responds to `cutoff_count` (`see_q_cutoff`/`see_n_cutoff`),
-  extending the same signal already used by `lmr_cutoff`/`fds_cutoff`
-- Qsearch delta pruning: a capture that can't plausibly reach alpha even crediting the full
-  captured-piece value is skipped before the pricier SEE call (`qs_delta_margin`) — a standard
-  technique, not previously present here
-- Recapture extension: a capture landing on the square the opponent's last move captured on, that
-  doesn't lose material itself, gets a full extra ply — compensates for the horizon effect at the
-  end of a forced capture sequence. A different technique from the check extension tried and
-  removed earlier (gated on square repetition and SEE, not on giving check)
-- ~~History Pruning exempts quiet moves that give check~~ — **reverted** for the same reason as the
-  SEE exemption above; 0.1.2 does not have it. Superseded text: matching the exemption LMP and FP
-  already had — HP was the one sibling pruning check that could discard a checking move on history
-  alone
-- TT-only ProbCut check: a lower-bound TT entry from a near-full-depth search, comfortably above
-  beta, is trusted as a cutoff without any further search
-- Opponent-worsening term in reverse futility pruning: the margin shrinks when the evaluation swung
-  further in our favor than the opponent's null-move expectation
-- "Improving" also counts a node whose static eval already clears beta
-- Improving signal's ply-2/ply-4 fallback chain extended to ply-6, for long same-side-to-move gaps
-  (e.g. extended check-evasion sequences) where neither ply-2 nor ply-4 is available
-- Shuffling guard: repetitive piece shuffling near the 50-move rule disables singular extensions,
-  preventing search explosions (Stockfish #6447)
-- RFP skipped when the TT move is quiet with strongly negative history
-- Correction history updated on confirmed null-move fail-highs
-- Far-from-root singular-extension margin damping
-- Pre-qsearch TT-move extension at PV nodes, gated by TT depth, that never overrides a negative
-  (singular) extension decision
-
-**Search structure:**
-
-- Internal Iterative Reductions restored in Stockfish's current form: PV and expected-cut nodes
-  without a TT move are reduced by one ply from depth 6, exempting nodes on the previous
-  iteration's principal variation
-- Aspiration re-searches re-centre on the failing score, so a fail-low window is exactly `delta`
-  wide rather than reaching back up to the previous alpha
-- Correction values computed before the TT probe, overlapping the work with the prefetch
-
-**Time management:**
-
-- Two-horizon falling-eval scaling: the time manager's score-trend factor also compares against the
-  best score from four iterations ago (Stockfish's `fallingEval`), extending time when the
-  evaluation is sliding across recent iterations
-
-### Correctness fixes
-
-Found via a systematic audit (transposition table, time management, threading, board state,
-hashing), not through game testing — these are bugs in the fork's own code, independent of whether
-any specific search/eval feature helps or hurts. **The node-limit time-check fix in particular means
-any earlier SPRT run in this project's history that used `go nodes N` rather than a time control may
-have been measured under an artificially slowed engine** — worth keeping in mind when weighing older
-results against new ones.
-
-- **Unthrottled node-limit time check** — `Limits::Nodes` in `check_time()` called
-  `Counter::aggregate()` (summing every shard — at least 512, per `ThreadPool::available_threads()`)
-  on *every node*, while every other limit type was already gated behind the same `& 2047 == 2047`
-  periodic mask. A severe NPS penalty specific to node-limited search — exactly the mode typically
-  used for deterministic SPRT testing. Now gated the same as the rest.
-- **TT verification key race under multithreading** — `Cluster.keys` packs all 3 entries'
-  verification keys into one `u64`, updated via a plain (non-atomic) read-modify-write from
-  `write()`, which every lazy-SMP thread calls concurrently. Two threads updating *different* slots
-  in the same cluster could race: one thread's update, computed from a stale read, could silently
-  revert the other's — corrupting a sibling slot's key, not just the writer's own entry (worse than
-  the "torn own entry" tradeoff this lock-free design otherwise deliberately accepts, the same way
-  Stockfish's TT does). `keys` is now an `AtomicU64` updated via `fetch_update`.
-- **Cyclic (`movestogo`) hard time bound could consume the entire remaining clock** — with a small
-  `movestogo` (e.g. 2), `5x` the per-move time allocation already exceeds the remaining clock, so the
-  hard safety bound collapsed to "everything left," even though another move is due before the
-  control replenishes. Now reserves one more allocation's worth of time when a next move is still due.
-- **Worker-thread panic caused a silent, permanent hang instead of a diagnosable crash** — if a
-  search thread's work panicked, the completion signal update was skipped entirely, so the caller's
-  `ReceiverHandle::join()` blocked forever with no output. The signal now fires regardless (via
-  `catch_unwind`) before the panic is re-raised, so it's still visible rather than a silent freeze.
-- **`TtDepth::NONE` was unreachable** — the depth encoding put both a real `SOME`-depth write and a
-  genuinely empty (zero-initialized, never-written) slot at the same raw byte value, making them
-  indistinguishable. The "found a truly free slot" fast path in the TT replacement logic could never
-  trigger as a result. Re-encoded so a never-written slot is uniquely identifiable.
-- **Qsearch delta pruning didn't credit promotion value** — for a non-capture promotion,
-  `type_on(mv.to())` reads an empty square (value 0), not the ~1133cp actually gained by promoting,
-  which could prune a winning promotion out of qsearch in a low-eval position. Now credits the
-  promoted piece's value swing separately.
-- **`ttMoveHistory`'s gravity update was missing its bonus clamp** — every other gravity-style
-  history update in the codebase clamps its bonus first; this one didn't, letting the multicut caller
-  push the tracked value briefly past its documented ±8192 bound at high depth.
-- Several lower-severity hygiene fixes from the same audit: `CorrectionHistory::update` now clamps
-  its bonus internally (previously safe only because its one caller already did); the LMR
-  `reduced_depth` PV bonus is applied before its clamp rather than after (previously could exceed its
-  own ceiling by up to 2 plies); Chess960 castling no longer leaves a stale rook in `state.captured`
-  (inert today — the one consumer already gates on move kind — but a real invariant violation); the
-  `Zobrist` table's `mem::transmute` from a flat array is now backed by `#[repr(C)]` rather than
-  relying on Rust's unguaranteed default field ordering.
+- **Qsearch delta pruning violated fail-soft.** A pruned capture's optimistic bound
+  (`eval + material_gain + margin`) is strictly above the standing pat that seeds `best_score`, but
+  the prune skipped the move without raising it. Qsearch therefore returned an upper bound *lower*
+  than the one it had proven, stored it as `Bound::Upper`, and the parent negated it into a score
+  *higher* than justified — capped by the margin, so it surfaced as many small overestimates rather
+  than few large ones. Upstream raises `best_score` at both of its own futility prunes; this block
+  was the sole violator of a convention the fork inherited. Measured effect: the fork had been
+  taking 22% more half-pawn evaluation collapses than upstream (z = +11.0); after the fix the two
+  are level.
+- **Qsearch delta pruning mixed unit systems.** The captured piece was credited with a raw
+  `PieceType::value()` against an `eval`-scaled margin, understating every capture roughly
+  threefold. Now converted (`qs_delta_piece_scale`, 192/64 ≈ 3.0, against a true ratio of ~2.94).
+- **The time manager's falling-eval factor was a two-level switch.** The linear structure is
+  Stockfish's and the coefficient ratio was preserved, but the constants were carried across
+  unscaled from a scale where a pawn is ~208 to one where it is ~321–382. The result cleared its
+  clamp ceiling after a **0.04-pawn** score drop and sat on the floor for any gain at all — no
+  proportional band, and therefore no gradient for SPSA to have tuned it against. Rescaled so the
+  ceiling is reached at ~0.37 pawns, matching Stockfish's band in pawn terms, and moved into
+  `parameters.rs` as fixed point so it can actually be tuned now that there is a gradient.
+- **Continuation-history updates used a running prefix count.** `positive_count` was incremented and
+  used to index the consistency multipliers within the same loop iteration, so lag 1 could only ever
+  reach `multipliers[1]` while lag 6 could reach `multipliers[6]`. The nearest lags — the ones move
+  ordering leans on hardest — were damped (94–103) against the distant ones (121–126) purely by
+  position in the loop. Now counted across all eligible lags before any bonus is applied.
+- **Continuation-history pointers broke Rust's aliasing rules.** `subtable_ptr` materialised a `&mut`
+  reference and coerced it to a raw pointer, which the search then holds on its stack across many
+  later borrows of the same table; `update` took `&mut self` while writing *through* that pointer,
+  handing LLVM a `noalias` promise its own argument immediately breaks. Restored upstream's form
+  (`&raw mut` and a `&self` receiver) for both `ContinuationHistory` and
+  `ContinuationCorrectionHistory`.
+- **Aspiration fail-low widened the re-search instead of narrowing it.** Collapsing `beta` to the
+  old `alpha` made the window 1.5× wider on a shallow fail-low and 3× wider on a deep one — the
+  opposite of the rationale the code carried. Now re-centres on the failing score, so every
+  re-search is exactly `delta` wide, matching upstream.
+- **The `history` sum silently rescaled seven tuned coefficients.** It feeds `lmp_history`,
+  `fp_history`, `bnfp_history`, `hp_margin`, `see_q_hist`, `see_n_hist` and
+  `lmr_quiet_hist`/`fds_quiet_hist`, all tuned against upstream's `quiet_history + conthist(1) +
+  conthist(2)`. Lags added beyond that widened the sum without anyone adjusting the consumers. All
+  six lags are now read at the same relative strengths the update writes them, then normalized back
+  onto upstream's two units.
+- **Null-move zugzwang guard tested the wrong quantity.** `board.material()` includes pawns, so a
+  pawn-heavy, piece-empty endgame — precisely the zugzwang case the guard exists for — could clear
+  the threshold and be null-move pruned anyway. Now uses `non_pawn_material()`.
+- **Node limits below 2048 were never enforced.** `Limits::Nodes` was gated behind the same
+  `& 2047` mask as the clock (reasonable — `aggregate()` sums at least 512 shards), but with a limit
+  under 2048 the mask never fires before the limit passes. Now also gated on the cheap thread-local
+  count, keeping the optimization without the gap.
+- **TT verification-key race under multithreading.** `Cluster.keys` packs three slots' keys into one
+  `u64` via a non-atomic read-modify-write, called concurrently by every lazy-SMP thread. Two threads
+  updating *different* slots could silently revert each other — corrupting a sibling's key, not just
+  the writer's own entry. Now an `AtomicU64` updated with `fetch_update`.
+- **`TtDepth::NONE` was unreachable.** The depth encoding gave a real `SOME`-depth write and a
+  never-written, zero-initialized slot the same raw byte, so the replacement logic's "found a free
+  slot" path could never fire. Re-encoded (`NONE = -2` → `offset_depth = 0`) so an empty cluster is
+  uniquely identifiable.
+- **Qsearch delta pruning ignored promotion value.** For a non-capture promotion, `type_on()` reads
+  an empty square, crediting nothing for the ~1133cp actually gained. Now credited separately.
+- **Cyclic (`movestogo`) hard bound could consume the whole clock.** With a small `movestogo`, five
+  times the per-move allocation already exceeds what remains, collapsing the safety bound to
+  "everything left" with another move still due. Now reserves one allocation.
+- **A panicking worker thread hung the engine.** The completion signal was skipped, so
+  `ReceiverHandle::join()` blocked forever with no output. It now fires via `catch_unwind` before the
+  panic is re-raised, turning a silent freeze into a visible crash.
+- **`ttMoveHistory`'s gravity update was missing its bonus clamp**, letting the multicut caller push
+  the value past its documented ±8192 bound at high depth. Every other gravity update in the codebase
+  clamps first.
+- **FEN parsing accepted malformed input** — no rank/file bounds checks and no requirement of exactly
+  one king per side.
+- Lower-severity hygiene from the same audit: `CorrectionHistory::update` clamps its own bonus; the
+  LMR `reduced_depth` PV bonus is applied before its clamp rather than after; Chess960 castling no
+  longer records the friendly rook in `state.captured`; the `Zobrist` table's `transmute` is backed
+  by `#[repr(C)]` rather than Rust's unguaranteed field ordering.
 
 ### Speed
 
+Behaviour-preserving. A `bench` after any of these should report an **identical node count** —
+a difference means something changed semantically and needs investigating.
+
 - **PEXT bitboards** — sliding-piece attacks indexed with the BMI2 `pext` instruction where
-  supported (classical magic multiplication as fallback). Disabled automatically on AMD Zen 1/2,
-  where `pext` is microcoded; override with `WRECKLESS_PEXT=0|1`
+  supported, with classical magic multiplication as fallback. Disabled automatically on AMD Zen 1/2,
+  where `pext` is microcoded and slower than the fallback.
 - **Windows large pages** — the transposition table and continuation-history tables use 2 MB pages
-  via `VirtualAlloc(MEM_LARGE_PAGES)` when the "Lock pages in memory" privilege is held, falling
-  back to regular pages otherwise (Linux already used `MADV_HUGEPAGE`)
-- **Unchecked hot-path indexing** — the per-ply search stack and ply-indexed arrays, accessed many
-  times at every node, skip the bounds check in release builds. The same `debug_assert` that
-  guarded the safe indexing before still covers debug builds. Verified node-identical — a pure
-  speed change with no behavior difference
-- **Search stack reuse** — the per-ply search stack (`Stack`) was reallocated from scratch on every
-  aspiration-window retry and every iterative-deepening depth (`Stack::new()`, a fresh `Box` alloc
-  plus a `MAX_PLY+16`-entry init loop, called inside the hottest retry loop in the engine). It's now
-  reset in place (`Stack::reset()`), reusing the one allocation made at thread startup. Verified
-  node-identical (bench and perft unaffected) — a pure speed change
+  where the OS grants the privilege.
+- **Hoisted mailbox reads in move scoring.** `conthist(ply, i, mv)` resolved `piece_on(mv.from())`
+  internally, so six lag lookups meant six reads of the same square — loop-invariant, but the read
+  through a raw pointer inside `get` stops the optimizer hoisting it. `conthist_at` now takes the
+  resolved piece and destination. In `score_quiet` this cut **nine** reads of `mv.from()` per quiet
+  move to one, since `type_on(sq)` is exactly `piece_on(sq).piece_type()` and `moved_piece(mv)` is
+  `piece_on(mv.from())`.
+- **Deferred pruning terms behind their guards.** Qsearch delta pruning computed a board probe and a
+  `PieceType::value` match for *every* move, including all check evasions — where the prune is
+  disabled outright by `!in_check`, and where the move lists are widest. The main search's noisy
+  history-pruning value did the same on quiets, where `capture_sq()` holds nothing. Both now sit
+  behind the cheap guards; `&&` short-circuits, so the conditions are unchanged.
+- **Search stack reuse** — the per-ply `Stack` was reallocated from scratch on every aspiration retry
+  and iterative-deepening iteration; it is now reset in place.
+- **Unchecked hot-path indexing** — the per-ply search stack and ply-indexed arrays use
+  `get_unchecked` behind `debug_assert!` bounds checks. Note this trades a bounds-check panic for
+  undefined behaviour in release if an invariant is ever violated; debug builds and the test suite
+  are the safety net.
 
-### Protocol / usability
+### Unverified search changes
 
-- **Pondering** — `go ponder` / `ponderhit` support and `bestmove ... ponder ...` output
-- **`searchmoves`** — root move filtering on the `go` command
-- **`UCI_ShowWDL`** — win/draw/loss estimates in `info` lines
-- **`SyzygyProbeDepth` / `SyzygyProbeLimit`** — user-tunable tablebase engagement
-- **SPSA tunables** — 124 search constants exposed as UCI options under the `spsa` cargo feature,
-  for OpenBench SPSA tuning; identical compiled code in default (non-`spsa`) builds. A ready-to-use
-  OpenBench SPSA input file is provided in [`spsa.config`](spsa.config). It is derived
-  mechanically from the defaults in `src/parameters.rs` (min/max at ±50%, step at 5% of the
-  magnitude, learning rate 0.002) and must be regenerated whenever a default changes or a parameter
-  is added or removed — it had previously drifted, leaving two parameters absent from it entirely
-  and one default outside the range the file offered for it
+Implemented and correct as far as perft, bench, the test suite and game records show — but **none has
+been demonstrated to gain Elo**. Every one is a candidate for an A/B run against upstream, and a
+negative result on any of them would be useful information.
+
+**Move ordering:**
+
+- Low-ply history: a root-relative `[ply][from][to]` table for plies 0–4, shifted by two between
+  searches. Its contribution decays as `1 / (1 + 2·ply)` and is comparable in magnitude to
+  `quiet_history` at ply 0, falling below it by ply 1.
+- Six continuation-history lags rather than upstream's four, with per-lag weights and a
+  positive-consistency multiplier, near lags only when in check. The quiet-scoring weights sum to the
+  same total (4817) as the four-lag set they replaced, so the score distribution — and therefore
+  `good_quiet_threshold` — keeps its meaning.
+- **Good/bad quiet split.** Quiets scoring at or below `good_quiet_threshold` are deferred to a sixth
+  `BadQuiet` stage, after bad captures. Upstream has five stages and searches every quiet before any
+  bad noisy; Stockfish does not split quiets this way either. Entirely fork-only.
+- **A more permissive good/bad noisy split.** Once several good captures have been tried behind a
+  quiet TT move, upstream sends every remaining noisy move to `bad_noisy` regardless of SEE; this
+  fork instead re-tests them against a fixed threshold, so material-winning captures still sort
+  early.
+- TT-move reliability statistic (`ttMoveHistory`), a gravity-updated record of how often the TT move
+  proves best, feeding the singular double-extension margin.
+- Captured-piece value credited in noisy reductions (Stockfish's capture `statScore`), strength
+  tunable via `lmr_capture_stat`.
+
+**Pruning and extensions:**
+
+- Qsearch delta pruning — a standard technique, but one upstream does not have at all, so every move
+  it prunes is one the baseline searches.
+- History pruning extended to bad-SEE noisy moves (`hp_noisy_margin`), gated by an eval check so a
+  capture that wins material back survives regardless of its history. Note `hp_margin` itself is the
+  one fork-only pruning gate with no anchor — the others carry Stockfish's measured constants for
+  mechanisms copied verbatim, but 948 was never measured against anything.
+- Recapture extension — a capture landing where the opponent's last move captured, that doesn't lose
+  material itself, gets a full ply. Gated on square repetition and SEE, not on giving check.
+- TT-only ProbCut — a lower-bound TT entry from a near-full-depth search, comfortably above beta, is
+  trusted as a cutoff without any search. This is the only place in the search that returns a score
+  nothing ever searched, so it is held to the same gating as its neighbours (non-PV, non-excluded,
+  not decisive).
+- SEE pruning thresholds respond to `cutoff_count`, extending a signal already used by
+  `lmr_cutoff`/`fds_cutoff`.
+- Shuffling guard — repetitive piece shuffling near the fifty-move rule disables singular extensions,
+  limiting search explosions (Stockfish #6447).
+- Opponent-worsening term in reverse futility pruning; "improving" also counts a node whose static
+  eval already clears beta; the improving fallback chain extends to ply 6 for long same-side gaps.
+- Correction history updated on confirmed null-move fail-highs; far-from-root singular-margin
+  damping; a pre-qsearch TT-move extension at PV nodes that never overrides a negative singular
+  decision.
+
+**Structure and time:**
+
+- Internal Iterative Reductions in Stockfish's current form — PV and expected-cut nodes without a TT
+  move reduced a ply from depth 6, exempting nodes on the previous iteration's principal variation.
+- Correction values computed before the TT probe, overlapping the work with the prefetch.
+- Two-horizon falling-eval scaling — the time manager's trend factor also compares against the best
+  score from four iterations ago.
+
+### Protocol and usability
+
+No effect on playing strength.
+
+- **Pondering** — `go ponder` / `ponderhit` support and `bestmove ... ponder ...` output.
+- **`searchmoves`** — root move filtering on the `go` command.
+- **`UCI_ShowWDL`** — win/draw/loss estimates in `info` lines.
+- **`SyzygyProbeDepth` / `SyzygyProbeLimit`** — user-tunable tablebase engagement.
+- **SPSA tunables** — 131 search constants exposed as UCI options under the `spsa` cargo feature,
+  with matching bounds in [`spsa.config`](spsa.config).
+- Robustness: EOF handling, spin options clamped to their declared ranges, `movestogo 0` guarded
+  against division by zero, `position startpos` honouring `UCI_Chess960`.
 
 ### Removed, and why
 
-Nothing below is present in the current source — this section exists so the reasoning isn't lost
-and doesn't get re-litigated by mistake.
-
-- **Classical (hand-crafted, not learned) evaluation terms** (pawn structure, bishop pair, rook
-  files, outposts, safe mobility, king safety) added on top of the NNUE output, gated behind
-  phase-scaled weights to limit double-counting risk with signal the network already learned from
-  real games. Tested negative in SPRT **twice** — once unscaled, once gated (25%/63% weights) — even
-  after fixing a real, concrete bug (`outpost_score`'s attackable-zone direction was backwards,
-  awarding the outpost bonus almost unconditionally) and adding a standard technique (safe mobility,
-  excluding enemy-pawn-attacked squares). Two negative results in a row on the same broad approach,
-  surviving real bug fixes, is a meaningful signal that a hand-crafted eval on top of this
-  NNUE doesn't pay off — not just an unlucky sample. Removed entirely (`classical_eval.rs` and its
-  22 SPSA parameters) rather than continuing to lower the weight indefinitely.
-- **A large speculative stack** (killers, countermoves, one-reply extension, qsearch futility
-  pruning, volatility-based pruning, entropy-based time scaling, history decay applied on every
-  move, and others) measured **−69 Elo ± 39** under SPRT against the upstream baseline and was
-  removed wholesale.
+- **Classical (hand-crafted) evaluation terms** — pawn structure, bishop pair, rook placement.
+  Superseded by the NNUE.
 - **Killer moves and countermoves** were not reintroduced. Both duplicate what continuation history
-  already does more precisely — continuation history is context-conditioned (keyed on the actual
-  preceding move), while killers/countermoves are only ply- or square-indexed. Layering the weaker
-  mechanism on top of the stronger one was the leading suspect behind the bisected regression above.
-- **Classic Internal Iterative Deepening** was not added. It's superseded by Internal Iterative
-  *Reductions*, already present: IIR gets the same TT-population benefit from a cheaper reduced
-  search rather than a separate full extra search.
-- **Qsearch checks, shared continuation history, the check extension, and a singular-extension
-  recursion cap** were removed as a batch after plateauing around **−18 to −40 Elo** across many
-  SPRT samples, even after fixing every identified bug in qsearch checks (an early-cutoff TT bypass
-  and a late-move-pruning coverage gap) and reference-checking the other two against Stockfish's
-  actual source. All four were then **restored** once a full-engine audit found `corr_weight_div`
-  (below) — a real, independent bug — as a plausible explanation for the persistent negative
-  results. That restored candidate subsequently tested at **≈−18 Elo at n≈394** (wide error bars,
-  not yet SPRT-resolved) — better than before, but still negative rather than clearly positive, so
-  the fix alone hasn't been confirmed to fully explain the earlier results. All four were **removed
-  again** to let `corr_weight_div` be tested in isolation, cleanly separated from this batch's own
-  (still unproven) effect on Elo. Restore them again only once that isolated test has a result.
-  - As a side effect of this second removal, the continuation-history table also reverted from
-    shared/atomic back to per-thread, non-atomic storage (see [Move ordering](#search-pending-sprt-verification)
-    above) — the sharing itself was never implicated in anything, it just travels with qsearch
-    checks as part of the same historical batch.
-- **A second check extension** (full-search-depth only, gated by shallow remaining depth and
-  non-losing SEE) was tried again, without first cross-checking the history above, and removed. A
-  different implementation of the same broad technique that already plateaued at −18 to −40 Elo
-  unisolated once — treated as higher-risk than a typical "pending" item for that reason, and
-  removed on request rather than risk-tested.
-- **A correction-history update on singular multicut** (feeding the gap between the singular
-  search's value and the static eval into correction history, as described for PlentyChess) was
-  implemented and removed after code review: the singular sub-search excludes the TT move and runs
-  at reduced depth, so its result isn't statistically comparable to the genuine
-  `(full search result − static eval)` samples correction history is built on elsewhere. Since
-  correction history feeds every RFP/FP/LMR/NMP margin, this had unusually high leverage as a
-  regression source.
-- **The opponent-worsening razoring term** (`razor_worsening`) was removed. It was new since 0.1.2,
-  its own note called the scaling "genuinely ambiguous", and its direction is backwards: it made the
-  engine razor *more* readily when the evaluation had swung further in our favour than expected,
-  inverting how the same signal is used in RFP, where good news supports trusting a fail-high rather
-  than giving up on the node earlier.
-  - `razor_corr` and `razor_cutoff` are removed too, and razoring now matches upstream Reckless
-    byte-for-byte (`alpha - 237 - 254 * depth * depth`). They were briefly restored on the grounds
-    that 0.1.2 carried them and 0.1.2 "measured neutral" — but the SPRT base is *upstream Reckless*,
-    not 0.1.2, and 0.1.2 is itself a fork build carrying the same stack of unverified changes.
-    Comparing one unverified build against another proves nothing, so upstream is the only
-    meaningful reference, and upstream has neither term.
-- **Null-move reduction responding to `ttMoveHistory`** (`nmp_r_tt_history`) was removed. It was the
-  one item this section's own notes ranked as "lower confidence than the fixes above": a plausible
-  correlation between a well-trusted TT move and a settled, less volatile position, never a derived
-  relationship. `ttMoveHistory` still feeds the singular double-extension margin, where there is an
-  actual mechanism behind it.
-- **History decay applied at the start of every search** (halving quiet/noisy/pawn history on every
-  `go` command) was removed — it was stacking on top of an already-self-regulating gravity-decay
-  mechanism built into every history table's update function, and fired far more often than
-  intended (every move of every game, not occasionally).
+  already encodes.
+- **Classic Internal Iterative Deepening** was not added; it is superseded by IIR.
+- **Material, minor-piece and major-piece correction-history tables.** These were added at full
+  strength on top of a five-term blend without adjusting the shared divisor, silently inflating every
+  RFP/FP/LMR/NMP margin that reads `eval_correction()`. Rather than keep coupling a hand-computed
+  divisor to a hand-picked weight, the three extra tables were removed and the blend returned to
+  upstream's terms.
+- **Depth-indexed history divisors** for late-move and futility pruning, replaced by a flat 1024. The
+  table was fork-only and its per-depth values were never measured.
+- **SEE-pruning and history-pruning exemptions for checking moves.** Extended by analogy with
+  LMP/FP, but the analogy does not carry: those decline to prune a narrow, heavily qualified slice of
+  quiet moves, whereas SEE pruning is the main filter for losing captures and `is_direct_check` is
+  broad. Exempting it waved through every checking move at every depth however much material it
+  dropped — in qsearch especially, where such nodes dominate.
+- **Qsearch checks, shared continuation history, a second check extension, a correction-history
+  update on singular multicut, `razor_worsening`, `nmp_r_tt_history`, and per-search history decay**
+  were each tried and removed.
 
-**The lesson so far**: repeatedly bisecting and patching that batch never moved the Elo, which is
-what led to auditing older, previously-trusted code instead of the recently-changed batch — and
-that's how the `corr_weight_div` normalization bug described under
-[Correction history](#search-pending-sprt-verification) above was found. It's a genuine, independent
-defect, present since the very first correction-history table beyond upstream's original three. What
-isn't yet established is whether it's the *whole* explanation: the restored batch plus that fix still
-tested negative (though less so) rather than clearly positive, so causality here is still open — it
-could be that the fix is real but this batch is separately, mildly net-negative on its own. Isolated
-testing of the fix alone (batch removed) is the next step to resolve that. The per-lag
-continuation-history reweighting fix (lags 2/4/6 had been silently weakened to 43–79% of their
-original strength) was kept throughout, since it's correct independent of anything else in this
-section.
+**The lesson from all of the above:** every measurable Elo recovery in this fork's history came from
+fixing arithmetic, not from adding ideas. When a change underperforms, check the units before
+questioning the heuristic — a mis-scaled term looks tuned, because SPSA will report a value for it,
+but a saturated or unnormalized coefficient has no gradient and whatever number it lands on is
+arbitrary.
 
 ## Testing and tuning
 
-All "pending" items above are unverified until they pass game testing. If you're evaluating a
-change, this is the expected workflow:
+Nothing in [Unverified search changes](#unverified-search-changes) should be trusted until it passes
+game testing. Build both sides identically — same toolchain, both PGO or neither — since a build
+asymmetry is worth several Elo on its own.
 
 ### SPRT (does this patch gain Elo?)
 
-1. Build the candidate and a baseline binary to compare against (e.g. via
-   `git worktree add ../wreckless-base <commit> && make` for the baseline).
-2. Run a sequential probability ratio test with [fastchess](https://github.com/Disservin/fastchess)
-   and a standard opening book such as `UHO_Lichess_4852_v1.epd`:
+Build the candidate and a baseline (e.g. `git worktree add ../wreckless-base <commit> && make pgo`),
+then:
 
-   ```bash
-   fastchess -engine cmd=wreckless name=test -engine cmd=wreckless-base name=base \
-     -each tc=10+0.1 option.Hash=16 option.Threads=1 proto=uci \
-     -openings file=UHO_Lichess_4852_v1.epd format=epd order=random \
-     -repeat -games 2 -rounds 30000 -concurrency 8 -recover \
-     -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05 -ratinginterval 200
-   ```
+```bash
+fastchess \
+  -engine cmd=./wreckless      name=Test \
+  -engine cmd=./wreckless-base name=Base \
+  -each tc=10+0.1 option.Threads=1 option.Hash=128 proto=uci \
+  -openings file=UHO_Lichess_4852_v1.epd format=epd order=sequential \
+  -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05 model=normalized \
+  -rounds 30000 -repeat -concurrency 8 -recover \
+  -pgnout file=games.pgn -ratinginterval 20
+```
 
-3. The run stops itself: H1 accepted means the patch gains Elo, H0 accepted means it doesn't.
+**Set `-concurrency` to your physical core count, not your logical one.** At 10+0.1, saturating every
+logical core leaves nothing for the harness and makes per-move timing erratic, which shows up as
+spurious losses on time.
 
-Test one patch per branch — bundling several changes into one SPRT run makes it impossible to tell
-which one actually mattered if the result is negative. Always test with the default (non-`spsa`)
-build; the `spsa` feature build reads parameters through extra indirection and is measurably slower.
+**Choose bounds that match the question.** `elo0=0 elo1=5` asks "does this gain at least 5 nElo" and
+is right for a change meant to add strength. For a correctness fix or a simplification, use
+`elo0=-5 elo1=0` — "does this lose anything" — which resolves far sooner. A test whose true effect
+sits on one of its bounds can run indefinitely without reaching either.
+
+Test one patch per run. Bundling several changes makes a negative result uninterpretable.
+
+**Optional adjudication.** Playing games out keeps conversion and endgame technique inside the
+measurement; adjudicating them roughly halves the wall-clock cost. If you adjudicate, these
+thresholds were derived by replaying this engine pair's own game records and checking every verdict
+against the real result:
+
+```bash
+  -resign movecount=3 score=400 twosided=true \
+  -draw   movenumber=40 movecount=8 score=5
+```
+
+That combination adjudicated 1494 of 1612 games and saved 32% of all plies with **zero** incorrect
+verdicts. Raising the resign threshold *reduces* savings sharply (600cp saves only 6%, because a
+larger margin only triggers deep into an already-decided conversion); lowering it past 400 starts
+misclassifying won games. These figures are specific to this engine pair and evaluation scale — re-derive
+them before applying elsewhere.
 
 ### SPSA (what should the tunable constants be?)
 
@@ -445,21 +440,27 @@ Build with all constants exposed:
 cargo rustc --release --bin wreckless --features spsa
 ```
 
-Feed [`spsa.config`](spsa.config) to an [OpenBench](https://github.com/AndyGrant/OpenBench) SPSA
-test (preferred — SPSA needs many games, and OpenBench distributes them across workers), or tune
-one parameter group at a time locally with a cutechess-based SPSA driver if you don't have access
-to distributed workers. Once you have new values, paste them into `src/parameters.rs` and run a
-normal SPRT to confirm the tuned result is actually better before keeping it — SPSA on too few
-games can converge to noise.
+Feed [`spsa.config`](spsa.config) to an [OpenBench](https://github.com/AndyGrant/OpenBench) SPSA test
+— SPSA needs many games, and OpenBench distributes them. Paste the results into `src/parameters.rs`
+and confirm with a normal SPRT before keeping them; SPSA on too few games converges to noise.
+
+Always benchmark and play with the default (non-`spsa`) build. The `spsa` feature reads every
+parameter through a mutable static instead of a constant, which is measurably slower.
+
+Two cautions specific to this codebase. A parameter that saturates its clamp gives SPSA no gradient,
+so it will return an arbitrary value with a confident-looking precision — check the operating range
+in pawns before trusting a tuned constant. And several parameters are deliberately coupled
+(`hp_noisy_margin` is derived from `hp_margin`; the conthist weights sum to a fixed total): moving one
+without the other reintroduces a scale bug the fork has already paid for once.
 
 ## Acknowledgements
 
 - [Reckless](https://github.com/codedeliveryservice/Reckless) and its
   [contributors](https://github.com/codedeliveryservice/Reckless/graphs/contributors) — Wreckless
-  is a fork and inherits virtually all of its strength from their work, including the NNUE networks
+  is a fork and inherits effectively all of its strength from their work, including the NNUE networks
   from [RecklessNetworks](https://github.com/codedeliveryservice/RecklessNetworks)
-- [OpenBench](https://github.com/AndyGrant/OpenBench), the primary testing framework, powered by
-  [Cute Chess](https://github.com/cutechess/cutechess)
+- [OpenBench](https://github.com/AndyGrant/OpenBench) and
+  [fastchess](https://github.com/Disservin/fastchess), the testing frameworks
 - [Bullet](https://github.com/jw1912/bullet), the NNUE trainer
 - [Stockfish](https://github.com/official-stockfish/Stockfish),
   [PlentyChess](https://github.com/Yoshie2000/PlentyChess),

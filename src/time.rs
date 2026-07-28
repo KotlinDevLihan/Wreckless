@@ -119,7 +119,15 @@ impl TimeManager {
             // on every node was a severe NPS penalty specific to node-limited
             // search -- exactly the mode used for deterministic SPRT/self-play
             // testing.
-            Limits::Nodes(maximum) => td.nodes() & 2047 == 2047 && td.shared.nodes.aggregate() > maximum,
+            //
+            // The thread-local count is cheap, so it also gates the case the
+            // mask alone would miss: with a limit under 2048 the mask never
+            // fires before the limit is passed, and the search would overrun
+            // it entirely -- upstream polls `aggregate()` every node and has
+            // no such gap.
+            Limits::Nodes(maximum) => {
+                (td.nodes() >= maximum || td.nodes() & 2047 == 2047) && td.shared.nodes.aggregate() > maximum
+            }
             _ => td.nodes() & 2047 == 2047 && self.search_elapsed(td) >= self.hard_bound,
         }
     }

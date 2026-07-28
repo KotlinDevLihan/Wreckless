@@ -273,15 +273,23 @@ impl ContinuationCorrectionHistory {
     pub fn subtable_ptr(
         &mut self, in_check: bool, capture: bool, piece: Piece, to: Square,
     ) -> *mut PieceToHistory<i16> {
-        &mut self.entries[in_check as usize][capture as usize][piece][to]
+        // `&raw mut`, not `&mut ... as *mut`. The latter materialises a `&mut`
+        // reference to the subtable first, and the search holds the resulting
+        // pointer on its stack across many later borrows of this table -- each
+        // of which invalidates a pointer derived that way. Taking the address
+        // directly never creates the intermediate reference.
+        &raw mut self.entries[in_check as usize][capture as usize][piece][to]
     }
 
     pub fn get(&self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square) -> i32 {
         unsafe { (&*subtable_ptr)[piece][to] as i32 }
     }
 
-    pub fn update(&mut self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square, bonus: i32) {
-        let entry = unsafe { &mut (&mut *subtable_ptr)[piece][to] };
+    /// Takes `&self`, not `&mut self`: `subtable_ptr` points *into* this
+    /// table, so a `&mut self` receiver would hand LLVM a `noalias` promise
+    /// that the argument immediately breaks.
+    pub fn update(&self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square, bonus: i32) {
+        let entry = &mut unsafe { &mut *subtable_ptr }[piece][to];
         apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
     }
 }
@@ -303,15 +311,23 @@ impl ContinuationHistory {
     pub fn subtable_ptr(
         &mut self, in_check: bool, capture: bool, piece: Piece, to: Square,
     ) -> *mut PieceToHistory<i16> {
-        &mut self.entries[in_check as usize][capture as usize][piece][to]
+        // `&raw mut`, not `&mut ... as *mut`. The latter materialises a `&mut`
+        // reference to the subtable first, and the search holds the resulting
+        // pointer on its stack across many later borrows of this table -- each
+        // of which invalidates a pointer derived that way. Taking the address
+        // directly never creates the intermediate reference.
+        &raw mut self.entries[in_check as usize][capture as usize][piece][to]
     }
 
     pub fn get(&self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square) -> i32 {
         (unsafe { &*subtable_ptr }[piece][to]) as i32
     }
 
-    pub fn update(&mut self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square, bonus: i32) {
-        let entry = unsafe { &mut (&mut *subtable_ptr)[piece][to] };
+    /// Takes `&self`, not `&mut self`: `subtable_ptr` points *into* this
+    /// table, so a `&mut self` receiver would hand LLVM a `noalias` promise
+    /// that the argument immediately breaks.
+    pub fn update(&self, subtable_ptr: *mut PieceToHistory<i16>, piece: Piece, to: Square, bonus: i32) {
+        let entry = &mut unsafe { &mut *subtable_ptr }[piece][to];
         apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
     }
 }

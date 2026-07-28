@@ -256,10 +256,13 @@ impl MovePicker {
         for entry in self.list.iter_mut() {
             let mv = entry.mv;
             let captured = td.board.type_on(mv.capture_sq());
-            let pt = td.board.type_on(mv.from());
+            // Single mailbox read: `type_on` and `moved_piece` both resolve
+            // `mv.from()`, and this loop wanted each of them once.
+            let moved = td.board.piece_on(mv.from());
+            let pt = moved.piece_type();
 
             entry.score = 14232 * captured.value() / 1024
-                + td.noisy_history.get(threats, td.board.moved_piece(mv), mv.to(), captured)
+                + td.noisy_history.get(threats, moved, mv.to(), captured)
                 + 4558 * (mv.is_promotion() && mv.promo_piece_type() == PieceType::Queen) as i32
                 // Evading check with the least valuable piece first dominates
                 // every learned term, hence the deliberately huge constant.
@@ -275,29 +278,38 @@ impl MovePicker {
 
         for entry in self.list.iter_mut() {
             let mv = entry.mv;
-            let pt = td.board.type_on(mv.from());
+            // One mailbox read serves all three: `type_on(sq)` is
+            // `piece_on(sq).piece_type()` and `moved_piece(mv)` is
+            // `piece_on(mv.from())`. Spelled out separately, this square was
+            // being re-read nine times per quiet move -- once here, once for
+            // pawn history, and once inside each of the six `conthist` calls,
+            // whose raw-pointer read blocks the optimiser from hoisting it.
+            let from = mv.from();
+            let to = mv.to();
+            let moved = td.board.piece_on(from);
+            let pt = moved.piece_type();
 
             entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
-                + 1024 * td.corrhist().pawn_history.get(pawn_key, td.board.moved_piece(mv), mv.to()) / 1024
+                + 1024 * td.corrhist().pawn_history.get(pawn_key, moved, to) / 1024
                 + Self::low_ply_term(td, ply, mv)
                 // All six continuation lags. The weights sum to the same total
                 // as the four-lag set they replaced (4817), so the good/bad
                 // quiet split still sees the same score distribution and
                 // `good_quiet_threshold` keeps its meaning.
-                + 1479 * td.conthist(ply, 1, mv) / 1024
-                + 977 * td.conthist(ply, 2, mv) / 1024
-                + 277 * td.conthist(ply, 3, mv) / 1024
-                + 995 * td.conthist(ply, 4, mv) / 1024
-                + 126 * td.conthist(ply, 5, mv) / 1024
-                + 963 * td.conthist(ply, 6, mv) / 1024
+                + 1479 * td.conthist_at(ply, 1, moved, to) / 1024
+                + 977 * td.conthist_at(ply, 2, moved, to) / 1024
+                + 277 * td.conthist_at(ply, 3, moved, to) / 1024
+                + 995 * td.conthist_at(ply, 4, moved, to) / 1024
+                + 126 * td.conthist_at(ply, 5, moved, to) / 1024
+                + 963 * td.conthist_at(ply, 6, moved, to) / 1024
                 // Positional shaping: reward stepping a threatened piece to
                 // safety, giving check, or attacking something; penalise moving
                 // into a threat or breaking up the pawns shielding our king.
-                + ctx.escape[pt] * ctx.threatened[pt].contains(mv.from()) as i32
-                + 10723 * td.board.checking_squares(pt).contains(mv.to()) as i32
-                - 8875 * ctx.threatened[pt].contains(mv.to()) as i32
-                + 3446 * ctx.offense[pt].contains(mv.to()) as i32
-                - 4494 * ctx.wall_pawns.contains(mv.from()) as i32;
+                + ctx.escape[pt] * ctx.threatened[pt].contains(from) as i32
+                + 10723 * td.board.checking_squares(pt).contains(to) as i32
+                - 8875 * ctx.threatened[pt].contains(to) as i32
+                + 3446 * ctx.offense[pt].contains(to) as i32
+                - 4494 * ctx.wall_pawns.contains(from) as i32;
         }
     }
 

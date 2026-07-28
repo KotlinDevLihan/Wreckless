@@ -1036,6 +1036,10 @@ fn search<NODE: NodeType>(
 
         let is_quiet = mv.is_quiet();
 
+        // Resolved once and reused by all six continuation lags below.
+        let moved = td.board.piece_on(mv.from());
+        let to = mv.to();
+
         // For noisy moves, reductions additionally credit the captured piece's
         // value (as in Stockfish's statScore for captures).
         let mut capture_stat = 0;
@@ -1088,17 +1092,19 @@ fn search<NODE: NodeType>(
             // dividing by 2 (0.50) restores 1.95. The extra lags now contribute
             // their information and nothing downstream is silently rescaled.
             td.quiet_history.get(td.board.all_threats(), stm, mv)
-                + (td.conthist(ply, 1, mv)
-                    + td.conthist(ply, 2, mv)
-                    + td.conthist(ply, 3, mv) * 2 / 7
-                    + td.conthist(ply, 4, mv)
-                    + td.conthist(ply, 5, mv) / 8
-                    + td.conthist(ply, 6, mv) / 2)
+                + (td.conthist_at(ply, 1, moved, to)
+                    + td.conthist_at(ply, 2, moved, to)
+                    + td.conthist_at(ply, 3, moved, to) * 2 / 7
+                    + td.conthist_at(ply, 4, moved, to)
+                    + td.conthist_at(ply, 5, moved, to) / 8
+                    + td.conthist_at(ply, 6, moved, to) / 2)
                     / 2
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
             capture_stat = p::lmr_capture_stat() * captured_type.value() / 64;
-            td.noisy_history.get(td.board.all_threats(), td.board.moved_piece(mv), mv.to(), captured_type)
+            // `moved_piece(mv)` is `mailbox[mv.from()]`, the same lookup as the
+            // hoisted `moved` above.
+            td.noisy_history.get(td.board.all_threats(), moved, to, captured_type)
         };
 
         if !NODE::ROOT && !is_loss(best_score) {
@@ -1199,17 +1205,24 @@ fn search<NODE: NodeType>(
             // a pawn 109 while the search's own units put it near 321-382, so
             // the raw value cannot be added to `eval` -- the same ~3x mismatch
             // that was silently under-crediting qsearch delta pruning.
-            let noisy_hp_value = eval
-                + td.board.type_on(mv.capture_sq()).value() * p::qs_delta_piece_scale() / 64
-                + p::hp_noisy_eval_margin();
-
+            //
+            // Evaluated last, after the six cheap guards, rather than for every
+            // move the loop sees. It was costing a board probe plus a
+            // `PieceType::value` match on quiets too, where `capture_sq()` holds
+            // nothing to capture and the result is discarded -- and `depth < 5`
+            // with `Stage::BadNoisy` means the guards reject the overwhelming
+            // majority of moves before it is needed. `&&` short-circuits, so the
+            // condition is unchanged.
             if !in_check
                 && !is_direct_check
                 && !is_quiet
                 && move_picker.stage() == Stage::BadNoisy
                 && depth < 5
                 && history < -p::hp_noisy_margin() * depth
-                && noisy_hp_value <= alpha
+                && eval
+                    + td.board.type_on(mv.capture_sq()).value() * p::qs_delta_piece_scale() / 64
+                    + p::hp_noisy_eval_margin()
+                    <= alpha
             {
                 continue;
             }
@@ -1743,32 +1756,43 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             // threshold (`(alpha - eval) / qs_see_div`); this is the same
             // conversion applied the other way. Tunable so SPSA can refine the
             // factor rather than leaving 3 as another hand-picked constant.
-            let material_gain = {
+            // The material lookup is deferred behind the four cheap guards
+            // rather than computed for every move. It costs a board probe plus
+            // a `PieceType::value` match, and none of it is used when the node
+            // is in check -- where the prune is disabled outright, yet every
+            // check evasion, quiets included, was paying for it. Those are the
+            // widest move lists qsearch generates, and qsearch is most of the
+            // tree. Pure reordering: `&&` short-circuits, so the guards and the
+            // test are evaluated in the same order and the outcome is
+            // unchanged.
+            if !in_check && !is_direct_check && !mv.is_quiet() && is_valid(eval) {
                 let captured = td.board.type_on(mv.capture_sq()).value();
                 let promotion_gain =
                     if mv.is_promotion() { mv.promo_piece_type().value() - PieceType::Pawn.value() } else { 0 };
-                (captured + promotion_gain) * p::qs_delta_piece_scale() / 64
-            };
+                let delta_value =
+                    eval + (captured + promotion_gain) * p::qs_delta_piece_scale() / 64 + p::qs_delta_margin();
 
-            let delta_value = eval + material_gain + p::qs_delta_margin();
-
-            if !in_check && !is_direct_check && !mv.is_quiet() && is_valid(eval) && delta_value < alpha {
-                // Fail-soft: `delta_value` is this move's optimistic upper
-                // bound, and it is strictly above the standing pat that seeded
-                // `best_score` (material_gain >= 0 and the margin is positive).
-                // Skipping the move without raising `best_score` therefore
-                // returns an upper bound lower than the one actually proven,
-                // and that bound gets stored as Bound::Upper -- the parent
-                // negates it and sees a score *higher* than justified.
-                //
-                // Stockfish raises bestValue at the same spot for this reason.
-                // The error is capped by the margin, so it shows up as many
-                // small overestimates rather than occasional large ones, which
-                // matches what this fork measures against upstream: +0.0032
-                // eval optimism on identical positions and 22% more half-pawn
-                // collapses, with no excess above 2 pawns.
-                best_score = best_score.max(delta_value);
-                continue;
+                if delta_value < alpha {
+                    // Fail-soft: `delta_value` is this move's optimistic upper
+                    // bound, and it is strictly above the standing pat that
+                    // seeded `best_score` (the material term is >= 0 and the
+                    // margin is positive). Skipping the move without raising
+                    // `best_score` therefore returns an upper bound lower than
+                    // the one actually proven, and that bound gets stored as
+                    // Bound::Upper -- the parent negates it and sees a score
+                    // *higher* than justified.
+                    //
+                    // Upstream raises best_score at both of its own futility
+                    // prunes, so this block was the one place in the codebase
+                    // breaking a convention it inherited. The error is capped
+                    // by the margin, so it shows up as many small overestimates
+                    // rather than occasional large ones -- which is what this
+                    // fork measures against upstream: +0.0032 eval optimism on
+                    // identical positions and 22% more half-pawn collapses,
+                    // with no excess above 2 pawns.
+                    best_score = best_score.max(delta_value);
+                    continue;
+                }
             }
 
             // Static Exchange Evaluation Pruning (SEE Pruning)

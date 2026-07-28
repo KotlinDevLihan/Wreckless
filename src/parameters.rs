@@ -113,25 +113,7 @@ define! {
     i32 bnfp_base: 24;
 
     // History Pruning
-    //
-    // Raised from 948. Unlike the other fork-only pruning gates, this one has
-    // no anchor -- probcut_tt_margin and qs_delta_margin both carry Stockfish's
-    // measured constants for mechanisms copied verbatim, and hp_noisy_margin is
-    // derived from this value, but 948 itself was never measured against
-    // anything. Upstream has no history-only pruning at all, so every move this
-    // gate cuts is one Base searches.
-    //
-    // Direction comes from 3568 games against upstream: on identical positions
-    // the fork is +0.0032 pawns more optimistic and 0.07 ply deeper at equal
-    // time, and it takes 22% more half-pawn eval collapses while showing almost
-    // no excess above 2 pawns (ratio 1.08). Many small overestimates and no
-    // extra blunders is what pruning slightly too much looks like, so this
-    // pulls the one unanchored gate back rather than retuning gates whose
-    // values were derived. At depth 4 it now needs history < -4928 instead of
-    // -3792, against a quiet history sum spanning roughly +/-38148.
-    //
-    // hp_noisy_margin moves with it to preserve the 12800/38148 ratio below.
-    i32 hp_margin: 1232;
+    i32 hp_margin: 948;
     // History pruning extended to bad-SEE noisy moves (quiet-only upstream).
     //
     // Scale-matched to hp_margin, not to MAX_HISTORY. The original 1481 came
@@ -153,7 +135,7 @@ define! {
     // qs_delta_margin, the qsearch analogue of the same test. Larger is safer
     // (prunes less).
     i32 hp_noisy_eval_margin: 306;
-    i32 hp_noisy_margin: 413;
+    i32 hp_noisy_margin: 318;
 
     // SEE Pruning
     i32 see_q_quad: 12;

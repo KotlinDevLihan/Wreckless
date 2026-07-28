@@ -2185,24 +2185,7 @@ fn is_shuffling(td: &ThreadData, tt_move: Move, ply: isize) -> bool {
     let prev2 = td.stack[ply - 2].mv;
     let prev4 = td.stack[ply - 4].mv;
 
-    // The chain conditions alone (same piece moving A->B->C->D) describe a
-    // *maneuver*, not a shuffle. Walking a king toward the action to convert a
-    // won endgame looks exactly like that, and it runs with no captures or
-    // pawn moves -- so it clears the fiftymove gate too, and singular
-    // extensions were being switched off across most of the conversion phase.
-    // Measured on final-fixed-games.pgn: in positions at +5 or better the
-    // engine gained 0.129 eval per move against upstream's 0.205 (4.1 sigma),
-    // i.e. visibly slower progress once already winning.
-    //
-    // The search explosion this guards against (Stockfish #6447) comes from
-    // repetitions, and a repetition requires revisiting a square -- so require
-    // the move to put the piece back on one it just left. Real shuffling still
-    // trips this; purposeful maneuvering no longer does.
-    prev2.is_present()
-        && prev4.is_present()
-        && tt_move.from() == prev2.to()
-        && prev2.from() == prev4.to()
-        && (tt_move.to() == prev2.from() || tt_move.to() == prev4.from())
+    prev2.is_present() && prev4.is_present() && tt_move.from() == prev2.to() && prev2.from() == prev4.to()
 }
 
 fn make_move(td: &mut ThreadData, ply: isize, mv: Move) {

@@ -262,10 +262,38 @@ within a few hundredths of a pawn is a bug, not a tuning choice.
   clamps first.
 - **FEN parsing accepted malformed input** — no rank/file bounds checks and no requirement of exactly
   one king per side.
+- **The evaluation could come back sign-flipped.** The fiftymove damping factor is
+  `(200 - clock) / 200`, and `clock` is a `u8` read straight from the FEN — so 201..=255 is
+  representable and the multiplier goes negative. `is_draw` gates every node except the root, so the
+  reachable case was a root FEN with a clock above 200 feeding a *negated* static eval into
+  aspiration and every margin that reads it. Clamped. Unreachable from legal play (the rule ends the
+  game at 100), so it is inert for normal games.
+- **`go movetime` ignored Move Overhead.** Only the fixed 15 ms was subtracted, so a GUI on the
+  default 100 ms overhead got `ms - 15` of thinking and could flag on a slow connection. Now
+  `saturating_sub(move_overhead)`, matching the Fischer and Cyclic branches.
+- **Dividing by a tunable parameter could crash the engine.** Four sites divide by an SPSA parameter
+  (`probcut_score_div`, `qs_see_div`, `corr_weight_div`, `conthist_div`), and `set_parameter`
+  accepted any value with no range check — so a tuner bug or a hand-typed
+  `setoption name corr_weight_div value 0` was a division-by-zero panic mid-match. The `spsa.config`
+  bounds only help if the tuner respects them. All four now clamp with `.max(1)` at the point the
+  invariant matters, as does the `root_delta` division in LMR. In the default build these are
+  `const fn`, so the clamp folds at compile time — zero cost in the binary that plays games.
+- **The SPSA setter turned a typo into a forfeit.** `value.parse().unwrap()` panicked on a malformed
+  value and `panic!` on an unrecognised name. A tuning run is a long-lived match; neither may take
+  the process down, and UCI requires unknown options be ignored. Both now emit `info string` and
+  continue.
+- **`LowPlyHistory` bounds lived in its callers.** `get`/`update` indexed `entries[ply]` directly
+  while the search calls them from nodes at any ply up to `MAX_PLY` — correct only because all three
+  call sites happened to test `ply < MAX_LOW_PLY`. The bound moved inside the type, so a fourth call
+  site is inert rather than an out-of-bounds panic, and a `const` assertion pins the `>= 2` that
+  `shift()`'s `rotate_left(2)` and `MAX_LOW_PLY - 2` slice assume.
 - Lower-severity hygiene from the same audit: `CorrectionHistory::update` clamps its own bonus; the
-  LMR `reduced_depth` PV bonus is applied before its clamp rather than after; Chess960 castling no
-  longer records the friendly rook in `state.captured`; the `Zobrist` table's `transmute` is backed
-  by `#[repr(C)]` rather than Rust's unguaranteed field ordering.
+  LMR `reduced_depth` PV bonus is applied *after* its clamp, so PV scout depth keeps the
+  `new_depth + 4` ceiling instead of being capped two plies lower; Chess960 castling no longer
+  records the friendly rook in `state.captured`; the `Zobrist` table's `transmute` is backed by
+  `#[repr(C)]` rather than Rust's unguaranteed field ordering; a dead `append_evasions` wrapper was
+  removed (nothing called it, and perft drives `generate_all_moves`, so it would have shipped
+  unvalidated the moment anyone wired it up — its crash post-mortem now lives on `generate_moves`).
 
 ### Speed
 
@@ -313,14 +341,8 @@ negative result on any of them would be useful information.
 - **Good/bad quiet split.** Quiets scoring at or below `good_quiet_threshold` are deferred to a sixth
   `BadQuiet` stage, after bad captures. Upstream has five stages and searches every quiet before any
   bad noisy; Stockfish does not split quiets this way either. Entirely fork-only.
-- **A more permissive good/bad noisy split.** Once several good captures have been tried behind a
-  quiet TT move, upstream sends every remaining noisy move to `bad_noisy` regardless of SEE; this
-  fork instead re-tests them against a fixed threshold, so material-winning captures still sort
-  early.
 - TT-move reliability statistic (`ttMoveHistory`), a gravity-updated record of how often the TT move
   proves best, feeding the singular double-extension margin.
-- Captured-piece value credited in noisy reductions (Stockfish's capture `statScore`), strength
-  tunable via `lmr_capture_stat`.
 
 **Pruning and extensions:**
 

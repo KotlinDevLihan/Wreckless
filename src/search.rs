@@ -830,7 +830,7 @@ fn search<NODE: NodeType>(
             let mut score = -qsearch::<NonPV>(td, -probcut_beta, -probcut_beta + 1, ply + 1);
 
             let base_depth = (depth - 4 - improving as i32).max(0);
-            let mut probcut_depth = (base_depth - (score - probcut_beta) / p::probcut_score_div()).clamp(0, base_depth);
+            let mut probcut_depth = (base_depth - (score - probcut_beta) / p::probcut_score_div().max(1)).clamp(0, base_depth);
 
             if score >= probcut_beta && probcut_depth > 0 {
                 let adjusted_beta =
@@ -1350,7 +1350,13 @@ fn search<NODE: NodeType>(
             }
 
             if NODE::PV {
-                reduction -= p::lmr_pv_base() + p::lmr_pv_delta() * (beta - alpha) / td.root_delta;
+                // `root_delta` is a plain field that starts at 0 and is only
+                // assigned inside the aspiration loop. It is always >= 1 by the
+                // time any node runs (that assignment is `beta - alpha` on a
+                // window where alpha < beta), so the clamp changes nothing --
+                // it just stops the one arrangement that would divide by zero
+                // from being a crash instead of a no-op.
+                reduction -= p::lmr_pv_base() + p::lmr_pv_delta() * (beta - alpha) / td.root_delta.max(1);
             }
 
             if tt_pv {
@@ -1802,7 +1808,7 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             if is_valid(eval)
                 && !td.board.see(
                     mv,
-                    (alpha - eval) / p::qs_see_div() - correction_value.abs().min(p::qs_see_corr_cap()) - p::qs_see_base(),
+                    (alpha - eval) / p::qs_see_div().max(1) - correction_value.abs().min(p::qs_see_corr_cap()) - p::qs_see_base(),
                 )
             {
                 continue;
@@ -2083,7 +2089,7 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
             td.stack[ply - 1].piece,
             td.stack[ply - 1].mv.to(),
         ))
-        / p::corr_weight_div()
+        / p::corr_weight_div().max(1)
 }
 
 fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: isize) {
@@ -2191,7 +2197,7 @@ fn update_continuation_histories_in_check(
         // Overall scale is SPSA-tunable since the right magnitude for this
         // 6-lag scheme relative to the original 4-lag baseline is an
         // empirical question, not one to guess at.
-        let scaled = bonus * weight * multiplier / p::conthist_div() + 73 * (offset < 2) as i32;
+        let scaled = bonus * weight * multiplier / p::conthist_div().max(1) + 73 * (offset < 2) as i32;
         td.continuation_history.update(conthist, piece, sq, scaled);
     }
 }

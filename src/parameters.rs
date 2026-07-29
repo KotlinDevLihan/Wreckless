@@ -12,10 +12,25 @@ macro_rules! define {
 #[cfg(feature = "spsa")]
 macro_rules! define {
     {$($type:ident $name:ident: $value:expr; )*} => {
+        /// Applies a tuner-supplied value, ignoring anything unparseable.
+        ///
+        /// Neither failure mode may take the process down. A tuning run is a
+        /// long-lived match: killing the engine on a malformed value or an
+        /// unrecognised name turns a typo into a forfeited game, and UCI
+        /// requires unknown options be ignored rather than treated as fatal.
+        /// Both used to panic (`parse().unwrap()` and `panic!` respectively).
+        ///
+        /// Note this is *not* what keeps the divisor parameters safe -- the
+        /// four sites that divide by a parameter clamp with `.max(1)`
+        /// themselves, so no value reachable through here can produce a
+        /// division by zero.
         pub fn set_parameter(name: &str, value: &str) {
             match name {
-                $(stringify!($name) => unsafe { parameters::$name = value.parse().unwrap() },)*
-                _ => panic!("Unknown tunable parameter: {name}"),
+                $(stringify!($name) => match value.parse() {
+                    Ok(parsed) => unsafe { parameters::$name = parsed },
+                    Err(_) => println!("info string ignoring malformed value for {}: {value:?}", stringify!($name)),
+                },)*
+                _ => println!("info string ignoring unknown tunable parameter: {name}"),
             }
         }
 

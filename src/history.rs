@@ -127,11 +127,27 @@ impl LowPlyHistory {
 
     const MAX_HISTORY: i32 = 8192;
 
+    /// Reads the table, returning 0 for plies outside the tracked window.
+    ///
+    /// The bound is enforced here rather than left to callers. `entries` covers
+    /// only the first [`Self::MAX_LOW_PLY`] plies, while the search calls this
+    /// from nodes at any ply up to `MAX_PLY`, so an unguarded index is an
+    /// out-of-bounds panic rather than a wrong answer. Callers may still test
+    /// the bound themselves to skip the surrounding work; this makes forgetting
+    /// to inert rather than fatal.
     pub fn get(&self, ply: usize, mv: Move) -> i32 {
+        if ply >= Self::MAX_LOW_PLY {
+            return 0;
+        }
         self.entries[ply][mv.from()][mv.to()] as i32
     }
 
+    /// Writes to the table, ignoring plies outside the tracked window. See
+    /// [`Self::get`] for why the bound lives here.
     pub fn update(&mut self, ply: usize, mv: Move, bonus: i32) {
+        if ply >= Self::MAX_LOW_PLY {
+            return;
+        }
         let entry = &mut self.entries[ply][mv.from()][mv.to()];
         apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
     }
@@ -139,6 +155,10 @@ impl LowPlyHistory {
     /// Shifts entries down by 2 plies so that knowledge about moves near the
     /// previous root carries over into the next `go` command.
     pub fn shift(&mut self) {
+        // `rotate_left(2)` and the `MAX_LOW_PLY - 2` slice below both assume at
+        // least two tracked plies; at 1 the subtraction underflows.
+        const _: () = assert!(LowPlyHistory::MAX_LOW_PLY >= 2);
+
         self.entries.rotate_left(2);
         for table in &mut self.entries[Self::MAX_LOW_PLY - 2..] {
             *table = [[0; 64]; 64];

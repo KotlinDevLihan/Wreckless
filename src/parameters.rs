@@ -1,4 +1,3 @@
-
 #[allow(unused_macros)]
 #[cfg(not(feature = "spsa"))]
 macro_rules! define {
@@ -207,24 +206,6 @@ define! {
     i32 lmr_quiet_alpha: 418;
     // Credits the captured piece's value in noisy reductions (LMR and FDS).
     // A fork addition; upstream Reckless has no such term.
-    //
-    // Set back to 437 on evidence, reversing an earlier change of mine to 73.
-    // I had argued that at 437 a queen capture adds ~8483 to a +/-12800 signal
-    // and swamps the learned noisy history. The hole in that argument is that
-    // for captures the piece value *should* dominate -- a queen capture matters
-    // more than a pawn capture whatever the history says, which is why
-    // Stockfish lets its own piece-value term dominate captureHistory.
-    //
-    // Two measurements point the same way. In 250 games the engine was
-    // surprised by non-checking opponent captures at 3.54% against upstream's
-    // 1.70%, a capture-specific weakness; `capture_stat` is exactly the term
-    // that buys captures extra depth in LMR/FDS, and at 73 a queen capture gets
-    // roughly 0.9 ply less than at 437. Separately, 437 produces the smallest
-    // bench tree of any value tried (2.39M against 2.88M at 73), i.e. better
-    // ordering and more cutoffs.
-    //
-    // Still untested in games as an isolated change.
-    i32 lmr_capture_stat: 437;
     i32 lmr_noisy_base: 1426;
     i32 lmr_noisy_hist: 130;
     i32 lmr_pv_base: 519;
@@ -471,17 +452,15 @@ define! {
     // same slot four iterations ago, and min/max clamp the result.
     //
     // The structure is Stockfish's and the diff:recent ratio is theirs
-    // (2.035:0.968), but the coefficients had been carried over against SF's
-    // Value scale, where a pawn is ~208 rather than our ~321-382. At the old
-    // 480/230 the sum cleared `max` after a 0.04-pawn drop and sat on `min`
-    // for any gain at all, so the factor was effectively a two-level switch
-    // and SPSA had no gradient to work with -- whatever it reported for these
-    // was noise. 56/27 puts the ceiling at ~0.37 pawns, matching SF's band
-    // once converted into our units. base/min/max are unchanged: those two
-    // saturated levels *were* tunable before and are kept as measured.
+    // (2.035:0.968). The correct comparator for SF's Value scale is
+    // NormalizeToPawnValue (~328), not the material PawnValue (~208) used
+    // for SEE -- and ~328 is on the same footing as our normalization()
+    // (~321-382), so the two scales are effectively 1:1 and no rescale is
+    // warranted. Restored to the untouched upstream fixed-point constants.
+    // base/min/max are unaffected by this and are kept as measured.
     i32 tm_trend_base: 7426;
-    i32 tm_trend_diff: 56;
-    i32 tm_trend_recent: 27;
+    i32 tm_trend_diff: 480;
+    i32 tm_trend_recent: 230;
     i32 tm_trend_min: 7214;
     i32 tm_trend_max: 14031;
 

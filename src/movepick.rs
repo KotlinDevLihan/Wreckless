@@ -229,20 +229,15 @@ impl MovePicker {
             let entry = self.pop_best();
 
             // Without an explicit ProbCut threshold, demand more from a capture
-            // the better its static score already is; once several good
-            // captures have been tried behind a quiet TT move, demand instead
-            // that it win material outright.
-            //
-            // Upstream diverges here: it sends *every* remaining noisy move to
-            // `bad_noisy` under that condition, regardless of SEE, rather than
-            // re-testing it against a fixed threshold. This fork is therefore
-            // the more permissive of the two, and the difference has never been
-            // measured either way.
-            let threshold = self.threshold.unwrap_or_else(|| {
-                if self.tt_move.is_quiet() && self.noisy_count > 2 { 1 } else { -entry.score / 47 + 116 }
-            });
+            // the better its static score already is. Once several good
+            // captures have already been tried behind a quiet TT move, cap it
+            // outright: every remaining noisy move goes to `bad_noisy` without
+            // a SEE retest, matching upstream. Retesting them instead lets
+            // noisy_count grow unbounded and keeps moves out of Stage::BadNoisy,
+            // silently disabling BNFP and bad-noisy history pruning for them.
+            let threshold = self.threshold.unwrap_or_else(|| -entry.score / 47 + 116);
 
-            if !td.board.see(entry.mv, threshold) {
+            if (self.tt_move.is_quiet() && self.noisy_count > 2) || !td.board.see(entry.mv, threshold) {
                 self.bad_noisy.push(entry.mv);
                 continue;
             }

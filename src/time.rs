@@ -30,7 +30,7 @@ pub struct TimeManager {
 impl TimeManager {
     pub fn new(limits: Limits, fullmove_number: usize, move_overhead: u64) -> Self {
         let soft;
-        let hard;
+        let mut hard;
 
         match limits {
             Limits::Time(ms) => {
@@ -51,8 +51,14 @@ impl TimeManager {
                 let main = main.saturating_sub(move_overhead);
                 let base = (main as f64 / moves as f64) + 0.75 * inc as f64;
 
-                soft = ((1.0 * base) as u64).min(main + inc);
-                // With a small movestogo, 5x base already exceeds main+inc,
+                // At movestogo 1 the increment is only credited *after* this
+                // move is played, so it isn't part of the pool actually
+                // available for it -- crediting it here let hard exceed the
+                // real remaining clock whenever inc was large enough to flag.
+                let pool = if moves > 1 { main + inc } else { main };
+
+                soft = ((1.0 * base) as u64).min(pool);
+                // With a small movestogo, 5x base already exceeds the pool,
                 // so the clamp alone made hard consume the entire remaining
                 // clock regardless of the 5x multiplier -- even though more
                 // moves are due before the control replenishes. Reserving
@@ -60,7 +66,12 @@ impl TimeManager {
                 // to reserve it for) keeps the hard bound from spending
                 // everything on a single move.
                 let reserve = if moves > 1 { base as u64 } else { 0 };
-                hard = ((5.0 * base) as u64).min((main + inc).saturating_sub(reserve));
+                hard = ((5.0 * base) as u64).min(pool.saturating_sub(reserve));
+                // The reserve must never push hard below soft: that would
+                // make the hard cutoff fire first and silently disable the
+                // entire soft/hard split (and the multiplier() extension
+                // logic that depends on it) for these moves.
+                hard = hard.max(soft);
             }
             _ => {
                 soft = u64::MAX;

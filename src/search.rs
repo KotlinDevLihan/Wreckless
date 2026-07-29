@@ -755,26 +755,27 @@ fn search<NODE: NodeType>(
         }
 
         if score >= bound && !is_win(score) {
-            if (td.nmp_min_ply > 0 || depth < 16) && score >= beta {
-                // A confirmed null-move fail high is evidence the static eval
-                // undershoots this position: feed it to the correction histories.
-                if score > eval {
-                    update_correction_histories(td, depth, score - eval, ply);
-                }
+            // A confirmed null-move fail high is evidence the static eval
+            // undershoots this position: feed it to the correction histories.
+            if score > eval {
+                update_correction_histories(td, depth, score - eval, ply);
+            }
+
+            if td.nmp_min_ply > 0 || depth < 16 {
                 return score;
             }
 
-            let reduced_depth = if score < beta { depth / 2 } else { depth - r };
+            let reduced_depth = depth - r;
 
             td.nmp_min_ply = ply as i32 + 3 * reduced_depth / 4;
-            let verified_score = search::<NonPV>(td, beta - 1, beta, reduced_depth, false, ply);
+            let verified_score = search::<NonPV>(td, bound - 1, bound, reduced_depth, false, ply);
             td.nmp_min_ply = 0;
 
             if td.shared.status.get() == Status::STOPPED {
                 return Score::ZERO;
             }
 
-            if verified_score >= beta {
+            if verified_score >= bound {
                 return score;
             }
         }
@@ -903,8 +904,9 @@ fn search<NODE: NodeType>(
         && tt_score >= probcut_beta_tt
         && !is_decisive(beta)
         && !is_decisive(tt_score)
+        && td.board.fiftymove_clock() < 90
     {
-        return probcut_beta_tt;
+        return probcut_beta_tt.min(Score::TB_WIN_IN_MAX - 1);
     }
 
     // Singular Extensions (SE)
@@ -1045,10 +1047,6 @@ fn search<NODE: NodeType>(
         let moved = td.board.piece_on(mv.from());
         let to = mv.to();
 
-        // For noisy moves, reductions additionally credit the captured piece's
-        // value (as in Stockfish's statScore for captures).
-        let mut capture_stat = 0;
-
         let history = if is_quiet {
             // Lags 1, 2 and 6 only, as in 0.1.2 (`4135b69`). Lags 3, 4 and 5
             // were folded in later without touching anything downstream, which
@@ -1106,7 +1104,6 @@ fn search<NODE: NodeType>(
                     / 2
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
-            capture_stat = p::lmr_capture_stat() * captured_type.value() / 64;
             // `moved_piece(mv)` is `mailbox[mv.from()]`, the same lookup as the
             // hoisted `moved` above.
             td.noisy_history.get(td.board.all_threats(), moved, to, captured_type)
@@ -1353,7 +1350,7 @@ fn search<NODE: NodeType>(
                 reduction += p::lmr_quiet_alpha() * ((alpha - estimated_score).clamp(-65, 91)) / 128;
             } else {
                 reduction += p::lmr_noisy_base();
-                reduction -= p::lmr_noisy_hist() * (history + capture_stat) / 1024;
+                reduction -= p::lmr_noisy_hist() * history / 1024;
             }
 
             if NODE::PV {
@@ -1405,13 +1402,12 @@ fn search<NODE: NodeType>(
             // for that reason rather than re-centred.
             reduction += ((td.nodes() + td.id as u64 * 27) % 128) as i32 - 59;
 
-            // The PV bonus was previously added after the clamp, letting
-            // reduced_depth exceed its own new_depth+2 ceiling by up to 2
-            // more plies for PV nodes. Applying it before clamping keeps the
-            // apparent intent (a higher floor for PV nodes, via the same +2
-            // shift) while actually respecting the ceiling.
+            // Clamp first, then apply the PV bonus (as upstream): the bonus
+            // raises both the floor and, effectively, the ceiling for PV
+            // nodes to new_depth+4, rather than capping PV scout depth at
+            // new_depth+2 the way clamping after the bonus would.
             let pv_bonus = 2 * NODE::PV as i32;
-            let reduced_depth = (new_depth - reduction / 1024 + pv_bonus).clamp(1 + pv_bonus, new_depth + 2);
+            let reduced_depth = (new_depth - reduction / 1024).clamp(1, new_depth + 2) + pv_bonus;
 
             td.stack[ply].reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, true, ply + 1);
@@ -1447,7 +1443,7 @@ fn search<NODE: NodeType>(
                 reduction -= p::fds_quiet_hist() * history / 1024;
             } else {
                 reduction += p::fds_noisy_base();
-                reduction -= p::fds_noisy_hist() * (history + capture_stat) / 1024;
+                reduction -= p::fds_noisy_hist() * history / 1024;
             }
 
             if tt_pv {
@@ -1719,14 +1715,14 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut move_count = 0;
     let mut move_picker = MovePicker::new(Move::NULL, None);
 
-    // Quiets are only generated to serve as check evasions. The old spelling
-    // was `!in_check || !is_loss(best_score)`, but on the in-check path
-    // best_score is still -Score::INFINITE here (it is seeded that way above,
-    // and neither the stand-pat cutoff nor the alpha raise can move it), so
-    // the second term was always false and the whole expression was `!in_check`.
-    let skip_quiets = !in_check;
-
-    while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets, ply) {
+    // Quiets are only generated to serve as check evasions, and only while no
+    // evasion found so far has proven non-losing. best_score does move once
+    // moves are searched below, so this has to be re-evaluated against its
+    // live value on every iteration -- freezing it as `!in_check` before the
+    // loop starts (equivalent to `!in_check || false`) let quiet evasions
+    // keep being generated for the rest of the node instead of stopping as
+    // soon as the first adequate evasion is found.
+    while let Some(mv) = move_picker.next::<NODE>(td, !in_check || !is_loss(best_score), ply) {
         move_count += 1;
 
         if !is_loss(best_score) {

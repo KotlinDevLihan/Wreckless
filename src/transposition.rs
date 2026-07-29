@@ -137,6 +137,17 @@ impl Cluster {
     fn write_entry(&self, index: usize, entry: InternalEntry) {
         self.entries[index].store(unsafe { std::mem::transmute(entry) }, Ordering::Release);
     }
+
+    /// Updates only the 2-byte `mv` field of an entry in place, leaving
+    /// score/raw_eval/depth/flags untouched. Unlike `write_entry`, this can't
+    /// clobber those fields with a stale snapshot if another thread claims
+    /// the slot for a different position between our read and this write.
+    fn write_move(&self, index: usize, entry: InternalEntry) {
+        let bits: u64 = unsafe { std::mem::transmute(entry) };
+        let mv_bits = bits & 0xFFFF;
+        let _ = self.entries[index]
+            .fetch_update(Ordering::Release, Ordering::Acquire, |old| Some((old & !0xFFFFu64) | mv_bits));
+    }
 }
 
 /// The transposition table is used to cache previously performed search results.

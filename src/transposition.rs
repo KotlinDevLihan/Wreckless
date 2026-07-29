@@ -286,7 +286,7 @@ impl TranspositionTable {
             // No `set_key` needed: this branch only runs when `key ==
             // entry_key`, so the verification key is already correct.
             if refreshed_move {
-                cluster.write_entry(replacement_index, entry);
+                cluster.write_move(replacement_index, entry);
             }
             return;
         }

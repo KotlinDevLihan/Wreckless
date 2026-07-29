@@ -556,6 +556,22 @@ impl Board {
         }
 
         let stm = self.side_to_move();
+
+        // The ep square must sit on the side-to-move's relative 6th rank
+        // (the rank the just-moved opposing pawn passed through), and an
+        // opposing pawn must actually be sitting on the square it would be
+        // captured from. Neither is guaranteed by parsing alone: a FEN can
+        // name any algebraic square as the ep field, including ones that
+        // don't correspond to any real double push (e.g. the wrong side to
+        // move for an otherwise-valid position).
+        if !crate::types::Bitboard::SIXTH_RANK[stm].contains(ep)
+            || !self.colored_pieces(!stm, PieceType::Pawn).contains(ep ^ 8)
+        {
+            self.state.keys.toggle_en_passant(ep);
+            self.state.en_passant = Square::None;
+            return;
+        }
+
         let king = self.king_square(stm);
         let ep_occ = self.occupancies() ^ ep.to_bb() ^ (ep ^ 8).to_bb();
         let ep_takers = pawn_attacks(ep, !stm) & self.colored_pieces(stm, PieceType::Pawn);

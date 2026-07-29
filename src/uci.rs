@@ -123,12 +123,16 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
             let mut message = String::new();
 
             if std::io::stdin().read_line(&mut message).unwrap() == 0 {
-                // EOF: no further command can ever arrive, so queue the quit and
-                // stop reading. Previously the "quit" was only sent when a search
-                // was *not* running, and the loop kept going either way -- with
-                // stdin at EOF, read_line returns 0 immediately every time, so
-                // closing the pipe mid-search spun a full core against the search
-                // itself until the search happened to finish.
+                // EOF: no further command can ever arrive, so stop any active
+                // search (mirroring the "quit" arm below) and queue the quit.
+                // Without clearing `ponder` here, a `go ponder` search in
+                // flight when the pipe closes never sees ponder go false and
+                // never sees STOPPED -- soft_limit/check_time both special-case
+                // ponder to never fire, so the search runs to MAX_PLY and the
+                // ponder-wait loop in go() then spins forever afterward,
+                // leaving a 100%-CPU zombie that never dequeues this quit.
+                shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                shared.status.set(Status::STOPPED);
                 let _ = tx.send("quit".to_string());
                 break;
             }

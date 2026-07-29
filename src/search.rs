@@ -781,10 +781,6 @@ fn search<NODE: NodeType>(
         }
     }
 
-    // Also treat the node as improving when the static evaluation already
-    // clears beta (as in Stockfish); affects heuristics from here on.
-    let improving = improving || (!in_check && is_valid(eval) && eval >= beta);
-
     // Internal Iterative Reductions (IIR): at sufficient depth, reduce PV and
     // expected cut nodes that have no TT move to anchor move ordering. Nodes
     // on the previous iteration's PV are exempt (as in Stockfish).

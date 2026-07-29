@@ -890,10 +890,15 @@ fn search<NODE: NodeType>(
     // (18.4 sigma; upstream drifts -0.024 the other way), i.e. its positions
     // kept turning out worse than its search claimed. Unverified scores
     // reaching the PV are a direct mechanism for that.
+    // The depth floor is not cosmetic. `TtDepth::SOME` is -1, so at depth 3 or
+    // below `tt_depth >= depth - 4` reduces to `tt_depth >= -1` and a *qsearch*
+    // entry satisfies it -- the one thing this cutoff must never trust, since
+    // its whole premise is a near-full-depth search. Clamping the floor at 0
+    // admits only entries from a real search. Depths 4 and up are unaffected.
     if !NODE::PV
         && !excluded
         && matches!(tt_bound, Bound::Lower | Bound::Exact)
-        && tt_depth >= depth - 4
+        && tt_depth >= (depth - 4).max(0)
         && is_valid(tt_score)
         && tt_score >= probcut_beta_tt
         && !is_decisive(beta)

@@ -40,6 +40,35 @@ use crate::{
     types::{ArrayVec, Bitboard, MAX_MOVES, Move, MoveEntry, MoveList, PieceType},
 };
 
+/// Per-lag weights for the continuation-history component of the quiet score,
+/// for lags 1 through 6 in order.
+///
+/// **Their total is load-bearing.** `good_quiet_threshold` splits quiets into
+/// [`Stage::Quiet`] and [`Stage::BadQuiet`] by comparing against this score, so
+/// it is calibrated against the resulting distribution. Redistributing weight
+/// between lags is safe; changing the total silently rescales the split, which
+/// is the same class of defect that a widened `history` sum caused in `search()`
+/// -- there it quietly rescaled seven separately tuned pruning coefficients at
+/// once.
+///
+/// Upstream uses four lags (1614 + 1066 + 1086 + 1051); this six-lag set must
+/// come to the same total, and the assertion below makes that a build error
+/// rather than a comment nobody rechecks.
+const CONTHIST_WEIGHTS: [i32; 6] = [1479, 977, 277, 995, 126, 963];
+
+const CONTHIST_WEIGHT_TOTAL: i32 = 1614 + 1066 + 1086 + 1051;
+
+const _: () = assert!(
+    CONTHIST_WEIGHTS[0]
+        + CONTHIST_WEIGHTS[1]
+        + CONTHIST_WEIGHTS[2]
+        + CONTHIST_WEIGHTS[3]
+        + CONTHIST_WEIGHTS[4]
+        + CONTHIST_WEIGHTS[5]
+        == CONTHIST_WEIGHT_TOTAL,
+    "continuation-history quiet weights must preserve upstream's total, or good_quiet_threshold is rescaled"
+);
+
 /// Which pool the most recently returned move came from.
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Debug)]
 pub enum Stage {
@@ -298,16 +327,13 @@ impl MovePicker {
             entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
                 + 1024 * td.corrhist().pawn_history.get(pawn_key, moved, to) / 1024
                 + Self::low_ply_term(td, ply, mv)
-                // All six continuation lags. The weights sum to the same total
-                // as the four-lag set they replaced (4817), so the good/bad
-                // quiet split still sees the same score distribution and
-                // `good_quiet_threshold` keeps its meaning.
-                + 1479 * td.conthist_at(ply, 1, moved, to) / 1024
-                + 977 * td.conthist_at(ply, 2, moved, to) / 1024
-                + 277 * td.conthist_at(ply, 3, moved, to) / 1024
-                + 995 * td.conthist_at(ply, 4, moved, to) / 1024
-                + 126 * td.conthist_at(ply, 5, moved, to) / 1024
-                + 963 * td.conthist_at(ply, 6, moved, to) / 1024
+                // All six continuation lags; see CONTHIST_WEIGHTS.
+                + CONTHIST_WEIGHTS[0] * td.conthist_at(ply, 1, moved, to) / 1024
+                + CONTHIST_WEIGHTS[1] * td.conthist_at(ply, 2, moved, to) / 1024
+                + CONTHIST_WEIGHTS[2] * td.conthist_at(ply, 3, moved, to) / 1024
+                + CONTHIST_WEIGHTS[3] * td.conthist_at(ply, 4, moved, to) / 1024
+                + CONTHIST_WEIGHTS[4] * td.conthist_at(ply, 5, moved, to) / 1024
+                + CONTHIST_WEIGHTS[5] * td.conthist_at(ply, 6, moved, to) / 1024
                 // Positional shaping: reward stepping a threatened piece to
                 // safety, giving check, or attacking something; penalise moving
                 // into a threat or breaking up the pawns shielding our king.

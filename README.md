@@ -236,6 +236,19 @@ within a few hundredths of a pawn is a bug, not a tuning choice.
   never-written, zero-initialized slot the same raw byte, so the replacement logic's "found a free
   slot" path could never fire. Re-encoded (`NONE = -2` → `offset_depth = 0`) so an empty cluster is
   uniquely identifiable.
+- **TT-only ProbCut trusted qsearch entries at shallow depth.** Its gate is
+  `tt_depth >= depth - 4`, but `TtDepth::SOME` is `-1`, so at depth 3 or below that reduces to
+  `tt_depth >= -1` — which a *qsearch* entry satisfies. The cutoff then returns a fabricated
+  `beta + margin` on the strength of an entry that never came from a real search, contradicting the
+  technique's own premise. The floor is now clamped at 0 (`(depth - 4).max(0)`), admitting only
+  real-search entries; depths 4 and above are unaffected.
+- **The continuation-history weight total is now enforced at compile time.** The six per-lag weights
+  in quiet scoring must sum to upstream's four-lag total (4817), because `good_quiet_threshold` is
+  calibrated against the resulting score distribution — redistributing weight between lags is safe,
+  changing the total silently rescales the good/bad quiet split. That invariant was previously held
+  by a comment; it is now `CONTHIST_WEIGHTS` plus a `const` assertion, so violating it fails the
+  build. This is the same defect class as the `history` sum above, which silently rescaled seven
+  tuned pruning coefficients at once.
 - **Qsearch delta pruning ignored promotion value.** For a non-capture promotion, `type_on()` reads
   an empty square, crediting nothing for the ~1133cp actually gained. Now credited separately.
 - **Cyclic (`movestogo`) hard bound could consume the whole clock.** With a small `movestogo`, five
@@ -322,7 +335,19 @@ negative result on any of them would be useful information.
 - TT-only ProbCut — a lower-bound TT entry from a near-full-depth search, comfortably above beta, is
   trusted as a cutoff without any search. This is the only place in the search that returns a score
   nothing ever searched, so it is held to the same gating as its neighbours (non-PV, non-excluded,
-  not decisive).
+  not decisive) and to a depth floor that excludes qsearch entries. Treat it as the highest-severity
+  item on this list: everything else here mis-orders or over-prunes, but this one can put a
+  fabricated score into the search result.
+- **Singular double/triple extension margins.** The fork adds three terms upstream does not have:
+  `-1175 * tt_move_history / 114178` (range ±84) and `-38` / `-43` when `ply > root_depth`. Worth
+  understanding before touching: the extension test is `singular_score < singular_beta - margin`,
+  evaluated inside the branch where `singular_score < singular_beta` already holds, so **once the
+  margin goes negative the test is unconditionally true** and every singular extension becomes a
+  double, then triple, extension. Upstream reaches that region too (its non-PV floor is about
+  −16 − 16·|corr|/128), so this is not fork-introduced — but these three terms push the floor to
+  roughly −138, about 8× deeper into it. Extensions multiply nodes, so this is the expensive
+  direction to be wrong in. Clamping both margins at 0 is a one-line change and is the first thing
+  worth A/B testing on this list.
 - SEE pruning thresholds respond to `cutoff_count`, extending a signal already used by
   `lmr_cutoff`/`fds_cutoff`.
 - Shuffling guard — repetitive piece shuffling near the fifty-move rule disables singular extensions,

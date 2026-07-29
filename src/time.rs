@@ -34,6 +34,13 @@ impl TimeManager {
 
         match limits {
             Limits::Time(ms) => {
+                // `go movetime` must honour Move Overhead like the other
+                // limits do. Only the fixed TIME_OVERHEAD_MS was being
+                // subtracted below, so a GUI configured with the default
+                // 100 ms overhead still got ms - 15 of thinking and could flag
+                // on a slow connection. `saturating_sub` matches the Fischer
+                // and Cyclic branches.
+                let ms = ms.saturating_sub(move_overhead);
                 soft = ms;
                 hard = ms;
             }

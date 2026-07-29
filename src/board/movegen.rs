@@ -37,13 +37,12 @@ impl super::Board {
         self.generate_moves(list, MovegenKind::Noisy);
     }
 
-    /// Every legal reply when in check.
+    /// Generates moves of `mgkind`, restricted to legal ones whenever
+    /// `checkers()` is non-empty.
     ///
-    /// This delegates to the ordinary generator rather than hand-rolling a
-    /// separate evasion path, because `generate_moves` already restricts to
-    /// legal moves when `checkers()` is non-empty and is the version perft
-    /// validates. A bespoke evasion generator here was the source of two
-    /// crashes and had to go:
+    /// **There is deliberately no separate evasion generator.** Check nodes go
+    /// through this same path, which is the one perft validates. A bespoke
+    /// evasion generator lived here once and caused two crashes:
     ///
     ///   - King escapes were masked with `!all_threats()`, the attack set of
     ///     the *current* position. That set still treats the square behind the
@@ -59,15 +58,12 @@ impl super::Board {
     ///     empty square. Either corrupts the board, and a corrupt board loses
     ///     the king the same way.
     ///
-    /// Splitting evasions out is only worth doing with a generator that
-    /// carries its own perft coverage; until then the shared path is both
-    /// correct and no slower in practice, since check nodes are a small
-    /// fraction of all nodes.
-    pub fn append_evasions(&self, list: &mut MoveList) {
-        self.append_noisy_moves(list);
-        self.append_quiet_moves(list);
-    }
-
+    /// Splitting evasions out is only worth doing with a generator that carries
+    /// its own perft coverage. Until then the shared path is both correct and
+    /// no slower in practice, since check nodes are a small fraction of all
+    /// nodes. (An `append_evasions` wrapper that merely re-called this function
+    /// was removed: nothing called it, and perft drives `generate_all_moves`,
+    /// so it would have shipped unvalidated the moment anyone wired it up.)
     fn generate_moves(&self, list: &mut MoveList, mgkind: MovegenKind) {
         let stm = self.side_to_move();
         let occupancies = self.occupancies();

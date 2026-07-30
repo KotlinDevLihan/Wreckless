@@ -122,7 +122,12 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
         loop {
             let mut message = String::new();
 
-            if std::io::stdin().read_line(&mut message).unwrap() == 0 {
+            // A read error is treated exactly like EOF. `unwrap()` here would
+            // panic the reader thread on a broken pipe or a non-UTF-8 byte,
+            // and that panic skips the shutdown below -- leaving the search
+            // running with no reader left to ever stop it, the same zombie the
+            // EOF branch exists to prevent.
+            if std::io::stdin().read_line(&mut message).unwrap_or(0) == 0 {
                 // EOF: no further command can ever arrive, so stop any active
                 // search (mirroring the "quit" arm below) and queue the quit.
                 // Without clearing `ponder` here, a `go ponder` search in
@@ -255,7 +260,14 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
-    if threads[0].root_moves.is_empty() {
+    // Every thread is indexed at `root_moves[0]` below, so the emptiness check
+    // has to cover all of them, not just thread 0. Today they always agree --
+    // `searchmoves` applies the same `retain` to each thread from one list --
+    // but that is an invariant of the spawn path, not of this function, and an
+    // out-of-bounds index here would take down a search that had already found
+    // its move. Checking `any` instead of `threads[0]` makes the guard match
+    // what the code actually relies on.
+    if threads.iter().any(|t| t.root_moves.is_empty()) {
         println!("bestmove (none)");
         return;
     }

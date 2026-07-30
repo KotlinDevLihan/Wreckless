@@ -260,19 +260,30 @@ fn parse_cpu_indices(cpu_ids: &str) -> Vec<usize> {
         return Vec::new();
     }
 
+    // Unparseable segments are skipped rather than panicking. This parses
+    // kernel-provided text (`/sys/.../cpulist`), so it is well-formed in
+    // practice -- but it runs during startup, before any fallback can take
+    // over, so a panic here is a dead engine rather than a degraded one. The
+    // caller already falls back to a single-node layout when the topology
+    // can't be read; skipping a bad segment lands in that same shape.
+    //
+    // A reversed range (`7-3`) yields nothing from `first..=last`, so it needs
+    // no special case.
     let mut indices = Vec::new();
     for segment in cpu_ids.split(',').filter(|s| !s.is_empty()) {
-        let parts: Vec<_> = segment.split('-').collect();
-        match parts.len() {
-            1 => indices.push(parts[0].parse::<usize>().unwrap()),
-            2 => {
-                let first = parts[0].parse::<usize>().unwrap();
-                let last = parts[1].parse::<usize>().unwrap();
-                for cpu in first..=last {
-                    indices.push(cpu);
-                }
+        let mut parts = segment.split('-');
+        let (Some(first), last, None) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+
+        let Ok(first) = first.parse::<usize>() else { continue };
+
+        match last {
+            None => indices.push(first),
+            Some(last) => {
+                let Ok(last) = last.parse::<usize>() else { continue };
+                indices.extend(first..=last);
             }
-            _ => {}
         }
     }
     indices

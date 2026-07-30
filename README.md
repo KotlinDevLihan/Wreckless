@@ -366,12 +366,10 @@ negative result on any of them would be useful information.
 
 - Qsearch delta pruning — a standard technique, but one upstream does not have at all, so every move
   it prunes is one the baseline searches.
-- History pruning extended to bad-SEE noisy moves (`hp_noisy_margin`), gated by an eval check so a
-  capture that wins material back survives regardless of its history. Note `hp_margin` itself is the
-  one fork-only pruning gate with no anchor — the others carry Stockfish's measured constants for
-  mechanisms copied verbatim, but 948 was never measured against anything.
 - Recapture extension — a capture landing where the opponent's last move captured, that doesn't lose
-  material itself, gets a full ply. Gated on square repetition and SEE, not on giving check.
+  material itself, gets a full ply. Gated on square repetition and SEE, not on giving check. Bounded
+  by construction: it only applies when `new_depth == 0`, and sets it to exactly 1, so it fires at
+  the frontier and cannot chain.
 - TT-only ProbCut — a lower-bound TT entry from a near-full-depth search, comfortably above beta, is
   trusted as a cutoff without any search. This is the only place in the search that returns a score
   nothing ever searched, so it is held to the same gating as its neighbours (non-PV, non-excluded,
@@ -444,6 +442,16 @@ No effect on playing strength.
   isolated patch rather than bundled with anything else.
 - **Depth-indexed history divisors** for late-move and futility pruning, replaced by a flat 1024. The
   table was fork-only and its per-depth values were never measured.
+- **History pruning for bad-SEE noisy moves** (`hp_noisy_margin` / `hp_noisy_eval_margin`) — removed
+  because it could **never fire**. It and Bad Noisy Futility Pruning gated on the same conditions
+  (`!in_check && !is_direct_check && Stage::BadNoisy`, at `depth < 5` vs BNFP's `depth < 11`), BNFP
+  ran first in the move loop, and BNFP's offset over that depth range (+82 to +258) sits far below
+  the noisy check's (`captured × 3 + 306`, at least +633 for even a pawn). BNFP therefore pruned a
+  strict superset and then called `skip_bad_noisy()`, abandoning the rest of the pool — the window
+  where the noisy check could fire was empty by 375+ centipawns at every depth, not marginally. It
+  cost a board probe and a `PieceType::value` match per bad capture to reach an unreachable branch.
+  Worth generalising: two prunes sharing a stage and a `<= alpha` test will usually have one dominate
+  the other, and the loser is invisible in profiles and untunable by SPSA.
 - **SEE-pruning and history-pruning exemptions for checking moves.** Extended by analogy with
   LMP/FP, but the analogy does not carry: those decline to prune a narrow, heavily qualified slice of
   quiet moves, whereas SEE pruning is the main filter for losing captures and `is_direct_check` is
@@ -523,11 +531,15 @@ and confirm with a normal SPRT before keeping them; SPSA on too few games conver
 Always benchmark and play with the default (non-`spsa`) build. The `spsa` feature reads every
 parameter through a mutable static instead of a constant, which is measurably slower.
 
-Two cautions specific to this codebase. A parameter that saturates its clamp gives SPSA no gradient,
-so it will return an arbitrary value with a confident-looking precision — check the operating range
-in pawns before trusting a tuned constant. And several parameters are deliberately coupled
-(`hp_noisy_margin` is derived from `hp_margin`; the conthist weights sum to a fixed total): moving one
-without the other reintroduces a scale bug the fork has already paid for once.
+Three cautions specific to this codebase. A parameter that saturates its clamp gives SPSA no
+gradient, so it will return an arbitrary value with a confident-looking precision — check the
+operating range in pawns before trusting a tuned constant. Some parameters are deliberately coupled
+(the conthist weights sum to a fixed total, enforced by a `const` assertion): moving one without the
+other reintroduces a scale bug the fork has already paid for once. And a tuned constant is only
+meaningful if the code that reads it can actually fire — before tuning a pruning margin, check that
+an earlier prune in the same move loop doesn't already cut a superset of what it would (that is how
+the noisy history prune turned out to be unreachable; see
+[Removed](#removed-and-why)).
 
 ## Acknowledgements
 

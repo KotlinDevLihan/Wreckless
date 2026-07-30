@@ -127,29 +127,20 @@ define! {
     i32 bnfp_base: 24;
 
     // History Pruning
+    //
+    // Quiet moves only, as upstream has it. The fork also carried a noisy
+    // variant (`hp_noisy_margin` / `hp_noisy_eval_margin`) extending this to
+    // bad-SEE captures; it was removed because it could never fire. Both it and
+    // Bad Noisy Futility Pruning gated on `!in_check && !is_direct_check &&
+    // Stage::BadNoisy` at `depth < 5`, BNFP ran first, and BNFP's offset
+    // (`bnfp_depth*d + bnfp_history*h/1024 + bnfp_base`, +82..+258 over that
+    // depth range) is far below the noisy variant's (`captured*3 +
+    // hp_noisy_eval_margin`, >= +633 for even a pawn). So BNFP pruned a strict
+    // superset and then called `skip_bad_noisy()`, abandoning the pool -- the
+    // window where the noisy check could fire was empty by 375+ centipawns at
+    // every depth, not marginally. It cost a board probe and a
+    // `PieceType::value` match per bad capture to reach an unreachable branch.
     i32 hp_margin: 948;
-    // History pruning extended to bad-SEE noisy moves (quiet-only upstream).
-    //
-    // Scale-matched to hp_margin, not to MAX_HISTORY. The original 1481 came
-    // from scaling 948 by the two tables' MAX_HISTORY ratio (12800/8192), but
-    // that compares the wrong things: the quiet `history` this margin's twin
-    // gates on is a *sum* -- quiet_history plus the normalised six-lag
-    // continuation group, range ~+/-38148 -- while the noisy `history` is a
-    // single noisy_history lookup, range +/-12800.
-    //
-    // Measured against their own signals, 1481 pruned the bottom ~46% of the
-    // noisy range at depth 4 where 948 prunes the bottom ~10% of the quiet
-    // range: 4.7x more aggressive, on captures, which is where tactics live.
-    // 948 * 12800/38148 = 318 puts the two on equal footing.
-    //
-    // Untested either way; this only removes an arithmetic mismatch.
-    // Safety margin on the eval check that now gates hp_noisy_margin. The
-    // move is pruned only if `eval + captured_material + this <= alpha`, i.e.
-    // only if it falls short even crediting the full piece it takes. Matches
-    // qs_delta_margin, the qsearch analogue of the same test. Larger is safer
-    // (prunes less).
-    i32 hp_noisy_eval_margin: 306;
-    i32 hp_noisy_margin: 318;
 
     // SEE Pruning
     i32 see_q_quad: 12;

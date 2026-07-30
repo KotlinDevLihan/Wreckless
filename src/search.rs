@@ -1185,58 +1185,6 @@ fn search<NODE: NodeType>(
                 continue;
             }
 
-            // History Pruning, noisy moves: the same pure-history threshold
-            // as above, extended to already-bad-SEE noisy moves. Distinct
-            // from BNFP just above, which tests eval+history combined
-            // against alpha rather than a raw history cutoff.
-            // History pruning for bad-SEE noisy moves.
-            //
-            // Gated on the position as well as on history. It used to fire on
-            // `history < -margin * depth` alone -- the only capture prune in
-            // the engine with no positional check at all, and upstream Reckless
-            // has no equivalent. Bad noisy history is a statement about how
-            // moves of this shape have scored elsewhere, not about whether this
-            // capture works here, so on its own it will happily discard a
-            // capture that is winning in this position because similar captures
-            // failed in others.
-            //
-            // That matters: across 250 games this engine was surprised by
-            // non-checking opponent captures at 3.54% against upstream's 1.70%
-            // -- more than double, and the single largest remaining weakness.
-            //
-            // Now both signals have to agree: the move's history must be bad
-            // *and* the position must not support it, where "support" credits
-            // the full value of the piece captured. That is an upper bound on
-            // what the move can win materially, so if even that falls short of
-            // alpha the move really is hopeless, and a capture that wins
-            // material back survives regardless of its history.
-            //
-            // The material credit is unit-converted. `PieceType::value()` calls
-            // a pawn 109 while the search's own units put it near 321-382, so
-            // the raw value cannot be added to `eval` -- the same ~3x mismatch
-            // that was silently under-crediting qsearch delta pruning.
-            //
-            // Evaluated last, after the six cheap guards, rather than for every
-            // move the loop sees. It was costing a board probe plus a
-            // `PieceType::value` match on quiets too, where `capture_sq()` holds
-            // nothing to capture and the result is discarded -- and `depth < 5`
-            // with `Stage::BadNoisy` means the guards reject the overwhelming
-            // majority of moves before it is needed. `&&` short-circuits, so the
-            // condition is unchanged.
-            if !in_check
-                && !is_direct_check
-                && !is_quiet
-                && move_picker.stage() == Stage::BadNoisy
-                && depth < 5
-                && history < -p::hp_noisy_margin() * depth
-                && eval
-                    + td.board.type_on(mv.capture_sq()).value() * p::qs_delta_piece_scale() / 64
-                    + p::hp_noisy_eval_margin()
-                    <= alpha
-            {
-                continue;
-            }
-
             // Static Exchange Evaluation Pruning (SEE Pruning)
             // The cutoff_count term matches the same signal already used in
             // lmr_cutoff/fds_cutoff: many recent cutoffs at

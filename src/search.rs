@@ -1343,20 +1343,7 @@ fn search<NODE: NodeType>(
                     (p::lmr_singular() * (margin - p::lmr_singular_margin()) / 128).clamp(0, p::lmr_singular_max());
             }
 
-            // Post-LMR reduction when the parent was heavily reduced, gated on
-            // the position also not having improved for us.
-            //
-            // The parent-reduction half is upstream's. The `!opponent_worsening`
-            // half is PlentyChess's shape for the same idea: it fires this only
-            // when `staticEval <= -(prev staticEval)`, which is exactly the
-            // negation of the `opponent_worsening` this function already
-            // computes for RFP. Reducing further because the parent was reduced
-            // makes sense when the position has not turned our way; when it
-            // has, the parent's reduction is weaker evidence and the extra cut
-            // is the one more likely to miss something.
-            //
-            // Free -- the signal is already in scope, no new state.
-            if !NODE::PV && !opponent_worsening && td.stack[ply - 1].reduction > reduction + 414 {
+            if !NODE::PV && td.stack[ply - 1].reduction > reduction + 414 {
                 reduction += p::lmr_prev_reduction();
             }
 
@@ -1444,8 +1431,7 @@ fn search<NODE: NodeType>(
                 reduction -= p::fds_ttmove();
             }
 
-            // Same PlentyChess gating as the LMR twin above.
-            if !opponent_worsening && td.stack[ply - 1].reduction > reduction + 590 {
+            if td.stack[ply - 1].reduction > reduction + 590 {
                 reduction += p::fds_prev_reduction();
             }
 

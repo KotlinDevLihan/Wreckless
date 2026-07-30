@@ -81,8 +81,17 @@ impl super::Board {
             if self.in_check() { between(king_sq, self.checkers().lsb()) | self.checkers() } else { Bitboard::ALL };
         let pinned = self.pinned(stm);
 
-        self.collect_pawn_moves(list, target, pinned, mgkind); //broken noisy/quiet boundary
+        // Deliberately passed the *unmasked* target: pawn moves do their own
+        // noisy/quiet split internally, and it does not line up with
+        // `kind_target`. A queen promotion by push is noisy but lands on an
+        // empty square, so masking with `kind_target` (= `colors(!stm)` for
+        // noisy) before the call would silently drop every push-promotion from
+        // noisy generation. Inside, quiets are masked by `empty` and captures
+        // by `colors(!stm)`, which is the same restriction applied where the
+        // distinction is actually known.
+        self.collect_pawn_moves(list, target, pinned, mgkind);
 
+        // Everything below is a piece move, where the split does line up.
         target &= kind_target;
 
         for knight in self.colored_pieces(stm, PieceType::Knight) & !pinned {

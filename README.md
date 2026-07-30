@@ -48,6 +48,20 @@ No search addition in this fork has been demonstrated to gain Elo over upstream.
 plausible and none is currently known to lose; they are listed under
 [Unverified search changes](#unverified-search-changes) and should be treated as experiments.
 
+Two of them are worth singling out, because they are the cases where a fork addition and an inherited
+upstream mechanism act on the *same* signal:
+
+- **A missing TT move** was penalised by both IIR and the LMR/FDS reduction bonus, at upstream's
+  coefficient. Corrected — see [Correctness and scale fixes](#correctness-and-scale-fixes).
+- **A bad-SEE capture at low depth** was tested by both Bad Noisy Futility Pruning and a fork-only
+  noisy history prune, where BNFP always won. The noisy prune was unreachable and is
+  [removed](#removed-and-why).
+
+Both were invisible to per-feature review and to profiling, and neither would ever have shown up in
+SPSA — an unreachable branch has no gradient, and a double-applied one looks like a well-tuned single
+term. When adding a heuristic here, the question to ask is not only "is this sound" but "does
+something else already act on this signal, and was that thing tuned before or after."
+
 ## Quick start
 
 Wreckless is not a standalone chess program — it's an engine you plug into a UCI-compatible GUI, such as
@@ -282,6 +296,17 @@ within a few hundredths of a pawn is a bug, not a tuning choice.
   value and `panic!` on an unrecognised name. A tuning run is a long-lived match; neither may take
   the process down, and UCI requires unknown options be ignored. Both now emit `info string` and
   continue.
+- **A missing TT move was penalised twice.** Upstream reduces late moves by `2204` (LMR) / `2168`
+  (FDS) when there is no TT move, tuned for a search that penalises that signal *once*. This fork
+  also has Internal Iterative Reductions, which decrement depth by a full ply on the same signal — so
+  at a cut node with no TT move at depth ≥ 6, both fired and late moves took roughly **3.15 plies of
+  reduction where the coefficient assumes 2.15**, about 47% more. Cut nodes are most of the tree and
+  a fresh node usually has no TT move, so this was not a corner case. The correction is exact rather
+  than estimated: reductions are in 1/1024 plies (`reduced_depth = new_depth - reduction / 1024`), so
+  IIR's ply is 1024 units, and `2204 − 1024 = 1180` / `2168 − 1024 = 1144` restores upstream's
+  late-move treatment while leaving IIR's effect on the *first* move — the part it exists for —
+  intact. Same defect class as the `history` sum and the conthist lags: a term added on top of a sum
+  whose consumers were never rescaled.
 - **`LowPlyHistory` bounds lived in its callers.** `get`/`update` indexed `entries[ply]` directly
   while the search calls them from nodes at any ply up to `MAX_PLY` — correct only because all three
   call sites happened to test `ply < MAX_LOW_PLY`. The bound moved inside the type, so a fourth call
@@ -406,8 +431,20 @@ negative result on any of them would be useful information.
 
 **Structure and time:**
 
-- Internal Iterative Reductions in Stockfish's current form — PV and expected-cut nodes without a TT
-  move reduced a ply from depth 6, exempting nodes on the previous iteration's principal variation.
+- **Internal Iterative Reductions** — PV and expected-cut nodes without a TT move are reduced a ply
+  from depth 6, exempting nodes on the previous iteration's principal variation. Upstream has no IIR;
+  it penalises a missing TT move only through the LMR/FDS reduction bonus, so this is a second
+  penalty on the same signal and the two have to be kept in balance (see
+  [Correctness](#correctness-and-scale-fixes)). Note also that the `follow_pv` exemption did not work
+  until the `previous_pv` fix — `pv_table` slot 0 was never written, so `follow_pv` was always false
+  and IIR applied at every eligible node. Its current behaviour is therefore newer than its Elo
+  evidence.
+- **Post-LMR reduction gated on the position not having improved.** The parent-reduction half is
+  upstream's (`stack[ply-1].reduction > reduction + N` → extra reduction). The `!opponent_worsening`
+  half follows PlentyChess, which fires the same idea only when `staticEval <= -(prev staticEval)` —
+  exactly the negation of the `opponent_worsening` this search already computes for RFP. Reducing
+  further because the parent was reduced is better evidence when the position has not turned our way.
+  Free: the signal was already in scope.
 - Correction values computed before the TT probe, overlapping the work with the prefetch.
 - Two-horizon falling-eval scaling — the time manager's trend factor also compares against the best
   score from four iterations ago.

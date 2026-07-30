@@ -220,7 +220,22 @@ define! {
     i32 lmr_ttpv_score: 611;
     i32 lmr_ttpv_depth: 685;
     i32 lmr_cutnode: 1852;
-    i32 lmr_cutnode_null: 2204;
+    // Extra reduction for a late move at a cut node with no TT move.
+    //
+    // Was 2204 -- upstream's tuned value, for a search where a missing TT move
+    // was penalised *once*. This fork also applies Internal Iterative
+    // Reductions (`depth -= 1` on the same signal, at `(PV || cut_node) &&
+    // depth >= 6 && tt_move.is_null()`), which upstream does not have, so at a
+    // cut node with no TT move both fired and late moves took ~3.15 plies of
+    // reduction where the coefficient assumes ~2.15. Cut nodes are most of the
+    // tree and a fresh node usually has no TT move, so this was not a corner.
+    //
+    // The correction is exact rather than estimated: reductions are in 1/1024
+    // plies (`reduced_depth = new_depth - reduction / 1024`), so IIR's one ply
+    // is 1024 units. 2204 - 1024 = 1180 restores upstream's late-move
+    // treatment while leaving IIR's effect on the *first* move intact, which is
+    // the part IIR is actually for.
+    i32 lmr_cutnode_null: 1180;
     i32 lmr_check: 955;
     i32 lmr_cutoff: 1151;
     i32 lmr_cutoff_node: 400;
@@ -251,7 +266,9 @@ define! {
     i32 fds_ttpv: 844;
     i32 fds_ttpv_depth: 1129;
     i32 fds_cutnode: 1260;
-    i32 fds_cutnode_null: 2168;
+    // Same IIR double-count correction as `lmr_cutnode_null` above:
+    // 2168 - 1024 = 1144.
+    i32 fds_cutnode_null: 1144;
     i32 fds_cutoff: 1394;
     i32 fds_cutoff_node: 258;
     i32 fds_singular: 351;

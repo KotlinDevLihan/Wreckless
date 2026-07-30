@@ -56,6 +56,16 @@ define! {
     // Restored: present in 0.1.2 (`4135b69`), silently dropped since with no
     // comment explaining the removal.
     i32 razor_corr: 300;
+    // Razor more freely when this node's children have been producing cutoffs
+    // -- the same `cutoff_count` signal already read by NMP, SEE pruning, and
+    // the LMR/FDS reductions. Fork-only; upstream razoring has no such term.
+    //
+    // Exposed rather than left as the literal `65` it was written as. Every
+    // other razoring coefficient is tunable, so a hardcoded one is unreachable
+    // by SPSA -- it can never be measured, only re-guessed, which is how
+    // `see_q_cutoff` ended up oscillating 15 -> 60 -> 48. Value unchanged, so
+    // this is a no-op for the default build.
+    i32 razor_cutoff: 65;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;

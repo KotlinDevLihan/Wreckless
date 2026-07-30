@@ -446,6 +446,12 @@ negative result on any of them would be useful information.
   until the `previous_pv` fix — `pv_table` slot 0 was never written, so `follow_pv` was always false
   and IIR applied at every eligible node. Its current behaviour is therefore newer than its Elo
   evidence.
+- **Post-LMR reduction gated on the position not having improved.** The parent-reduction half is
+  upstream's (`stack[ply-1].reduction > reduction + N` → extra reduction). The `!opponent_worsening`
+  half follows [PlentyChess](https://github.com/Yoshie2000/PlentyChess), which fires the same idea
+  only when `staticEval <= -(prev staticEval)` — exactly the negation of the `opponent_worsening`
+  this search already computes for RFP. Reducing further because the parent was reduced is better
+  evidence when the position has not turned our way. Free: the signal was already in scope.
 - Correction values computed before the TT probe, overlapping the work with the prefetch.
 - Two-horizon falling-eval scaling — the time manager's trend factor also compares against the best
   score from four iterations ago.

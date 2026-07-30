@@ -378,25 +378,33 @@ negative result on any of them would be useful information.
   not decisive) and to a depth floor that excludes qsearch entries. Treat it as the highest-severity
   item on this list: everything else here mis-orders or over-prunes, but this one can put a
   fabricated score into the search result.
-- **Singular double/triple extension margins.** The fork adds three terms upstream does not have:
-  `-1175 * tt_move_history / 114178` (range ±84) and `-38` / `-43` when `ply > root_depth`. Worth
-  understanding before touching: the extension test is `singular_score < singular_beta - margin`,
-  evaluated inside the branch where `singular_score < singular_beta` already holds, so **once the
-  margin goes negative the test is unconditionally true** and every singular extension becomes a
-  double, then triple, extension. Upstream reaches that region too (its non-PV floor is about
-  −16 − 16·|corr|/128), so this is not fork-introduced — but these three terms push the floor to
-  roughly −138, about 8× deeper into it. Extensions multiply nodes, so this is the expensive
-  direction to be wrong in. Clamping both margins at 0 is a one-line change and is the first thing
-  worth A/B testing on this list.
+- **Singular double/triple extension margins, now clamped at 0.** The fork adds three terms
+  upstream does not have: `-1175 * tt_move_history / 114178` (range ±84) and `-38` / `-43` when
+  `ply > root_depth`. The extension test is `singular_score < singular_beta - margin`, evaluated
+  inside the branch where `singular_score < singular_beta` already holds, so **once the margin goes
+  negative the test is unconditionally true** and every singular extension becomes a double, then
+  triple, extension. Upstream reaches that region too (its non-PV floor is about −16 − 16·|corr|/128),
+  so this is not fork-introduced — but these three terms could push the floor to roughly −138, about
+  8× deeper into it, and extensions multiply nodes. Both margins are now `.max(0)`'d, bounding the
+  worst case to "extends at most as often as with the term absent" rather than "extends unboundedly
+  more often as the term grows more negative." Still worth an isolated SPRT — the clamp changes the
+  distribution of how often double/triple extensions fire, which is itself untested.
 - SEE pruning thresholds respond to `cutoff_count`, extending a signal already used by
   `lmr_cutoff`/`fds_cutoff`.
 - Shuffling guard — repetitive piece shuffling near the fifty-move rule disables singular extensions,
   limiting search explosions (Stockfish #6447).
 - Opponent-worsening term in reverse futility pruning; "improving" also counts a node whose static
   eval already clears beta; the improving fallback chain extends to ply 6 for long same-side gaps.
-- Correction history updated on confirmed null-move fail-highs; far-from-root singular-margin
-  damping; a pre-qsearch TT-move extension at PV nodes that never overrides a negative singular
-  decision.
+- **Correction history updated on null-move fail-highs, moved to fire only once confirmed.** At
+  `depth >= 16` a null-move fail-high is checked with a verification search before being trusted as a
+  cutoff — but the correction-history update previously ran *before* that verification, so a value
+  from a since-rejected fail-high could still land in the table. Moved to the two paths that actually
+  return `score` (the immediate-trust branch, and after `verified_score >= bound`), the same
+  statistical-validity concern documented for the singular-multicut correction update this fork tried
+  and reverted: a sub-search result that hasn't been confirmed isn't comparable to the genuine
+  `(full search result − static eval)` samples this table is built on elsewhere. Far-from-root
+  singular-margin damping; a pre-qsearch TT-move extension at PV nodes that never overrides a
+  negative singular decision.
 
 **Structure and time:**
 

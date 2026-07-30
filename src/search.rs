@@ -755,13 +755,12 @@ fn search<NODE: NodeType>(
         }
 
         if score >= bound && !is_win(score) {
-            // A confirmed null-move fail high is evidence the static eval
-            // undershoots this position: feed it to the correction histories.
-            if score > eval {
-                update_correction_histories(td, depth, score - eval, ply);
-            }
-
             if td.nmp_min_ply > 0 || depth < 16 {
+                // Trusted immediately -- no verification search follows on
+                // this path, so it's safe to feed correction history here.
+                if score > eval {
+                    update_correction_histories(td, depth, score - eval, ply);
+                }
                 return score;
             }
 
@@ -776,6 +775,17 @@ fn search<NODE: NodeType>(
             }
 
             if verified_score >= bound {
+                // Only now is the fail-high actually confirmed. Feeding
+                // correction history before this point (as a previous version
+                // of this code did) meant an update could go in from a score
+                // the very next line then refused to trust as a cutoff --
+                // the same "sub-search result isn't comparable to a genuine
+                // full-search sample" problem documented for the
+                // singular-multicut correction update this fork tried and
+                // reverted.
+                if score > eval {
+                    update_correction_histories(td, depth, score - eval, ply);
+                }
                 return score;
             }
         }
@@ -952,16 +962,18 @@ fn search<NODE: NodeType>(
             // upstream's `+81 * ttPv`. Two coefficients lifted out of a
             // differently shaped formula are not the same formula, and the
             // surrounding constants were tuned against 16/19.
-            let double_margin = 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
+            let double_margin = (195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
                 - 16 * tt_move.is_quiet() as i32
                 - 16 * correction_value.abs() / 128
                 - 1175 * td.tt_move_history / 114178
-                - 38 * (ply as i32 > td.root_depth) as i32;
-            let triple_margin = 230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
+                - 38 * (ply as i32 > td.root_depth) as i32)
+                .max(0);
+            let triple_margin = (230 * NODE::PV as i32 + 56 * (NODE::PV && !tt_was_pv) as i32
                 - 19 * tt_move.is_quiet() as i32
                 - 15 * correction_value.abs() / 128
                 - 43 * (ply as i32 > td.root_depth) as i32
-                + 36;
+                + 36)
+                .max(0);
 
             extension = 1;
             extension += (singular_score < singular_beta - double_margin) as i32;

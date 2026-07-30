@@ -2075,10 +2075,11 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
     (corrhist.pawn.get(stm, td.board.pawn_key(), bucket)
         + corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
         + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
-        // Upstream's blend summed 5 terms over corr_weight_div; material,
-        // minor, and major are all additions since, so they're grouped under
-        // one tunable weight rather than each inflating the sum at full,
-        // un-normalized strength against a divisor tuned for 5 terms.
+        + corrhist.material.get(stm, td.board.material_key(), bucket)
+        // A 6th term added to upstream's 5-term blend; corr_weight_div is
+        // rescaled to match (see its definition in parameters.rs) rather than
+        // left at upstream's value the way it silently was the first time
+        // this table existed in this fork.
         + td.continuation_corrhist.get(
             td.stack[ply - 2].contcorrhist,
             td.stack[ply - 1].piece,
@@ -2102,6 +2103,7 @@ fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: 
 
     corrhist.non_pawn[Color::White].update(stm, td.board.non_pawn_key(Color::White), bucket, bonus);
     corrhist.non_pawn[Color::Black].update(stm, td.board.non_pawn_key(Color::Black), bucket, bonus);
+    corrhist.material.update(stm, td.board.material_key(), bucket, bonus);
 
     if td.stack[ply - 1].mv.is_present() && td.stack[ply - 2].mv.is_present() {
         td.continuation_corrhist.update(

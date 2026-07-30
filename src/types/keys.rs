@@ -5,6 +5,7 @@ pub struct Keys {
     pub full: u64,
     pub pawn: u64,
     pub non_pawn: [u64; Color::NUM],
+    pub material: u64,
 }
 
 impl Keys {
@@ -20,8 +21,17 @@ impl Keys {
         self.non_pawn[color as usize]
     }
 
+    pub const fn material(&self) -> u64 {
+        self.material
+    }
 
-
+    /// Keyed by piece counts only (no square information): adding the
+    /// `count`-th piece of a kind and later removing it toggle the same
+    /// value, so the key is order-independent regardless of how many other
+    /// toggles happen in between.
+    pub fn toggle_material(&mut self, piece: Piece, count: usize) {
+        self.material ^= ZOBRIST.pieces[piece][count];
+    }
 
 
     pub fn toggle(&mut self, piece: Piece, sq: Square) {

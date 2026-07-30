@@ -366,20 +366,31 @@ define! {
     // pawn/non-pawn correction history. Isolated change -- corr_bonus_min/
     // max left untouched.
 
-    // Upstream's five-term correction blend: pawn, non-pawn x2, continuation x2.
+    // Six-term correction blend: upstream's pawn, non-pawn x2, continuation x2,
+    // plus this fork's material-key table (piece-count-only Zobrist key, no
+    // square information -- see `eval_correction()`), summed unweighted at the
+    // same strength as the terms upstream tuned.
     //
-    // The material/minor/major tables this fork added are gone, so the divisor
-    // returns to upstream's 64. These two were always coupled by
-    // `corr_weight_div = 64 * (5 + 3 * corr_minor_major / 128) / 5` -- 128 gave
-    // 102, 40 gave 76, and with the group removed the multiplier is 1.
+    // This is the coupling the README warns about: `corr_weight_div` must
+    // scale with how many terms are actually summed in `eval_correction()`.
+    // Upstream's own divisor (64) was tuned for their 5-term sum; adding a 6th
+    // term on top of that sum without rescaling divides the (now larger) total
+    // by too little, inflating every margin that reads
+    // `correction_value.abs()` -- razoring, RFP, both singular margins,
+    // futility, LMR, FDS, qsearch SEE, and via `eval` also null move,
+    // stand-pat, improving, LMP and BNFP. That exact mistake (material added
+    // at full strength against the unrescaled 5-term divisor) is why the
+    // table was pulled out entirely last time rather than patched -- so this
+    // divisor moves together with the term it now includes: 64 * 6 / 5 = 76.
     //
-    // If the tables ever come back, restore that coupling. A divisor below the
-    // figure the rule gives divides the blend by less than it sums and inflates
-    // every margin that reads `correction_value.abs()` -- razoring, RFP, both
-    // singular margins, futility, LMR, FDS, qsearch SEE, and via `eval` also
-    // null move, stand-pat, improving, LMP and BNFP. The README identifies
-    // exactly that as the source of past Elo losses.
-    i32 corr_weight_div: 64;
+    // Unweighted rather than reintroducing a separate `corr_material_weight`
+    // knob: the removed minor/major tables aren't coming back, so there's no
+    // group left to blend -- material is just a sixth term at par with the
+    // rest. If game testing shows it needs damping relative to
+    // pawn/non-pawn/continuation, reintroduce a weight and recompute this
+    // divisor from `64 * (5 + weight / 128) / 5` rather than hand-editing it.
+    // Pending SPRT verification, same as the rest of this table's history.
+    i32 corr_weight_div: 76;
 
     // Continuation history
     //

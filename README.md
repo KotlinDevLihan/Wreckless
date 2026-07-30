@@ -329,6 +329,24 @@ Implemented and correct as far as perft, bench, the test suite and game records 
 been demonstrated to gain Elo**. Every one is a candidate for an A/B run against upstream, and a
 negative result on any of them would be useful information.
 
+**Evaluation correction:**
+
+- Material correction history, restored: a 6th term in `eval_correction()`'s blend, keyed on
+  `material_key()` — piece counts only, no square information, so a cramped middlegame and an open
+  endgame with the same material land in the same bucket. It's a weaker signal than the
+  pawn/non-pawn tables upstream tuned, but it's summed in unweighted, at the same strength as the
+  rest of the blend. `corr_weight_div` is rescaled to `76` (`64 * 6 / 5`) to match — the first time
+  this table existed in this fork it was added on top of the unrescaled 5-term divisor, silently
+  inflating every RFP/FP/LMR/NMP margin that reads `correction_value.abs()`, which is why it was
+  pulled out entirely rather than patched (see [Removed](#removed-and-why)). This time the divisor
+  moves with it. `Clear Hash`/`ucinewgame` now also clears this table specifically because that was
+  missed on the first pass and would have carried stale values across games.
+- `eval_correction()`'s `correction_value` feeds razoring, RFP, both singular margins, futility
+  pruning, LMR, FDS, qsearch SEE, and — through `eval` — null move, stand-pat, improving,
+  opponent-worsening, LMP and BNFP, in both search and qsearch. Any further change to this blend
+  (the divisor, or reintroducing a per-term weight) should be tested in isolation from everything
+  else on this list, for the same reason.
+
 **Move ordering:**
 
 - Low-ply history: a root-relative `[ply][from][to]` table for plies 0–4, shifted by two between
@@ -408,11 +426,14 @@ No effect on playing strength.
 - **Killer moves and countermoves** were not reintroduced. Both duplicate what continuation history
   already encodes.
 - **Classic Internal Iterative Deepening** was not added; it is superseded by IIR.
-- **Material, minor-piece and major-piece correction-history tables.** These were added at full
-  strength on top of a five-term blend without adjusting the shared divisor, silently inflating every
-  RFP/FP/LMR/NMP margin that reads `eval_correction()`. Rather than keep coupling a hand-computed
-  divisor to a hand-picked weight, the three extra tables were removed and the blend returned to
-  upstream's terms.
+- **Minor-piece and major-piece correction-history tables.** Added alongside the material table (see
+  [Unverified search changes](#unverified-search-changes)) at full strength on top of a five-term
+  blend without adjusting the shared divisor, silently inflating every RFP/FP/LMR/NMP margin that
+  reads `eval_correction()`. All three tables were pulled out and the blend returned to upstream's
+  terms while the divisor bug was isolated; material has since been reintroduced with the divisor
+  rescaled to match (`corr_weight_div: 76`). Minor and major have not been — reintroducing either
+  means recomputing the divisor again for the added term(s), the same way, and testing it as its own
+  isolated patch rather than bundled with anything else.
 - **Depth-indexed history divisors** for late-move and futility pruning, replaced by a flat 1024. The
   table was fork-only and its per-depth values were never measured.
 - **SEE-pruning and history-pruning exemptions for checking moves.** Extended by analogy with

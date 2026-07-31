@@ -31,7 +31,7 @@
 //! move kinds, corrupting the board.
 
 use crate::{
-    history::LowPlyHistory,
+    history::{LowPlyHistory, PieceToHistory},
     lookup::king_attacks,
     parameters as p,
     search::NodeType,
@@ -305,6 +305,21 @@ impl MovePicker {
         let threats = td.board.all_threats();
         let side = td.board.side_to_move();
         let pawn_key = td.board.pawn_key();
+        let pawn_hist = &td.corrhist().pawn_history;
+
+        // The six continuation-history subtable pointers depend only on `ply`,
+        // never on the move being scored, but `conthist_at` re-read
+        // `stack[ply - n].conthist` for every move: six strided loads into a
+        // large array per move, where six for the whole list will do.
+        let conthist: [*mut PieceToHistory<i16>; 6] =
+            std::array::from_fn(|i| td.stack[ply - 1 - i as isize].conthist);
+
+        // `low_ply_term`'s bound test and its `1024 * (1 + 2 * ply)` divisor are
+        // both loop-invariant; only the table lookup varies per move. Same
+        // operands in the same order, so the arithmetic is unchanged -- the
+        // branch is just paid once instead of per move.
+        let low_ply =
+            ((ply as usize) < LowPlyHistory::MAX_LOW_PLY).then(|| (p::lowply_weight(), 1024 * (1 + 2 * ply as i32)));
 
         for entry in self.list.iter_mut() {
             let mv = entry.mv;
@@ -319,16 +334,21 @@ impl MovePicker {
             let moved = td.board.piece_on(from);
             let pt = moved.piece_type();
 
+            let low_ply_term = match low_ply {
+                Some((weight, divisor)) => weight * td.low_ply_history.get(ply as usize, mv) / divisor,
+                None => 0,
+            };
+
             entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
-                + 1024 * td.corrhist().pawn_history.get(pawn_key, moved, to) / 1024
-                + Self::low_ply_term(td, ply, mv)
+                + 1024 * pawn_hist.get(pawn_key, moved, to) / 1024
+                + low_ply_term
                 // All six continuation lags; see CONTHIST_WEIGHTS.
-                + CONTHIST_WEIGHTS[0] * td.conthist_at(ply, 1, moved, to) / 1024
-                + CONTHIST_WEIGHTS[1] * td.conthist_at(ply, 2, moved, to) / 1024
-                + CONTHIST_WEIGHTS[2] * td.conthist_at(ply, 3, moved, to) / 1024
-                + CONTHIST_WEIGHTS[3] * td.conthist_at(ply, 4, moved, to) / 1024
-                + CONTHIST_WEIGHTS[4] * td.conthist_at(ply, 5, moved, to) / 1024
-                + CONTHIST_WEIGHTS[5] * td.conthist_at(ply, 6, moved, to) / 1024
+                + CONTHIST_WEIGHTS[0] * td.continuation_history.get(conthist[0], moved, to) / 1024
+                + CONTHIST_WEIGHTS[1] * td.continuation_history.get(conthist[1], moved, to) / 1024
+                + CONTHIST_WEIGHTS[2] * td.continuation_history.get(conthist[2], moved, to) / 1024
+                + CONTHIST_WEIGHTS[3] * td.continuation_history.get(conthist[3], moved, to) / 1024
+                + CONTHIST_WEIGHTS[4] * td.continuation_history.get(conthist[4], moved, to) / 1024
+                + CONTHIST_WEIGHTS[5] * td.continuation_history.get(conthist[5], moved, to) / 1024
                 // Positional shaping: reward stepping a threatened piece to
                 // safety, giving check, or attacking something; penalise moving
                 // into a threat or breaking up the pawns shielding our king.
@@ -340,19 +360,6 @@ impl MovePicker {
         }
     }
 
-    /// Root-relative history, covering only the first few plies.
-    ///
-    /// The divisor fades it out with depth. Its weight is anchored so the
-    /// ply-0 ceiling matches continuation-history lag 1; left larger it
-    /// outweighed every other ordering signal at the root by more than 2x,
-    /// which is where ordering matters most.
-    fn low_ply_term(td: &ThreadData, ply: isize, mv: Move) -> i32 {
-        if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
-            p::lowply_weight() * td.low_ply_history.get(ply as usize, mv) / (1024 * (1 + 2 * ply as i32))
-        } else {
-            0
-        }
-    }
 }
 
 /// Board-wide sets used by quiet scoring, computed once per rescore rather than

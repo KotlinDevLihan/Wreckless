@@ -1343,22 +1343,21 @@ fn search<NODE: NodeType>(
                     (p::lmr_singular() * (margin - p::lmr_singular_margin()) / 128).clamp(0, p::lmr_singular_max());
             }
 
-            // Post-LMR reduction when the parent was heavily reduced, gated on
-            // the position also not having improved for us.
+            // Extra reduction when the parent was heavily reduced, gated on the
+            // position also not having improved for us.
             //
             // The parent-reduction half is upstream's. The `!opponent_worsening`
-            // half is PlentyChess's shape for the same idea: it fires this only
-            // when `staticEval <= -(prev staticEval)`, which is exactly the
-            // negation of the `opponent_worsening` this function already
-            // computes for RFP. Reducing further because the parent was reduced
-            // is better evidence when the position has not turned our way; when
-            // it has, the parent's reduction says less and the extra cut is the
-            // one more likely to miss something.
+            // half follows PlentyChess, which fires the same idea only when
+            // `staticEval <= -(prev staticEval)` -- exactly the negation of the
+            // `opponent_worsening` already computed above for RFP. Reducing
+            // further because the parent was reduced is better evidence when the
+            // position has not turned our way; when it has, the parent's
+            // reduction says less and the extra cut is the likelier to miss
+            // something. Free: the signal is already in scope.
             //
-            // Free -- the signal is already in scope, no new state. Untested:
-            // this and the `lmr_cutnode_null` correction both move total
-            // reduction, so a single SPRT covering both cannot say which one
-            // any result belongs to.
+            // Untested. Note this and the `lmr_cutnode_null` correction both
+            // move total reduction, so one SPRT covering both cannot attribute
+            // a result to either.
             if !NODE::PV && !opponent_worsening && td.stack[ply - 1].reduction > reduction + 414 {
                 reduction += p::lmr_prev_reduction();
             }

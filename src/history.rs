@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI16, Ordering};
 use crate::types::{Bitboard, Color, Move, Piece, PieceType, Square};
 
 type FromToHistory<T> = [[T; 64]; 64];
-type PieceToHistory<T> = [[T; 64]; 13];
+pub type PieceToHistory<T> = [[T; 64]; 13];
 type ContinuationHistoryType = [[[[PieceToHistory<i16>; 64]; 13]; 2]; 2];
 
 struct HugeBox<T> {

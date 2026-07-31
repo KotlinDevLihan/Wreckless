@@ -647,7 +647,15 @@ fn search<NODE: NodeType>(
     // already found something the static eval does not see, so pruning margins
     // should widen and reductions shrink. Zero when there is no usable TT
     // score, which makes it a no-op on nodes with nothing to compare against.
-    let complexity = if is_valid(tt_score) && !is_decisive(tt_score) { (eval - tt_score).abs() } else { 0 };
+    // `is_valid(eval)` is load-bearing, not defensive: `eval` is `Score::NONE`
+    // (32002) whenever this node is in check, and `Score::NONE` is a sentinel,
+    // not a number. Without this guard the subtraction produces ~32000 and the
+    // LMR consumer -- which has no `!in_check` of its own -- subtracts ~15 plies
+    // of reduction at every in-check node holding a TT score, silently
+    // disabling LMR there. Nothing crashes, because `reduced_depth` is clamped;
+    // it just quietly searches a different tree.
+    let complexity =
+        if is_valid(eval) && is_valid(tt_score) && !is_decisive(tt_score) { (eval - tt_score).abs() } else { 0 };
 
     // Razoring
     // Restored the `razor_corr` eval-correction term and the `cutoff_count[ply

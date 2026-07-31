@@ -31,12 +31,23 @@ evidence each change has behind it.
 
 ## Status
 
-**Wreckless currently measures at parity with upstream Reckless.** Recent SPRT runs at 10+0.1,
-1 thread, 128 MB hash against the upstream baseline land between roughly −2 and +3 Elo, with 95%
-confidence intervals of ±10 to ±20 — that is, indistinguishable from zero in either direction.
+**Wreckless measures at or above parity with upstream Reckless, and the size of the margin is not
+settled.** SPRT runs at 10+0.1, 1 thread, 128 MB hash have landed anywhere from roughly −7 to +3
+Elo with 95% intervals of ±10 to ±20, while a 553-game run against the same upstream build under a
+different tournament manager put a release build **+63 Elo** ahead. Those cannot both be right about
+the same code, and the discrepancy has been traced to harness differences rather than to the engine.
 
-That is worth stating plainly because it is the honest reading, and because it has not always been
-true. Earlier states of this fork measured as much as 17 Elo *behind* upstream, and the work that
+Two lessons from that are worth carrying:
+
+- **Check what the binary reports, not what you think you built.** A UCI `id name` line carries the
+  version and commit hash. More than one conclusion here has been drawn from a run whose binary was
+  not the code being discussed.
+- **Paired openings are not optional.** The +63 run assigned each opening exactly once, so its
+  variance is far wider than a naive binomial interval suggests — colour-swapped pairs are what make
+  the pentanomial (and the interval it produces) meaningful.
+
+What is not in doubt is the direction of travel. Earlier states of this fork measured as much as
+17 Elo *behind* upstream, and the work that
 closed that gap was almost entirely arithmetic and correctness repair rather than new ideas: unit
 mismatches between the evaluation scale and `PieceType::value()`, coefficients ported from another
 engine without rescaling, a fail-soft bound that was never raised, sums whose consumers were tuned
@@ -337,12 +348,18 @@ a difference means something changed semantically and needs investigating.
   where `pext` is microcoded and slower than the fallback.
 - **Windows large pages** — the transposition table and continuation-history tables use 2 MB pages
   where the OS grants the privilege.
-- **Hoisted mailbox reads in move scoring.** `conthist(ply, i, mv)` resolved `piece_on(mv.from())`
-  internally, so six lag lookups meant six reads of the same square — loop-invariant, but the read
-  through a raw pointer inside `get` stops the optimizer hoisting it. `conthist_at` now takes the
-  resolved piece and destination. In `score_quiet` this cut **nine** reads of `mv.from()` per quiet
-  move to one, since `type_on(sq)` is exactly `piece_on(sq).piece_type()` and `moved_piece(mv)` is
-  `piece_on(mv.from())`.
+- **Hoisted mailbox reads in move scoring.** Continuation history was read through a per-lag helper
+  that resolved `piece_on(mv.from())` internally, so six lag lookups meant six reads of the same
+  square — loop-invariant, but the read through a raw pointer inside `get` stops the optimizer
+  hoisting it. In `score_quiet` this cut **nine** reads of `mv.from()` per quiet move to one, since
+  `type_on(sq)` is exactly `piece_on(sq).piece_type()` and `moved_piece(mv)` is `piece_on(mv.from())`.
+- **Hoisted continuation-history subtable pointers.** The six `stack[ply - n].conthist` pointers
+  depend only on `ply`, so they are constant for a whole node — but the per-lag helper re-read them
+  on every call, making six strided loads into a large array *per move* where six per node suffice.
+  Both consumers (the quiet `history` sum in `search`, and `score_quiet`) now resolve them once
+  before their loop, and the helper is gone. The same commit hoists the low-ply term's bound test
+  and its `1024 * (1 + 2 * ply)` divisor, which are likewise loop-invariant; the operands and their
+  order are unchanged, so the arithmetic is bit-for-bit identical and only the branch moves.
 - **Deferred pruning terms behind their guards.** Qsearch delta pruning computed a board probe and a
   `PieceType::value` match for *every* move, including all check evasions — where the prune is
   disabled outright by `!in_check`, and where the move lists are widest. The main search's noisy

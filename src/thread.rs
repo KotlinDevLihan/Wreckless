@@ -34,7 +34,7 @@ use crate::{
     threadpool::ThreadPool,
     time::{Limits, TimeManager},
     transposition::TranspositionTable,
-    types::{MAX_MOVES, MAX_PLY, Move, Piece, Score, Square, normalize_to_cp, wdl_model},
+    types::{MAX_MOVES, MAX_PLY, Move, Score, normalize_to_cp, wdl_model},
 };
 
 pub trait UciWriter: Send {
@@ -317,19 +317,6 @@ impl ThreadData {
 
     pub fn corrhist(&self) -> &SharedCorrectionHistory {
         &self.corrhist
-    }
-
-    /// Continuation history for one lag, with the moved piece and destination
-    /// already resolved.
-    ///
-    /// Both callers -- the six-lag sum in `search()` and the one in
-    /// `score_quiet` -- read all six lags for the same move. Taking `mv` here
-    /// instead would repeat `piece_on(mv.from())` six times over; that lookup
-    /// is loop-invariant, but the `get` below reads through a raw pointer,
-    /// which is enough to stop the optimiser from proving it can be hoisted.
-    /// So the caller resolves it once and passes it in.
-    pub fn conthist_at(&self, ply: isize, index: isize, piece: Piece, to: Square) -> i32 {
-        self.continuation_history.get(self.stack[ply - index].conthist, piece, to)
     }
 
     pub fn print_uci_info(&mut self, depth: i32) {

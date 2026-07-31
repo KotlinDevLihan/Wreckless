@@ -308,13 +308,15 @@ impl MovePicker {
         let pawn_hist = &td.corrhist().pawn_history;
 
         // The six continuation-history subtable pointers depend only on `ply`,
-        // never on the move being scored, but `conthist_at` re-read
-        // `stack[ply - n].conthist` for every move: six strided loads into a
-        // large array per move, where six for the whole list will do.
+        // never on the move being scored, but these used to go through a
+        // per-lag helper that re-read `stack[ply - n].conthist` on every call:
+        // six strided loads into a large array per move, where six for the
+        // whole list will do. The raw-pointer read stops the optimiser from
+        // hoisting them itself.
         let conthist: [*mut PieceToHistory<i16>; 6] =
             std::array::from_fn(|i| td.stack[ply - 1 - i as isize].conthist);
 
-        // `low_ply_term`'s bound test and its `1024 * (1 + 2 * ply)` divisor are
+        // The low-ply term's bound test and its `1024 * (1 + 2 * ply)` divisor are
         // both loop-invariant; only the table lookup varies per move. Same
         // operands in the same order, so the arithmetic is unchanged -- the
         // branch is just paid once instead of per move.

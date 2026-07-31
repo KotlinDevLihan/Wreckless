@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 
 use crate::{
     evaluation::correct_eval,
-    history::LowPlyHistory,
+    history::{LowPlyHistory, PieceToHistory},
     movepick::{MovePicker, Stage},
     parameters as p,
     thread::{PlyArray, RootMove, Status, ThreadData},
@@ -1035,6 +1035,14 @@ fn search<NODE: NodeType>(
     let mut current_search_count = 0;
     let mut tt_move_score = Score::NONE;
 
+    // Continuation-history subtable pointers for the six lags read by the quiet
+    // `history` sum below. They depend only on `ply`, so they are constant for
+    // this whole node, but these used to go through a per-lag helper that
+    // re-read `stack[ply - n].conthist` on every call -- six strided loads into
+    // a large array per quiet move, where six for the entire node will do. The
+    // raw-pointer read stops the optimiser from hoisting them itself.
+    let conthist: [*mut PieceToHistory<i16>; 6] = std::array::from_fn(|i| td.stack[ply - 1 - i as isize].conthist);
+
     while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets, ply) {
         if mv == td.excluded[ply] {
             continue;
@@ -1103,12 +1111,12 @@ fn search<NODE: NodeType>(
             // dividing by 2 (0.50) restores 1.95. The extra lags now contribute
             // their information and nothing downstream is silently rescaled.
             td.quiet_history.get(td.board.all_threats(), stm, mv)
-                + (td.conthist_at(ply, 1, moved, to)
-                    + td.conthist_at(ply, 2, moved, to)
-                    + td.conthist_at(ply, 3, moved, to) * 2 / 7
-                    + td.conthist_at(ply, 4, moved, to)
-                    + td.conthist_at(ply, 5, moved, to) / 8
-                    + td.conthist_at(ply, 6, moved, to) / 2)
+                + (td.continuation_history.get(conthist[0], moved, to)
+                    + td.continuation_history.get(conthist[1], moved, to)
+                    + td.continuation_history.get(conthist[2], moved, to) * 2 / 7
+                    + td.continuation_history.get(conthist[3], moved, to)
+                    + td.continuation_history.get(conthist[4], moved, to) / 8
+                    + td.continuation_history.get(conthist[5], moved, to) / 2)
                     / 2
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());

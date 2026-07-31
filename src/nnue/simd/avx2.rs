@@ -73,12 +73,33 @@ pub unsafe fn clamp_f32(x: __m256, min: __m256, max: __m256) -> __m256 {
     _mm256_max_ps(_mm256_min_ps(x, max), min)
 }
 
+// AVX-VNNI does u8 x i8 -> i32 accumulate as a single instruction. Same
+// cfg-gated split the AVX-512 path above already uses for `avx512vnni`, on the
+// 256-bit encoding available from Alder Lake and Zen 4 onwards. Reached only
+// with `-C target-feature=+avxvnni` (or a `target-cpu` that implies it), so a
+// portable build is untouched and still takes the fallback.
+//
+// Besides being shorter, the VNNI form is also *more correct*: the fallback's
+// `double_dpbusd` sums two `maddubs` results as i16 before widening, which can
+// saturate on large activations. VNNI accumulates straight into i32 and cannot.
+#[cfg(target_feature = "avxvnni")]
+pub unsafe fn dpbusd(i32s: __m256i, u8s: __m256i, i8s: __m256i) -> __m256i {
+    _mm256_dpbusd_avx_epi32(i32s, u8s, i8s)
+}
+
+#[cfg(not(target_feature = "avxvnni"))]
 pub unsafe fn dpbusd(i32s: __m256i, u8s: __m256i, i8s: __m256i) -> __m256i {
     let pairwise = _mm256_maddubs_epi16(u8s, i8s);
     let widened = _mm256_madd_epi16(pairwise, _mm256_set1_epi16(1));
     _mm256_add_epi32(i32s, widened)
 }
 
+#[cfg(target_feature = "avxvnni")]
+pub unsafe fn double_dpbusd(i32s: __m256i, u8s1: __m256i, i8s1: __m256i, u8s2: __m256i, i8s2: __m256i) -> __m256i {
+    _mm256_dpbusd_avx_epi32(_mm256_dpbusd_avx_epi32(i32s, u8s1, i8s1), u8s2, i8s2)
+}
+
+#[cfg(not(target_feature = "avxvnni"))]
 pub unsafe fn double_dpbusd(i32s: __m256i, u8s1: __m256i, i8s1: __m256i, u8s2: __m256i, i8s2: __m256i) -> __m256i {
     let pairwise1 = _mm256_maddubs_epi16(u8s1, i8s1);
     let pairwise2 = _mm256_maddubs_epi16(u8s2, i8s2);

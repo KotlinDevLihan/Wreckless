@@ -78,6 +78,17 @@ define! {
     i32 rfp_worsening: 20;
     i32 rfp_no_threats: 54;
     i32 rfp_base: 19;
+    // Widen the RFP margin when the static eval and the TT's search score
+    // disagree (see `complexity` in search.rs). A real search already found
+    // something the static eval does not see, so this is a worse moment than
+    // usual to trust the static eval and cut.
+    //
+    // Mechanism from Stormphrax and Viridithas, which both carry this signal.
+    // The *magnitude* is mine and unmeasured: sized so a 100-unit disagreement
+    // moves the margin by ~20, comparable to `rfp_base` itself. Their divisors
+    // (/262144) are on a different scale from this file's /1024, so the value
+    // could not be transferred -- only the idea.
+    i32 rfp_complexity: 200;
 
     // Null Move Pruning
     i32 nmp_depth: 9;
@@ -246,6 +257,32 @@ define! {
     // treatment while leaving IIR's effect on the *first* move intact, which is
     // the part IIR is actually for.
     i32 lmr_cutnode_null: 1180;
+    // Extra reduction per alpha raise already seen at this node.
+    //
+    // Absent here, present in at least three independently developed engines:
+    // Viridithas (`lmr_alpha_raise_mul`, 384), Stormphrax
+    // (`lmrAlphaRaiseReductionScale`) and Pawnocchio (`lmr_alpha_raise_mult`).
+    // A node that has raised alpha repeatedly without cutting off already has a
+    // best move it keeps improving on, which makes a move arriving this late a
+    // worse bet than its move number alone implies.
+    //
+    // Seeded from Viridithas's 384 because its reduction scale matches this one
+    // (both /1024, comparable sibling magnitudes -- their cut-node term is 1601
+    // against 1852 here). That is a starting point, not a transfer: the same
+    // reasoning applied to Stockfish's IIR constant produced a value that
+    // looked derived and was never measured here. SPSA owns it from here.
+    i32 lmr_alpha_raise: 384;
+    // Reduce less when the static eval and the TT's search score disagree --
+    // the same `complexity` signal as `rfp_complexity`, applied to reductions
+    // rather than to a pruning margin. A disputed position is where a reduced
+    // search is most likely to miss what the full one would find.
+    //
+    // Deliberately smaller relative to its siblings than `lmr_corr` (3417) is
+    // to correction history: this term *decreases* reduction, and the term one
+    // line above increases it, so an oversized value here would silently cancel
+    // the `alpha_raise` term rather than act independently. Unmeasured, like
+    // its RFP twin.
+    i32 lmr_complexity: 500;
     i32 lmr_check: 955;
     i32 lmr_cutoff: 1151;
     i32 lmr_cutoff_node: 400;

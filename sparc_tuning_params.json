@@ -88,6 +88,14 @@
         "rk": 0.002
     },
     {
+        "name": "rfp_complexity",
+        "default": 200.0,
+        "min": 100.0,
+        "max": 300.0,
+        "ck": 10.0,
+        "rk": 0.002
+    },
+    {
         "name": "nmp_depth",
         "default": 9.0,
         "min": 5.0,
@@ -549,6 +557,22 @@
         "min": 590.0,
         "max": 1770.0,
         "ck": 59.0,
+        "rk": 0.002
+    },
+    {
+        "name": "lmr_alpha_raise",
+        "default": 384.0,
+        "min": 192.0,
+        "max": 576.0,
+        "ck": 19.2,
+        "rk": 0.002
+    },
+    {
+        "name": "lmr_complexity",
+        "default": 500.0,
+        "min": 250.0,
+        "max": 750.0,
+        "ck": 25.0,
         "rk": 0.002
     },
     {

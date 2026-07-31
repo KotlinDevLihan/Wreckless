@@ -636,6 +636,19 @@ fn search<NODE: NodeType>(
     // alongside it for the same reason.
     let opponent_worsening = !in_check && is_valid(td.stack[ply - 1].eval) && eval > -td.stack[ply - 1].eval;
 
+    // How far the static evaluation and the transposition table's search score
+    // disagree about this position. Stormphrax and Viridithas both carry this
+    // (as `complexity` / `tt_complexity`) and feed it into pruning margins and
+    // reductions; this fork had no equivalent.
+    //
+    // It is *not* the same signal as `correction_value`, which is what
+    // correction history has learned about positions that hash alike. This is
+    // about the position in front of us: a large gap means a real search
+    // already found something the static eval does not see, so pruning margins
+    // should widen and reductions shrink. Zero when there is no usable TT
+    // score, which makes it a no-op on nodes with nothing to compare against.
+    let complexity = if is_valid(tt_score) && !is_decisive(tt_score) { (eval - tt_score).abs() } else { 0 };
+
     // Razoring
     // Restored the `razor_corr` eval-correction term and the `cutoff_count[ply
     // + 1] > 3` bonus, both present in 0.1.2 and both silently dropped since
@@ -670,6 +683,7 @@ fn search<NODE: NodeType>(
                 + (p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
+                    + p::rfp_complexity() * complexity / 1024
                     - p::rfp_no_threats() * (td.board.all_threats() & td.board.colors(stm)).is_empty() as i32
                     - p::rfp_worsening() * opponent_worsening as i32
                     - p::rfp_base())
@@ -1034,6 +1048,12 @@ fn search<NODE: NodeType>(
     let mut skip_quiets = false;
     let mut current_search_count = 0;
     let mut tt_move_score = Score::NONE;
+    // How many times a move at this node has already raised alpha. A node that
+    // has raised alpha several times has been searching a while without a
+    // cutoff and has a best move it keeps improving on, so a move arriving this
+    // late is a worse bet than its move number alone suggests. Fed into the LMR
+    // reduction below.
+    let mut alpha_raises = 0;
 
     // Continuation-history subtable pointers for the six lags read by the quiet
     // `history` sum below. They depend only on `ply`, so they are constant for
@@ -1336,6 +1356,9 @@ fn search<NODE: NodeType>(
                 reduction += p::lmr_cutnode_null() * tt_move.is_null() as i32;
             }
 
+            reduction += p::lmr_alpha_raise() * alpha_raises;
+            reduction -= p::lmr_complexity() * complexity / 1024;
+
             if td.board.in_check() {
                 reduction -= p::lmr_check();
             }
@@ -1513,6 +1536,7 @@ fn search<NODE: NodeType>(
                 }
 
                 alpha = score;
+                alpha_raises += 1;
 
                 if !(NODE::ROOT && td.pv_index > 0) && mv != tt_move {
                     td.shared.tt.write(hash, depth, raw_eval, score, Bound::Lower, mv, ply, true, false);

@@ -10,7 +10,7 @@ use crate::{
     time::{Limits, TimeManager},
     tools,
     transposition::DEFAULT_TT_SIZE,
-    types::{Color, MAX_MOVES, Move, Piece, Score, Square, is_decisive, is_loss, is_win},
+    types::{Color, MAX_MOVES, MAX_PLY, Move, Piece, Score, Square, is_decisive, is_loss, is_win},
 };
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -546,7 +546,14 @@ fn parse_limits(color: Color, tokens: &[&str]) -> Limits {
             };
 
             match name {
-                "depth" if value > 0 => return Limits::Depth(value as i32),
+                // Clamped before the cast. `value as i32` truncates: `go depth
+                // 2147483648` lands on i32::MIN, and the iterative-deepening
+                // loop's `depth > maximum` is then true on the first iteration,
+                // so the search breaks before running and `bestmove` reports a
+                // move that was never searched. `4294967296` gives 0 and does
+                // the same. MAX_PLY is the deepest iteration the loop can reach
+                // anyway, so clamping there loses nothing.
+                "depth" if value > 0 => return Limits::Depth(value.min(MAX_PLY as u64) as i32),
                 "movetime" if value > 0 => return Limits::Time(value),
                 "nodes" if value > 0 => return Limits::Nodes(value),
                 "mate" if value > 0 => return Limits::Mate(value),

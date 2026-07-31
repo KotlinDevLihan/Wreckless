@@ -10,6 +10,7 @@ use crate::{
     thread::SharedContext,
     threadpool::ThreadPool,
     time::{Limits, TimeManager},
+    types::MAX_PLY,
 };
 
 #[wasm_bindgen]
@@ -55,7 +56,11 @@ impl Engine {
         let limits = if nodes > 0 {
             Limits::Nodes(nodes as u64)
         } else if depth > 0 {
-            Limits::Depth(depth as i32)
+            // Clamped for the same reason as the `go depth` path in uci.rs:
+            // `depth` arrives as a u32 from JS, and anything above i32::MAX
+            // truncates to a negative, which makes the search return an
+            // unsearched move.
+            Limits::Depth(depth.min(MAX_PLY as u32) as i32)
         } else {
             Limits::Infinite
         };

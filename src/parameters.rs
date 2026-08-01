@@ -194,24 +194,26 @@ define! {
     // Extra strictness on the quiet SEE threshold when this node's children
     // have been producing cutoffs. Fork-only, added flat.
     //
-    // 16, down from 48. The term is constant while its base is `-12d^2 + 56d
-    // + 27`, so it was 69.6% of the base at depth 6, 16.4% at depth 8 and 0.9%
-    // at depth 24 -- overwhelmingly a shallow-depth pruning term regardless of
-    // intent. Measured eval volatility runs 1.15-1.19x base at the mover's own
-    // depth 8-23 and exactly 1.00 at 24+, which is where this bites.
+    // Left at 48 deliberately. The structural objection to it is real -- the
+    // term is constant while its base is `-12d^2 + 56d + 27`, so it is 69.6% of
+    // the base at depth 6 and 0.9% at depth 24, i.e. a shallow-depth pruning
+    // term whatever the intent. But it was 48 in every build that has been
+    // measured: the two that scored +56 and +62, and the one that scored -16.
+    // It is constant across all of them and therefore cannot explain any of the
+    // differences between them.
     //
-    // A d^2-scaled form was tried first, to hold the term at a constant ~8% of
-    // its base. That was the wrong fix: it made the term 2-8x LARGER across
-    // depth 12-24, adding pruning inside the very band the measurement flags.
-    // Reducing the constant instead is strictly less pruning at every depth --
-    // 23% of base at d6, 5.5% at d8 -- so no band gets worse.
-    i32 see_q_cutoff: 16;
+    // Two changes were tried here and both backed out: scaling by d^2 (which
+    // made the term 2-8x LARGER across depth 12-24, adding pruning inside the
+    // band the measurement flags), and cutting it to 16 (unevidenced in either
+    // direction). Change it only as its own SPRT, not while something else is
+    // being measured.
+    i32 see_q_cutoff: 48;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
-    // Same reasoning as `see_q_cutoff`, proportioned to the noisy base.
-    i32 see_n_cutoff: 12;
+    // Unchanged for the same reason as `see_q_cutoff` above.
+    i32 see_n_cutoff: 37;
     i32 see_n_base: 14;
 
     // Late Move Reductions
@@ -254,12 +256,27 @@ define! {
     // -87 Elo build was "same depth, thinner search", and this was the same
     // phenomenon one step along. Node count and depth cannot validate a
     // reduction term; only games can.
-    // 48. At 192 this measured -16 Elo with eval volatility 45% above base
-    // (z = +9.0), concentrated at the mover's depth 8-23 where the term is
-    // largest. 96 halved that; 48 is a quarter, putting the term at ~4-6% of
-    // the LMR base -- comparable to the other minor reduction adjustments
-    // rather than to `lmr_cutnode`-scale terms.
-    i32 lmr_movecount_ilog: 48;
+    // 0. This is the single parameter that differs between the builds that
+    // measured well and the one that did not:
+    //
+    //   ca43124  movecount 0    -> +56 Elo (myracle, 652 games)
+    //   14ee9dd  movecount 0    -> +62 Elo (myracle, 102 games)
+    //   464e859  movecount 192  -> -16 Elo (fastchess, 437 games)
+    //
+    // `see_q_cutoff`/`see_n_cutoff` were 48/37 in all three, so they cannot
+    // explain the gap; this can. Within the fastchess run alone, 192 also came
+    // with eval volatility 45% above base (z = +9.0) localised to the mover's
+    // depth 8-23 -- the band this term is largest in -- against 1.00 at 24+.
+    //
+    // The multiplicative form is still the right shape (additive was 446% of
+    // base at depth 2, and cost -87 Elo). But no value above 0 has ever
+    // measured well, and 0 has twice. Intermediate values of 96 and 48 were
+    // written here and removed: both were guesses between a number with no
+    // evidence and a number with negative evidence.
+    //
+    // The spsa.config range reaches 0, so a tuning run can explore upward from
+    // here if the form change deserves another look.
+    i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // 1028, not upstream's 1412. `bound == Bound::Exact` is set on exactly the
@@ -381,8 +398,8 @@ define! {
     // proportioned to this path's smaller base (207 vs 269).
     // Same form and reasoning as `lmr_movecount_ilog`, proportioned to this
     // path's smaller base (207 vs 269).
-    // Proportioned to this path's smaller base (207 vs 269).
-    i32 fds_movecount_ilog: 37;
+    // Zeroed alongside `lmr_movecount_ilog`; same evidence.
+    i32 fds_movecount_ilog: 0;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

@@ -353,10 +353,10 @@
     },
     {
         "name": "see_q_cutoff",
-        "default": 16.0,
+        "default": 48.0,
         "min": 0.0,
-        "max": 24.0,
-        "ck": 0.8,
+        "max": 72.0,
+        "ck": 2.4,
         "rk": 0.002
     },
     {
@@ -393,10 +393,10 @@
     },
     {
         "name": "see_n_cutoff",
-        "default": 12.0,
+        "default": 37.0,
         "min": 0.0,
-        "max": 18.0,
-        "ck": 0.6,
+        "max": 56.0,
+        "ck": 1.9,
         "rk": 0.002
     },
     {
@@ -417,9 +417,9 @@
     },
     {
         "name": "lmr_movecount_ilog",
-        "default": 48.0,
+        "default": 0.0,
         "min": 0.0,
-        "max": 72.0,
+        "max": 48.0,
         "ck": 2.4,
         "rk": 0.002
     },
@@ -665,9 +665,9 @@
     },
     {
         "name": "fds_movecount_ilog",
-        "default": 37.0,
+        "default": 0.0,
         "min": 0.0,
-        "max": 56.0,
+        "max": 37.0,
         "ck": 1.9,
         "rk": 0.002
     },

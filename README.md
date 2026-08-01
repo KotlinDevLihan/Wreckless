@@ -5,7 +5,7 @@
 </div>
 
 Wreckless is a UCI chess engine, a fork of [Reckless](https://github.com/codedeliveryservice/Reckless)
-by Arseniy Surkov, Shahin M. Shahin, and Styx — an open source competitive engine that consistently
+by Lihan van der Westhuizen — an open source competitive engine that consistently
 performs among the top engines in major tournaments including the
 [Chess.com Computer Chess Championship (CCC)][ccc] and [Top Chess Engine Championship (TCEC)][tcec].
 

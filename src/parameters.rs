@@ -275,6 +275,12 @@ define! {
     // reasoning applied to Stockfish's IIR constant produced a value that
     // looked derived and was never measured here. SPSA owns it from here.
     i32 lmr_alpha_raise: 384;
+    // Ceiling on the alpha-raise count fed to the term above. 6 raises is
+    // already 2.25 plies at the default weight; beyond that the signal is
+    // saturated and the only thing a higher count adds is the risk of one term
+    // dominating the whole reduction. Bounds the contribution without changing
+    // it in the range that actually occurs (typically 1-5).
+    i32 lmr_alpha_raise_cap: 6;
     // Reduce less when the static eval and the TT's search score disagree --
     // the same `complexity` signal as `rfp_complexity`, applied to reductions
     // rather than to a pruning margin. A disputed position is where a reduced
@@ -286,6 +292,14 @@ define! {
     // the `alpha_raise` term rather than act independently. Unmeasured, like
     // its RFP twin.
     i32 lmr_complexity: 500;
+    // Ceiling on |eval - tt_score| before it is scaled by the two complexity
+    // terms. `eval` is clamped to +/-(TB_WIN_IN_MAX - 1) and a non-decisive
+    // `tt_score` can sit just below TB_WIN_IN_MAX, so the raw difference can
+    // reach ~63000 against an intended range of 0-800 -- roughly 30 plies of
+    // reduction from a term meant to contribute 0.38. 1024 keeps every
+    // realistic value untouched (0.49 plies at the default weight) and bounds
+    // the tail.
+    i32 complexity_cap: 1024;
     i32 lmr_check: 955;
     i32 lmr_cutoff: 1151;
     i32 lmr_cutoff_node: 400;

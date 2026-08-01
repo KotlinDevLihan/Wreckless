@@ -692,8 +692,23 @@ fn search<NODE: NodeType>(
     // of reduction at every in-check node holding a TT score, silently
     // disabling LMR there. Nothing crashes, because `reduced_depth` is clamped;
     // it just quietly searches a different tree.
-    let complexity =
-        if is_valid(eval) && is_valid(tt_score) && !is_decisive(tt_score) { (eval - tt_score).abs() } else { 0 };
+    // Capped as well as validity-gated. The `is_valid(eval)` guard stops the
+    // `Score::NONE` sentinel getting in, but a *legitimate* value can still be
+    // far outside the range this signal was sized for: `eval` is clamped to
+    // +/-(TB_WIN_IN_MAX - 1) and a non-decisive `tt_score` can sit just under
+    // TB_WIN_IN_MAX, so the difference can reach ~63000 where the intended
+    // range is 0-800. Uncapped that is ~30 plies of reduction from one term
+    // against the 0.38 it is meant to contribute.
+    //
+    // The cap also matches what the signal means: past a certain disagreement
+    // the eval and the search have simply diverged, and "more diverged" is not
+    // more informative. Same treatment `qs_see_corr_cap` already gives
+    // `correction_value` in qsearch.
+    let complexity = if is_valid(eval) && is_valid(tt_score) && !is_decisive(tt_score) {
+        (eval - tt_score).abs().min(p::complexity_cap())
+    } else {
+        0
+    };
 
     // Razoring
     // Restored the `razor_corr` eval-correction term and the `cutoff_count[ply
@@ -1402,7 +1417,14 @@ fn search<NODE: NodeType>(
                 reduction += p::lmr_cutnode_null() * tt_move.is_null() as i32;
             }
 
-            reduction += p::lmr_alpha_raise() * alpha_raises;
+            // Capped: `alpha_raises` is bounded only by the move count, so at a
+            // node where many moves improve in turn this term could reach
+            // double-digit plies on its own. The `reduced_depth` clamp stops
+            // that being unsound, but it would mean every late move searched at
+            // depth 1 because of one signal. The cap is also what the signal
+            // means -- the first few raises say "this node is still improving";
+            // the twentieth says nothing the third did not.
+            reduction += p::lmr_alpha_raise() * alpha_raises.min(p::lmr_alpha_raise_cap());
             reduction -= p::lmr_complexity() * complexity / 1024;
 
             if td.board.in_check() {

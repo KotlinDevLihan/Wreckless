@@ -608,11 +608,27 @@
             "rk": 0.002
         },
         {
+            "name": "lmr_alpha_raise_cap",
+            "default": 6.0,
+            "min": 3.0,
+            "max": 9.0,
+            "ck": 0.3,
+            "rk": 0.002
+        },
+        {
             "name": "lmr_complexity",
             "default": 500.0,
             "min": 0.0,
             "max": 750.0,
             "ck": 25.0,
+            "rk": 0.002
+        },
+        {
+            "name": "complexity_cap",
+            "default": 1024.0,
+            "min": 512.0,
+            "max": 1536.0,
+            "ck": 51.2,
             "rk": 0.002
         },
         {

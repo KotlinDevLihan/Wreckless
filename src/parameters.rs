@@ -207,7 +207,10 @@ define! {
     // to put the bench tree back on 0.1.2's (2.64M against 2.61M); be honest
     // about what that means -- at this magnitude the term is close to inert
     // (0.03 ply at move 32). It is parked here rather than deleted so SPSA can
-    // still explore it, and because the response is badly non-monotonic
+    // still explore it -- which it could not actually do until the range in
+    // spsa.config was widened from the degenerate [0, 0] that a 0 default
+    // generates to an explicit [0, 48], chosen to stay well clear of the 240
+    // that measured -87 Elo. And because the response is badly non-monotonic
     // (240 -> 2.20M, 90 -> 2.25M, 40 -> 2.50M, 22 -> 2.41M, 12 -> 2.71M,
     // 6 -> 2.64M, 0 -> 2.74M), which is itself a reason not to trust any
     // hand-picked value here.

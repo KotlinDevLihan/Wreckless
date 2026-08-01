@@ -440,6 +440,23 @@ fn search<NODE: NodeType>(
 
     // Computed before the TT probe so the work overlaps the prefetched cache
     // line's arrival instead of serializing after the lookup.
+    //
+    // SHARED SIGNAL -- read two different ways, which is deliberate:
+    //
+    //   signed, via `correct_eval`: folded into `eval` itself, so every test
+    //     comparing `eval` against alpha/beta already carries it.
+    //   magnitude, via `.abs()`: razoring, RFP, futility, both singular
+    //     margins, LMR, FDS and qsearch SEE each add their own term.
+    //
+    // These are not double-counting. The signed value says which way the
+    // evaluation is wrong; the magnitude says how unsure we are, and margins
+    // widen with uncertainty regardless of direction. Removing the apparent
+    // duplication would leave eight margins with no confidence input at all.
+    //
+    // What does need care is scale: `corr_weight_div` divides the blend, so
+    // changing how many tables `eval_correction` sums rescales all eight
+    // consumers at once -- the defect the material/minor/major tables caused
+    // once already (see `corr_weight_div` in parameters.rs).
     let correction_value = eval_correction(td, ply);
 
     let hash = td.board.hash();
@@ -576,6 +593,27 @@ fn search<NODE: NodeType>(
     td.stack[ply].tt_pv = tt_pv;
     td.stack[ply].reduction = 0;
     td.stack[ply].move_count = 0;
+
+    // `cutoff_count[ply]` counts beta cutoffs produced by this node's children.
+    // Written at the `break` in the move loop; each node clears its
+    // grandchild slot here so the count a child reads starts fresh.
+    //
+    // SHARED SIGNAL -- FIVE CONSUMERS. Every one reads `cutoff_count[ply + 1]`
+    // and each coefficient was set as if it were the only reader:
+    //
+    //   razoring   `razor_cutoff`         (> 3)   fork-only
+    //   NMP        `nmp_cutoff`           (< 2)   upstream
+    //   SEE prune  `see_q/n_cutoff`       (> 2)   fork-only
+    //   LMR        `lmr_cutoff(_node)`    (> 2)   upstream
+    //   FDS        `fds_cutoff(_node)`    (> 2)   upstream
+    //
+    // Three are fork additions layered onto a signal upstream already read
+    // twice. Before tuning any one of them, or adding a sixth, account for the
+    // others: this is exactly the shape of the IIR/`lmr_cutnode_null` defect,
+    // where a second mechanism was added on a signal whose existing consumer
+    // kept a coefficient tuned for being the only one. That cost roughly a ply
+    // of reduction before anyone noticed, and nothing about it was visible at
+    // any single site.
     td.cutoff_count[ply + 2] = 0;
 
     // Quiet move ordering using eval difference

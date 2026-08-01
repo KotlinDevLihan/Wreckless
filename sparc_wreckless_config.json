@@ -433,7 +433,7 @@
         },
         {
             "name": "see_n_cutoff",
-            "default": 37.0,
+            "default": 0.0,
             "min": 0.0,
             "max": 56.0,
             "ck": 1.9,

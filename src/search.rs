@@ -1396,13 +1396,13 @@ fn search<NODE: NodeType>(
                     // Flat 48 was 69.6% of base at depth 6, 16.4% at depth 8, 0.9% at depth 24.
                     // This volatility analysis shows excess eval at depth 8-23 (ratio 1.15-1.19),
                     // absent at 24+ (1.00). The d^2 scaling keeps the term proportional to its base.
-                    + p::see_q_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32 * depth * depth / 64
+                    + p::see_q_cutoff() * ((td.cutoff_count[ply + 1] > 2 && depth >= 6) as i32) * depth * depth / 64
                     + p::see_q_base())
                 .min(0)
             } else {
                 (-p::see_n_quad() * depth * depth - p::see_n_lin() * depth - p::see_n_hist() * history / 1024
                     // Same d^2/64 scaling as see_q_cutoff above, matching its -7d^2 base.
-                    + p::see_n_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32 * depth * depth / 64
+                    + p::see_n_cutoff() * ((td.cutoff_count[ply + 1] > 2 && depth >= 6) as i32) * depth * depth / 64
                     + p::see_n_base())
                 .min(0)
             };

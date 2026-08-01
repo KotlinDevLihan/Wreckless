@@ -101,18 +101,22 @@ define! {
     i32 nmp_r_depth: 265;
     i32 nmp_r_beta: 477;
     i32 nmp_r_beta_max: 1187;
-    // Zugzwang-guard threshold, compared against
-    // `colored_non_pawn_material(stm)` -- one side's pieces only.
+    // Zugzwang-guard threshold, compared against whole-board
+    // `non_pawn_material()`.
     //
-    // Upstream gates on `material() > 491`, which counts both sides *and*
-    // pawns. This guard has since been narrowed twice (pawns out, then scoped
-    // to the mover), so 491 is now being applied to roughly a quarter of the
-    // quantity it was chosen for. On the `PieceType::value()` scale a knight is
-    // 403, so as it stands NMP switches off whenever the side to move is down
-    // to one minor piece or less. That is a defensible place for a zugzwang
-    // guard to bite, but it is not what 491 was measured against and nothing
-    // has measured it since -- the narrowing is the defensible part, the
-    // constant is the open question.
+    // Upstream gates on `material() > 491`, which counts pawns too; this fork
+    // drops them, which is the right signal since zugzwang is about having no
+    // useful *piece* move. The constant was never re-measured against that
+    // narrower quantity, so it is an open question -- but a *bounded* one.
+    //
+    // A further narrowing to `colored_non_pawn_material(stm)` (the mover's
+    // pieces only) was tried and reverted. The reasoning was sound -- zugzwang
+    // is the mover's problem, and K+P vs K+Q clears a both-sides threshold
+    // while the mover has nothing -- but shipping it against an unchanged 491
+    // was not: a knight is 403 and a bishop 435 on this scale, so it switched
+    // NMP off entirely whenever the mover was down to one minor. That is a
+    // common state and NMP is the largest node reducer here. Re-narrow only
+    // together with a threshold sized for the new quantity, as one SPRT.
     i32 nmp_material: 491;
 
     // ProbCut
@@ -464,13 +468,16 @@ define! {
     i32 conthist_lag3: 195;
     i32 conthist_lag4: 700;
     i32 conthist_lag5: 89;
-    // 350, not 700. The read in `search()` weights lag 6 at 1/2 and its comment
-    // claims the read mirrors "the same relative strengths the update uses".
-    // At 700 the write was full strength while the read halved it, so the stated
-    // invariant held for lags 3 and 5 and was violated for exactly one lag --
-    // and the "raw sum is 3.911, divide by 2" normalisation was computed from
-    // the wrong number. 350/700 = 0.50 makes the write match the read.
-    i32 conthist_lag6: 350;
+    // 700. A halving to 350 was tried, on the argument that the write should
+    // mirror `search()`'s 1/2 read weight. That argument does not survive
+    // checking: the two read sites already disagree on this lag (search 0.50,
+    // `score_quiet` 963/1024 = 0.94), so there is no single read weight to
+    // match -- and write weight (how fast an entry fills) is a different
+    // quantity from read weight (how much a filled entry counts). They are
+    // independent scalings, not a correspondence. Reverted to the measured
+    // value; the comment in search.rs claiming the two mirror each other is the
+    // thing that was wrong, not this number.
+    i32 conthist_lag6: 700;
     // Positive-consistency multipliers, indexed by how many of the (up to 6)
     // continuation entries for this move are already positive -- counted
     // across all of them before any bonus is applied, so every lag is scaled

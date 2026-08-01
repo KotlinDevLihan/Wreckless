@@ -834,7 +834,15 @@ fn search<NODE: NodeType>(
         // The 491 magnitude itself is still unverified against this
         // (corrected) quantity -- exposed as a tunable rather than silently
         // re-guessed. Let SPSA settle it.
-        && td.board.colored_non_pawn_material(stm) > p::nmp_material()
+        // Back to whole-board non-pawn material. Narrowing this to the side to
+        // move is defensible in principle -- zugzwang is about *the mover*
+        // having no useful piece move -- but it was shipped against upstream's
+        // unchanged 491, and on the `PieceType::value()` scale a knight is 403
+        // and a bishop 435. So the narrowed form switched NMP off entirely
+        // whenever the mover was down to one minor: a very common state, and
+        // NMP is the largest node reducer in the engine. Re-narrow only with a
+        // threshold sized for the new quantity, behind its own SPRT.
+        && td.board.non_pawn_material() > p::nmp_material()
         && !is_loss(beta)
         && !is_win(estimated_score)
         && !(tt_bound == Bound::Lower
@@ -892,7 +900,14 @@ fn search<NODE: NodeType>(
         // NMP contributed was valid *and* positive, arriving at high frequency
         // beside a main site that contributes both signs.
         if score >= bound && !is_win(score) {
-            if (td.nmp_min_ply > 0 || depth < 16) && score >= beta {
+            // `>= bound`, as upstream. Requiring `>= beta` here is sound in
+            // principle -- a null move proves a lower bound, so a sub-beta
+            // result is not an upper bound the parent can trust -- but the
+            // search window is `[bound - 1, bound]`, so a fail-soft return
+            // lands at or just above `bound` and almost never reaches beta when
+            // `bound` came from a sub-beta TT entry. In practice that did not
+            // tighten the proof, it deleted the TT-bound path from NMP.
+            if td.nmp_min_ply > 0 || depth < 16 {
                 return score;
             }
 
@@ -906,7 +921,7 @@ fn search<NODE: NodeType>(
                 return Score::ZERO;
             }
 
-            if verified_score >= beta && score >= beta {
+            if verified_score >= bound {
                 return score;
             }
         }

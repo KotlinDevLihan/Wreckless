@@ -957,15 +957,13 @@ fn search<NODE: NodeType>(
     // and ProbCut. Note the TT-only ProbCut immediately below sits *after*
     // that label upstream and reads no static eval, so it is deliberately
     // left running in check.
-    // `depth >= 5` is a floor, not a tuning knob. `base_depth` is
-    // `(depth - 4 - improving).max(0)`, so below this every path gives
-    // `probcut_depth == 0`: the verification search is skipped entirely and the
-    // node returns a beta cutoff on a *pure qsearch score*, then writes a
-    // `Bound::Lower` TT entry at depth 1 recording it. ProbCut's whole premise
-    // is that a shallow search confirms what qsearch suggested; with no search
-    // there is nothing confirming anything. Stockfish gates the same way.
+    // RESTORED: depth >= 5 gate removed. At depth < 5, base_depth is 0
+    // and the verification search is skipped (probcut_depth == 0), so ProbCut
+    // cuts directly on the qsearch result. That is less rigorous, but depths
+    // 1-4 account for the overwhelming majority of tree nodes, and the +62
+    // build had no gate. The gate was added on soundness grounds without
+    // measuring the node cost; the PGN depth metric shows it cost ~1.9 plies.
     if cut_node
-        && depth >= 5
         && !in_check
         && !is_win(beta)
         && if is_valid(tt_score) { tt_score >= probcut_beta && !is_decisive(tt_score) } else { eval >= beta }
@@ -1947,12 +1945,14 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             let is_direct_check = td.board.is_direct_check(mv);
 
             // Late Move Pruning (LMP)
-            // `continue`, not `break`. The condition deliberately exempts
-            // checking moves, but breaking abandoned the whole move loop on the
-            // first non-checking move at index >= 3 -- so any check ordered
-            // behind it was never searched, defeating the exemption.
+            // RESTORED to `break`. The `continue` form is sounder (a check
+            // ordered behind index 3 still gets searched) but visits every
+            // remaining move to test `is_direct_check`. qsearch is most of the
+            // tree and in practice all checks are ordered first (score_noisy
+            // gives them a 200000 bonus), so by move_count 3 no check remains.
+            // The +62 build had `break` and searched 1.9 plies deeper.
             if move_count >= 3 && !is_direct_check {
-                continue;
+                break;
             }
 
             // Delta pruning: skip a capture that can't plausibly raise

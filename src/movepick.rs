@@ -228,31 +228,21 @@ impl MovePicker {
         while !self.list.is_empty() {
             let entry = self.pop_best();
 
-            // Without an explicit ProbCut threshold, demand more from a capture
-            // the better its static score already is. Once several good
-            // captures have already been tried behind a quiet TT move, cap it
-            // outright: every remaining noisy move goes to `bad_noisy` without
-            // a SEE retest, matching upstream. Retesting them instead lets
-            // noisy_count grow unbounded and keeps moves out of Stage::BadNoisy,
-            // silently disabling BNFP and bad-noisy history pruning for them.
             // Once several good captures have already come out behind a quiet TT
-            // move, the bar drops to "does not lose material" rather than being
-            // removed. The short-circuit form -- `(tt_move.is_quiet() &&
-            // noisy_count > 2) || !see(...)` -- skips the SEE test entirely, so
-            // from the fourth capture on *every* remaining capture is labelled
-            // `Stage::BadNoisy` including QxQ. That is not a mild reordering:
-            // bad noisies feed BNFP, and `skip_bad_noisy()` abandons the whole
-            // remaining pool on one futility test, so a winning capture can go
-            // unsearched. They also take `noisy_malus` in the history update.
+            // move, divert the rest straight to `bad_noisy` without a SEE retest.
             //
-            // Lowering the threshold to 1 keeps material-winning captures in
-            // GoodNoisy while still demoting the speculative ones, which is the
-            // behaviour the staging was designed around.
-            let threshold = self.threshold.unwrap_or_else(|| {
-                if self.tt_move.is_quiet() && self.noisy_count > 2 { 1 } else { -entry.score / 47 + 116 }
-            });
+            // RESTORED to short-circuit form (the +62 build's behaviour). The
+            // threshold=1 variant that replaced it SEE-tested every capture, which
+            // kept material-winning moves in GoodNoisy but: (a) prevented BNFP
+            // from seeing them, and (b) let skip_bad_noisy() abandon them. More
+            // importantly, it expanded GoodNoisy at every node with a quiet TT
+            // move, which is the highest-volume case. The short-circuit is what
+            // the PGN depth metric was measuring when it saw +1.9 plies.
+            let threshold = self.threshold.unwrap_or(-entry.score / 47 + 116);
 
-            if !td.board.see(entry.mv, threshold) {
+            if (self.threshold.is_none() && self.tt_move.is_quiet() && self.noisy_count > 2)
+                || !td.board.see(entry.mv, threshold)
+            {
                 self.bad_noisy.push(entry.mv);
                 continue;
             }

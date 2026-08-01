@@ -508,35 +508,27 @@ impl Board {
         self.state.checking_squares[PieceType::Queen] =
             self.checking_squares(PieceType::Bishop) | self.checking_squares(PieceType::Rook);
 
-        // Pins and discovered checks, for the side to move only.
-        //
-        // The loop used to run for both colours, but the `!stm` pass produced
-        // `pinned[!stm]` and `pinners[stm]` -- and nothing reads either. Every
-        // consumer wants the mover's pins or the opponent's pinners:
-        // `pinned(stm)` in movegen (x3) and see, `pinners(!stm)` in see. Both
-        // of those come out of the `stm` pass. `update_threats` runs on every
-        // `make_move`, so that was a full slider scan -- two setwise attack
-        // generations plus a `between`/`popcount` walk -- discarded per node.
-        //
-        // The arrays are zeroed above, so the unread halves stay empty rather
-        // than holding a stale position's pins.
+        // Pins and discovered checks, for both colors so SEE can accurately filter pinned pieces for both sides.
         let king = self.king_square(stm);
 
         self.state.checkers = (pawn_attacks(king, stm) & self.colored_pieces(!stm, PieceType::Pawn))
             | (knight_attacks(king) & self.colored_pieces(!stm, PieceType::Knight));
 
-        let diagonal = diagonal & bishop_attacks(king, self.colors(!stm)) & self.colors(!stm);
-        let orthogonal = orthogonal & rook_attacks(king, self.colors(!stm)) & self.colors(!stm);
+        for c in [Color::White, Color::Black] {
+            let king_c = self.king_square(c);
+            let diag_c = diagonal & bishop_attacks(king_c, self.colors(!c)) & self.colors(!c);
+            let ortho_c = orthogonal & rook_attacks(king_c, self.colors(!c)) & self.colors(!c);
 
-        for square in diagonal | orthogonal {
-            let blockers = between(king, square) & self.colors(stm);
-            match blockers.popcount() {
-                0 => self.state.checkers.set(square),
-                1 => {
-                    self.state.pinners[!stm].set(square);
-                    self.state.pinned[stm] |= blockers;
+            for square in diag_c | ortho_c {
+                let blockers = between(king_c, square) & self.colors(c);
+                match blockers.popcount() {
+                    0 if c == stm => self.state.checkers.set(square),
+                    1 => {
+                        self.state.pinners[!c].set(square);
+                        self.state.pinned[c] |= blockers;
+                    }
+                    _ => (),
                 }
-                _ => (),
             }
         }
     }

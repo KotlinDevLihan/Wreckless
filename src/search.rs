@@ -1201,13 +1201,16 @@ fn search<NODE: NodeType>(
     // reduction below.
     let mut alpha_raises = 0;
 
-    // Continuation-history subtable pointers for the six lags read by the quiet
+    // Continuation-history subtable pointers for the two lags read by the quiet
     // `history` sum below. They depend only on `ply`, so they are constant for
-    // this whole node, but these used to go through a per-lag helper that
-    // re-read `stack[ply - n].conthist` on every call -- six strided loads into
-    // a large array per quiet move, where six for the entire node will do. The
-    // raw-pointer read stops the optimiser from hoisting them itself.
-    let conthist: [*mut PieceToHistory<i16>; 6] = std::array::from_fn(|i| td.stack[ply - 1 - i as isize].conthist);
+    // the whole node, but used to go through a per-lag helper that re-read
+    // `stack[ply - n].conthist` on every call -- strided loads into a large
+    // array per quiet move, where two for the entire node will do. The
+    // raw-pointer read stops the optimiser hoisting them itself.
+    //
+    // Two, not six: the sum below reads lags 1 and 2 only. `score_quiet` still
+    // uses all six for move ordering and builds its own array there.
+    let conthist: [*mut PieceToHistory<i16>; 2] = std::array::from_fn(|i| td.stack[ply - 1 - i as isize].conthist);
 
     while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets, ply) {
         if mv == td.excluded[ply] {
@@ -1276,14 +1279,28 @@ fn search<NODE: NodeType>(
             // back onto upstream's two units: the raw sum is 3.911 units, so
             // dividing by 2 (0.50) restores 1.95. The extra lags now contribute
             // their information and nothing downstream is silently rescaled.
+            // Lags 1 and 2 only, as upstream and as the initial commit had it.
+            //
+            // This sum runs for EVERY quiet move at EVERY node -- it feeds LMP,
+            // futility, BNFP, history pruning, SEE pruning and the LMR/FDS
+            // history terms -- and each `get` is a random read into a 5.3 MB
+            // table. Reading six lags here instead of two tripled the random
+            // memory traffic in the hottest loop in the engine.
+            //
+            // That cost is invisible on an idle machine and severe under
+            // concurrency, which is exactly the pattern the games showed: on
+            // unresolved positions this fork searched 16.4 ply against base's
+            // 14.5 when games ran one at a time, and 14.5 against 14.5 at
+            // concurrency 8 -- while base, which never added the reads, sat at
+            // 14.5 in both. Roughly two ply of search, spent on cache misses.
+            //
+            // The extra lags are still WRITTEN by the update, and `score_quiet`
+            // still reads all six for move ordering. This is only about the
+            // per-move pruning input, where the traffic is multiplied by the
+            // move count.
             td.quiet_history.get(td.board.all_threats(), stm, mv)
-                + (td.continuation_history.get(conthist[0], moved, to)
-                    + td.continuation_history.get(conthist[1], moved, to)
-                    + td.continuation_history.get(conthist[2], moved, to) * 2 / 7
-                    + td.continuation_history.get(conthist[3], moved, to)
-                    + td.continuation_history.get(conthist[4], moved, to) / 8
-                    + td.continuation_history.get(conthist[5], moved, to) / 2)
-                    / 2
+                + td.continuation_history.get(conthist[0], moved, to)
+                + td.continuation_history.get(conthist[1], moved, to)
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
             // `moved_piece(mv)` is `mailbox[mv.from()]`, the same lookup as the

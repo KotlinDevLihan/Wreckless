@@ -65,7 +65,7 @@
         },
         {
             "name": "razor_cutoff",
-            "default": 65.0,
+            "default": 0.0,
             "min": 0.0,
             "max": 98.0,
             "ck": 3.3,
@@ -393,7 +393,7 @@
         },
         {
             "name": "see_q_cutoff",
-            "default": 0.0,
+            "default": 48.0,
             "min": 0.0,
             "max": 72.0,
             "ck": 2.4,
@@ -433,7 +433,7 @@
         },
         {
             "name": "see_n_cutoff",
-            "default": 0.0,
+            "default": 37.0,
             "min": 0.0,
             "max": 56.0,
             "ck": 1.9,
@@ -481,7 +481,7 @@
         },
         {
             "name": "lmr_exact",
-            "default": 1028.0,
+            "default": 1412.0,
             "min": 514.0,
             "max": 1542.0,
             "ck": 51.4,

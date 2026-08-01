@@ -332,13 +332,26 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
                 // The linear structure is Stockfish's (their 2.035:0.968
                 // coefficient ratio is preserved), but SF's Value scale puts a
-                // pawn at ~208 where ours is ~321-382. Carried over unscaled,
-                // the old 0.0480 saturated the ceiling after a 0.04-pawn drop
-                // and pinned the result to the floor on any gain at all: a
-                // bang-bang switch with no proportional band, which is also
-                // why SPSA never found signal in these constants. Rescaled so
-                // the ceiling is reached at ~0.37 pawns, matching SF's band in
-                // pawn terms.
+                // pawn at ~208 where ours is ~321-382.
+                //
+                // BE CLEAR ABOUT WHAT THIS DOES AS SHIPPED. An earlier revision
+                // rescaled these constants so the ceiling sat ~0.37 pawns out,
+                // matching SF's band in pawn terms; that was reverted in favour
+                // of upstream's untouched fixed-point values, and this comment
+                // went on describing the rescale that no longer exists. With
+                // base 7426, diff 480 and the [7214, 14031] clamp, the ceiling
+                // is reached after a 13.8-unit (~0.04 pawn) drop and the floor
+                // after 0.4 units -- i.e. on any gain at all. It is a bang-bang
+                // switch with essentially no proportional band, and
+                // `tm_trend_recent` adds a second saturating term on top of an
+                // already-saturated one.
+                //
+                // Left at upstream's values because those are the measured ones
+                // and this is a time-management path where a bad constant costs
+                // games rather than nodes. Reaching the SF-equivalent band would
+                // mean roughly diff 51 / recent 25; that is a change to test,
+                // not to assume, and it explains why SPSA has never found signal
+                // here -- there is no gradient to find inside the clamp.
                 //
                 // Held in fixed point (1e-4) rather than f32 so the constants
                 // can live in `parameters.rs` and actually be tuned now that
@@ -793,10 +806,15 @@ fn search<NODE: NodeType>(
                     + p::nmp_base())
                 .max(2)
         && ply as i32 >= td.nmp_min_ply
-        // Zugzwang guard: material() sums every piece including pawns, so a
-        // pawn-heavy, piece-empty endgame (the textbook zugzwang scenario
-        // this check exists to catch) could pass a material()-based
-        // threshold. non_pawn_material() is the correct signal here.
+        // Zugzwang guard, scoped to the side to move.
+        //
+        // Two corrections over upstream's `material() > 491`. First, `material()`
+        // counts pawns, so a pawn-heavy piece-empty endgame -- the textbook
+        // zugzwang case this exists to catch -- could clear the threshold on
+        // pawn mass alone. Second, whole-board non-pawn material is still the
+        // wrong scope: zugzwang is about *the mover* having no useful piece
+        // move, and K+P vs K+Q passes a both-sides test comfortably while the
+        // side to move has none.
         // Zugzwang guard. Upstream gates on `material() > 491`, which counts
         // pawns; this fork switched to `non_pawn_material()` -- the correct
         // signal, since zugzwang risk is about having no useful *piece* moves
@@ -816,7 +834,7 @@ fn search<NODE: NodeType>(
         // The 491 magnitude itself is still unverified against this
         // (corrected) quantity -- exposed as a tunable rather than silently
         // re-guessed. Let SPSA settle it.
-        && td.board.non_pawn_material() > p::nmp_material()
+        && td.board.colored_non_pawn_material(stm) > p::nmp_material()
         && !is_loss(beta)
         && !is_win(estimated_score)
         && !(tt_bound == Bound::Lower
@@ -858,9 +876,20 @@ fn search<NODE: NodeType>(
             if td.nmp_min_ply > 0 || depth < 16 {
                 // Trusted immediately -- no verification search follows on
                 // this path, so it's safe to feed correction history here.
-                if score > eval {
-                    update_correction_histories(td, depth, score - eval, ply);
-                }
+                    // No correction-history update here. Upstream has none on
+                    // either NMP return, and this fork's addition skewed the
+                    // table's sample balance: `score > eval` is the correct
+                    // bound-consistency test for a fail-high -- the main site at
+                    // the end of `search` excludes `Lower && best_score <= eval`
+                    // for exactly that reason -- so every sample NMP fed in was
+                    // valid *and* positive. NMP cutoffs are among the highest
+                    // frequency events in the tree, so a large one-signed stream
+                    // landed next to a main site contributing both signs, and
+                    // correction history is a signed error estimator feeding
+                    // `correct_eval` plus eight `correction_value.abs()` margins.
+                    //
+                    // Removed rather than made symmetric: a null-move score is
+                    // not drawn from the distribution the table models.
                 return score;
             }
 
@@ -883,9 +912,20 @@ fn search<NODE: NodeType>(
                 // full-search sample" problem documented for the
                 // singular-multicut correction update this fork tried and
                 // reverted.
-                if score > eval {
-                    update_correction_histories(td, depth, score - eval, ply);
-                }
+                    // No correction-history update here. Upstream has none on
+                    // either NMP return, and this fork's addition skewed the
+                    // table's sample balance: `score > eval` is the correct
+                    // bound-consistency test for a fail-high -- the main site at
+                    // the end of `search` excludes `Lower && best_score <= eval`
+                    // for exactly that reason -- so every sample NMP fed in was
+                    // valid *and* positive. NMP cutoffs are among the highest
+                    // frequency events in the tree, so a large one-signed stream
+                    // landed next to a main site contributing both signs, and
+                    // correction history is a signed error estimator feeding
+                    // `correct_eval` plus eight `correction_value.abs()` margins.
+                    //
+                    // Removed rather than made symmetric: a null-move score is
+                    // not drawn from the distribution the table models.
                 return score;
             }
         }
@@ -2314,7 +2354,15 @@ fn update_continuation_histories_in_check(
         }
     }
 
-    let multiplier = multipliers[positive_count];
+    // Indexed by how many of the lags *considered* agreed, not by the raw
+    // count. In check the loop stops after lag 2, so a raw count can never
+    // exceed 2 and the multipliers tuned for indices 3-6 are unreachable there
+    // -- an in-check node with both lags positive got index 2 where an
+    // out-of-check node with all six positive got index 6, for the same
+    // "everything agrees" state. Scaling by `len` puts both on the same
+    // footing. `len` is 0 only when no lag had a move, and index 0 is the
+    // no-agreement multiplier, which is the right answer for that case.
+    let multiplier = multipliers[if len == 0 { 0 } else { positive_count * 6 / len }];
 
     for &(conthist, weight, offset) in &targets[..len] {
         // Overall scale is SPSA-tunable since the right magnitude for this

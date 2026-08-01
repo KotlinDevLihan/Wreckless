@@ -174,6 +174,20 @@ impl Board {
         self.state.material - self.pieces(PieceType::Pawn).popcount() as i32 * PieceType::Pawn.value()
     }
 
+    /// Non-pawn material belonging to one side.
+    ///
+    /// The whole-board [`Self::non_pawn_material`] is the wrong quantity for a
+    /// zugzwang guard: the risk is that the side *to move* has nothing but pawn
+    /// pushes, and K+P vs K+Q clears a both-sides threshold comfortably while
+    /// the mover has no piece move at all.
+    pub fn colored_non_pawn_material(&self, color: Color) -> i32 {
+        let mut material = 0;
+        for pt in [PieceType::Knight, PieceType::Bishop, PieceType::Rook, PieceType::Queen] {
+            material += self.colored_pieces(color, pt).popcount() as i32 * pt.value();
+        }
+        material
+    }
+
     pub const fn in_check(&self) -> bool {
         !self.state.checkers.is_empty()
     }

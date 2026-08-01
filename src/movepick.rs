@@ -235,9 +235,24 @@ impl MovePicker {
             // a SEE retest, matching upstream. Retesting them instead lets
             // noisy_count grow unbounded and keeps moves out of Stage::BadNoisy,
             // silently disabling BNFP and bad-noisy history pruning for them.
-            let threshold = self.threshold.unwrap_or_else(|| -entry.score / 47 + 116);
+            // Once several good captures have already come out behind a quiet TT
+            // move, the bar drops to "does not lose material" rather than being
+            // removed. The short-circuit form -- `(tt_move.is_quiet() &&
+            // noisy_count > 2) || !see(...)` -- skips the SEE test entirely, so
+            // from the fourth capture on *every* remaining capture is labelled
+            // `Stage::BadNoisy` including QxQ. That is not a mild reordering:
+            // bad noisies feed BNFP, and `skip_bad_noisy()` abandons the whole
+            // remaining pool on one futility test, so a winning capture can go
+            // unsearched. They also take `noisy_malus` in the history update.
+            //
+            // Lowering the threshold to 1 keeps material-winning captures in
+            // GoodNoisy while still demoting the speculative ones, which is the
+            // behaviour the staging was designed around.
+            let threshold = self.threshold.unwrap_or_else(|| {
+                if self.tt_move.is_quiet() && self.noisy_count > 2 { 1 } else { -entry.score / 47 + 116 }
+            });
 
-            if (self.tt_move.is_quiet() && self.noisy_count > 2) || !td.board.see(entry.mv, threshold) {
+            if !td.board.see(entry.mv, threshold) {
                 self.bad_noisy.push(entry.mv);
                 continue;
             }

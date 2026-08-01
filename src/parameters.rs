@@ -169,13 +169,17 @@ define! {
     i32 see_q_hist: 27;
     // Extends the cutoff_count signal (already used in lmr_cutoff/fds_cutoff)
     // to SEE pruning as well -- not previously used here.
-    // Re-checked: at depth 5 the surrounding terms sum to roughly 600
-    // (quad+lin+base), and an initial guess of 15 was only ~2.5% of that --
-    // far weaker proportionally than lmr_cutoff/fds_cutoff are relative to
-    // their own base terms (~80%). Raised to a still-modest but more
-    // meaningful fraction. Trimmed from 60 back toward the middle of that
-    // range on review, to keep quiet SEE pruning a little less eager at nodes
-    // whose children have been producing cutoffs; untested either way.
+    // The sizing argument that produced this value does not hold. It claimed
+    // the surrounding terms "sum to roughly 600" at depth 5; they largely
+    // cancel there -- -12*25 + 56*5 + 27 = +7, which the `.min(0)` then clamps
+    // to 0, and adding 48 still clamps to 0. The term is inert at depth 5 and
+    // only starts biting at depth 6 (-69 -> -21), so 48 versus the original 15
+    // was never distinguishable at the depths the argument cites.
+    //
+    // Value left alone: it is bounded (the threshold cannot exceed 0, so the
+    // worst this can do is prune every losing capture) and changing it on a
+    // corrected argument would just be a new guess. The spsa.config range now
+    // reaches 0, so a tuning run can retire the term if it is worthless.
     i32 see_q_cutoff: 48;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
@@ -458,6 +462,20 @@ define! {
     // 8192 = 3018); at the previous 7052 it was 2.34x the next-largest
     // ordering signal and dominated root move choice.
     i32 lowply_weight: 3018;
+    // Split point between `Stage::Quiet` and `Stage::BadQuiet`, compared
+    // against the whole quiet score.
+    //
+    // Deliberately NOT rescaled when `lowply_weight` was halved (7052 -> 3018),
+    // even though the module doc in movepick.rs warns that this threshold is
+    // calibrated against the quiet score's total magnitude -- the same argument
+    // that pins CONTHIST_WEIGHTS with a const assertion. The reason the two
+    // cases differ: the conthist group contributes at every ply, so changing
+    // its total shifts the distribution this threshold sees everywhere. The
+    // low-ply term is zero from ply 5 up (`LowPlyHistory::MAX_LOW_PLY`), so the
+    // threshold has always operated against a no-low-ply distribution for the
+    // overwhelming majority of nodes. Halving the weight moved plies 0-4 toward
+    // that distribution rather than away from it; rescaling the global
+    // threshold to compensate would mis-set it for every ply >= 5.
     i32 good_quiet_threshold: -14000;
 
     // Qsearch SEE pruning threshold -- previously hardcoded consts with no

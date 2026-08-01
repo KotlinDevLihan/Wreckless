@@ -19,7 +19,7 @@ use crate::{
     search::{self, Report},
     thread::{RootMove, SharedContext, Status, ThreadData},
     time::TimeManager,
-    types::Move,
+    types::{Move, Score},
 };
 
 pub struct ThreadPool {
@@ -98,7 +98,15 @@ impl ThreadPool {
         shared.soft_stop_votes.store(0, Ordering::Release);
         shared.status.set(Status::RUNNING);
         shared.best_stats.iter().for_each(|x| {
-            x.store((self.main_thread().previous_best_score + 32768) as u32, Ordering::Release);
+            // Same `-Score::INFINITE` sentinel guard as `centre` in
+            // `search::start`. `RootMove::default()` seeds that score, so a
+            // search aborted before any root move scored stores 767 here, and
+            // `best_avg` then pegs `optimism` to its extreme for the first PV
+            // line of the next search -- feeding a maximally skewed
+            // `correct_eval` at every node. Half the fix landed previously.
+            let seed = self.main_thread().previous_best_score;
+            let seed = if seed.abs() < Score::INFINITE { seed } else { Score::ZERO };
+            x.store((seed + 32768) as u32, Ordering::Release);
         });
 
         #[cfg(target_arch = "wasm32")]
@@ -126,6 +134,11 @@ impl ThreadPool {
                 t.time_manager = time_manager.clone();
                 t.board = (*board).clone();
                 t.root_moves = root_moves.clone();
+                // Helpers were given everything except this. Under MultiPV > 1
+                // they kept a stale `multi_pv` and so searched a different
+                // problem from the main thread, while still voting on the final
+                // move in `uci::bestmove`.
+                t.multi_pv = multi_pv;
             }
 
             let (t1, rest) = self.vector.split_first_mut().unwrap();

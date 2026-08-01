@@ -872,24 +872,27 @@ fn search<NODE: NodeType>(
             return Score::ZERO;
         }
 
+        // NMP must prove BETA, not merely `bound`, before this node returns a
+        // value.
+        //
+        // A null move establishes a lower bound. When `bound` is a TT lower
+        // bound sitting under beta, a result in [bound, beta) re-states what the
+        // TT already said -- but returning it as this node's value labels a
+        // lower bound as a fail-low, which is an upper-bound claim nothing
+        // established, and the parent reads a good move as refuted. The window
+        // is `[bound - 1, bound]` yet the search is fail-soft, so the returned
+        // score can exceed `bound` and `>= beta` is answerable.
+        //
+        // Upstream returns on `>= bound` and this fork inherited that. This cuts
+        // strictly less often, and only where the proof actually holds.
+        //
+        // No correction-history update on either return. Upstream has none, and
+        // the fork's addition skewed the table's sample balance: `score > eval`
+        // is the right bound-consistency test for a fail-high, so every sample
+        // NMP contributed was valid *and* positive, arriving at high frequency
+        // beside a main site that contributes both signs.
         if score >= bound && !is_win(score) {
-            if td.nmp_min_ply > 0 || depth < 16 {
-                // Trusted immediately -- no verification search follows on
-                // this path, so it's safe to feed correction history here.
-                    // No correction-history update here. Upstream has none on
-                    // either NMP return, and this fork's addition skewed the
-                    // table's sample balance: `score > eval` is the correct
-                    // bound-consistency test for a fail-high -- the main site at
-                    // the end of `search` excludes `Lower && best_score <= eval`
-                    // for exactly that reason -- so every sample NMP fed in was
-                    // valid *and* positive. NMP cutoffs are among the highest
-                    // frequency events in the tree, so a large one-signed stream
-                    // landed next to a main site contributing both signs, and
-                    // correction history is a signed error estimator feeding
-                    // `correct_eval` plus eight `correction_value.abs()` margins.
-                    //
-                    // Removed rather than made symmetric: a null-move score is
-                    // not drawn from the distribution the table models.
+            if (td.nmp_min_ply > 0 || depth < 16) && score >= beta {
                 return score;
             }
 
@@ -903,29 +906,7 @@ fn search<NODE: NodeType>(
                 return Score::ZERO;
             }
 
-            if verified_score >= bound {
-                // Only now is the fail-high actually confirmed. Feeding
-                // correction history before this point (as a previous version
-                // of this code did) meant an update could go in from a score
-                // the very next line then refused to trust as a cutoff --
-                // the same "sub-search result isn't comparable to a genuine
-                // full-search sample" problem documented for the
-                // singular-multicut correction update this fork tried and
-                // reverted.
-                    // No correction-history update here. Upstream has none on
-                    // either NMP return, and this fork's addition skewed the
-                    // table's sample balance: `score > eval` is the correct
-                    // bound-consistency test for a fail-high -- the main site at
-                    // the end of `search` excludes `Lower && best_score <= eval`
-                    // for exactly that reason -- so every sample NMP fed in was
-                    // valid *and* positive. NMP cutoffs are among the highest
-                    // frequency events in the tree, so a large one-signed stream
-                    // landed next to a main site contributing both signs, and
-                    // correction history is a signed error estimator feeding
-                    // `correct_eval` plus eight `correction_value.abs()` margins.
-                    //
-                    // Removed rather than made symmetric: a null-move score is
-                    // not drawn from the distribution the table models.
+            if verified_score >= beta && score >= beta {
                 return score;
             }
         }
@@ -961,7 +942,15 @@ fn search<NODE: NodeType>(
     // and ProbCut. Note the TT-only ProbCut immediately below sits *after*
     // that label upstream and reads no static eval, so it is deliberately
     // left running in check.
+    // `depth >= 5` is a floor, not a tuning knob. `base_depth` is
+    // `(depth - 4 - improving).max(0)`, so below this every path gives
+    // `probcut_depth == 0`: the verification search is skipped entirely and the
+    // node returns a beta cutoff on a *pure qsearch score*, then writes a
+    // `Bound::Lower` TT entry at depth 1 recording it. ProbCut's whole premise
+    // is that a shallow search confirms what qsearch suggested; with no search
+    // there is nothing confirming anything. Stockfish gates the same way.
     if cut_node
+        && depth >= 5
         && !in_check
         && !is_win(beta)
         && if is_valid(tt_score) { tt_score >= probcut_beta && !is_decisive(tt_score) } else { eval >= beta }
@@ -1135,7 +1124,22 @@ fn search<NODE: NodeType>(
         }
     }
     // Low Depth Singular Extensions (LDSE)
-    else if depth <= 7 && !in_check && cut_node && estimated_score <= alpha - 25 {
+    //
+    // `!excluded` and `!is_shuffling(..)` mirror the guards on the singular
+    // branch this is the `else` of. Without them the shuffling guard did the
+    // opposite of its purpose over the low-depth slice: a node detected as
+    // shuffling -- precisely where extensions are meant to be switched off to
+    // stop search explosion -- fell through to here and was extended a ply
+    // instead. And a singular verification search (`excluded`) could extend its
+    // own first move, deepening the search whose `(depth - 1) / 2` depth is what
+    // makes the singularity test affordable in the first place.
+    else if depth <= 7
+        && !in_check
+        && !excluded
+        && cut_node
+        && estimated_score <= alpha - 25
+        && !is_shuffling(td, tt_move, ply)
+    {
         extension = 1;
     }
 
@@ -1553,12 +1557,14 @@ fn search<NODE: NodeType>(
             // for that reason rather than re-centred.
             reduction += ((td.nodes() + td.id as u64 * 27) % 128) as i32 - 59;
 
-            // Clamp first, then apply the PV bonus (as upstream): the bonus
-            // raises both the floor and, effectively, the ceiling for PV
-            // nodes to new_depth+4, rather than capping PV scout depth at
-            // new_depth+2 the way clamping after the bonus would.
+            // PV bonus inside the clamp, as Stockfish has it. Applied after the
+            // clamp (upstream's form) the ceiling became new_depth + 4, so a PV
+            // scout could run *deeper* than the full-window re-search at
+            // new_depth that follows it -- and `new_depth > reduced_depth`, the
+            // test guarding that re-search, could then never be true at a PV
+            // node. Inside the clamp the ceiling stays new_depth + 2.
             let pv_bonus = 2 * NODE::PV as i32;
-            let reduced_depth = (new_depth - reduction / 1024).clamp(1, new_depth + 2) + pv_bonus;
+            let reduced_depth = (new_depth - reduction / 1024 + pv_bonus).clamp(1, new_depth + 2);
 
             td.stack[ply].reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, true, ply + 1);
@@ -1808,12 +1814,14 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut tt_score = Score::NONE;
     let mut tt_bound = Bound::None;
     let mut tt_pv = NODE::PV;
+    let mut tt_move = Move::NULL;
 
     // QS early TT cutoff
     if let Some(entry) = &entry {
         tt_score = entry.score;
         tt_bound = entry.bound;
         tt_pv |= entry.tt_pv;
+        tt_move = entry.mv;
 
         if is_valid(tt_score)
             && (!NODE::PV || !is_decisive(tt_score))
@@ -1876,7 +1884,12 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut best_move = Move::NULL;
 
     let mut move_count = 0;
-    let mut move_picker = MovePicker::new(Move::NULL, None);
+    // The hash move, first. The TT is probed above and written below, but the
+    // stored move was never read, so qsearch -- most of the tree -- ordered
+    // every node without the one move most likely to be best. `MovePicker`
+    // verifies legality before returning it, which matters here because qsearch
+    // generates only a subset of moves and the entry may hold a quiet.
+    let mut move_picker = MovePicker::new(tt_move, None);
 
     // Quiets are only generated to serve as check evasions, and only while no
     // evasion found so far has proven non-losing. best_score does move once
@@ -1892,8 +1905,12 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             let is_direct_check = td.board.is_direct_check(mv);
 
             // Late Move Pruning (LMP)
+            // `continue`, not `break`. The condition deliberately exempts
+            // checking moves, but breaking abandoned the whole move loop on the
+            // first non-checking move at index >= 3 -- so any check ordered
+            // behind it was never searched, defeating the exemption.
             if move_count >= 3 && !is_direct_check {
-                break;
+                continue;
             }
 
             // Delta pruning: skip a capture that can't plausibly raise

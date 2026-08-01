@@ -115,7 +115,13 @@ impl TimeManager {
         match self.limits {
             Limits::Infinite | Limits::Depth(_) | Limits::Mate(_) => false,
             Limits::Nodes(maximum) => td.shared.nodes.aggregate() >= maximum,
-            Limits::Time(maximum) => self.search_elapsed(td) >= Duration::from_millis(maximum),
+            // Compared against `soft_bound`, not the raw `maximum`. `soft_bound`
+            // is `maximum - move_overhead - TIME_OVERHEAD_MS`, and `hard_bound`
+            // is the same value, so testing the raw figure here meant the hard
+            // limit always fired first and this branch never decided anything --
+            // taking `go movetime` out of the soft/hard split and out of the
+            // `multiplier()` extension logic entirely.
+            Limits::Time(_) => self.search_elapsed(td) >= self.soft_bound,
             _ => self.search_elapsed(td) >= Duration::from_secs_f32(self.soft_bound.as_secs_f32() * multiplier()),
         }
     }
@@ -144,7 +150,11 @@ impl TimeManager {
             // it entirely -- upstream polls `aggregate()` every node and has
             // no such gap.
             Limits::Nodes(maximum) => {
-                (td.nodes() >= maximum || td.nodes() & 2047 == 2047) && td.shared.nodes.aggregate() > maximum
+                // `>=`, matching `soft_limit` above. The two disagreed by one
+                // node, which under a node limit -- the mode used for
+                // deterministic self-play -- is exactly the kind of off-by-one
+                // that makes a "reproducible" run not reproduce.
+                (td.nodes() >= maximum || td.nodes() & 2047 == 2047) && td.shared.nodes.aggregate() >= maximum
             }
             _ => td.nodes() & 2047 == 2047 && self.search_elapsed(td) >= self.hard_bound,
         }

@@ -101,11 +101,18 @@ define! {
     i32 nmp_r_depth: 265;
     i32 nmp_r_beta: 477;
     i32 nmp_r_beta_max: 1187;
-    // Zugzwang-guard threshold on non-pawn material. Upstream gates on
-    // `material() > 491`, which includes pawns; this fork uses
-    // `non_pawn_material()` -- the right signal -- but inherited upstream's
-    // constant unchanged, and the two quantities differ by the full pawn mass.
-    // Never measured against the quantity it now guards.
+    // Zugzwang-guard threshold, compared against
+    // `colored_non_pawn_material(stm)` -- one side's pieces only.
+    //
+    // Upstream gates on `material() > 491`, which counts both sides *and*
+    // pawns. This guard has since been narrowed twice (pawns out, then scoped
+    // to the mover), so 491 is now being applied to roughly a quarter of the
+    // quantity it was chosen for. On the `PieceType::value()` scale a knight is
+    // 403, so as it stands NMP switches off whenever the side to move is down
+    // to one minor piece or less. That is a defensible place for a zugzwang
+    // guard to bite, but it is not what 491 was measured against and nothing
+    // has measured it since -- the narrowing is the defensible part, the
+    // constant is the open question.
     i32 nmp_material: 491;
 
     // ProbCut
@@ -232,14 +239,31 @@ define! {
     i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
-    i32 lmr_exact: 1412;
+    // 1028, not upstream's 1412. `bound == Bound::Exact` is set on exactly the
+    // event that increments `alpha_raises`, so once `lmr_alpha_raise` was added
+    // both terms fired together: 1412 + 384 = 1796 for a single alpha raise,
+    // where 1412 was tuned as the entire effect. Subtracting one raise's worth
+    // (1412 - 384 = 1028) keeps the first raise at upstream's magnitude and lets
+    // `lmr_alpha_raise` supply only the *additional* raises it was added for.
+    //
+    // Same defect class as the IIR/`lmr_cutnode_null` pair documented above: a
+    // new mechanism on a signal whose existing consumer kept a coefficient tuned
+    // for being the only reader.
+    i32 lmr_exact: 1028;
     i32 lmr_tt_alpha: 464;
     i32 lmr_tt_depth: 326;
     i32 lmr_quiet_base: 2171;
     i32 lmr_quiet_hist: 179;
     i32 lmr_quiet_alpha: 418;
-    // Credits the captured piece's value in noisy reductions (LMR and FDS).
-    // A fork addition; upstream Reckless has no such term.
+    // Flat base reduction for noisy moves. Upstream's, unchanged
+    // (`reduction += 1426`).
+    //
+    // The previous comment here claimed this "credits the captured piece's
+    // value" and was "a fork addition" -- neither is true. There is no
+    // captured-piece term anywhere in either reduction path, and 1426 is
+    // upstream's own constant. Corrected because a wrong description is worse
+    // than none: it invites tuning the value toward a behaviour it does not
+    // have.
     i32 lmr_noisy_base: 1426;
     i32 lmr_noisy_hist: 130;
     i32 lmr_pv_base: 519;
@@ -391,7 +415,7 @@ define! {
     // clamp its own correction bonus symmetrically, so the symmetry argument
     // is not baseless. But the asymmetric pair is the one with a measured
     // result attached to it, and that outranks the tidier-looking one.
-    i32 corr_bonus_min: 2496;
+    i32 corr_bonus_min: 4678;
     i32 corr_bonus_max: 2496;
 
     // Six-term correction blend: upstream's pawn, non-pawn x2, continuation x2,
@@ -440,7 +464,13 @@ define! {
     i32 conthist_lag3: 195;
     i32 conthist_lag4: 700;
     i32 conthist_lag5: 89;
-    i32 conthist_lag6: 700;
+    // 350, not 700. The read in `search()` weights lag 6 at 1/2 and its comment
+    // claims the read mirrors "the same relative strengths the update uses".
+    // At 700 the write was full strength while the read halved it, so the stated
+    // invariant held for lags 3 and 5 and was violated for exactly one lag --
+    // and the "raw sum is 3.911, divide by 2" normalisation was computed from
+    // the wrong number. 350/700 = 0.50 makes the write match the read.
+    i32 conthist_lag6: 350;
     // Positive-consistency multipliers, indexed by how many of the (up to 6)
     // continuation entries for this move are already positive -- counted
     // across all of them before any bonus is applied, so every lag is scaled
@@ -457,11 +487,15 @@ define! {
     i32 conthist_mult6: 121;
 
     // Move ordering
-    // Weight of the fork's low-ply-history term in score_quiet. Anchored so
-    // its ply-0 ceiling matches continuation-history lag 1 (1614 * 15320 /
-    // 8192 = 3018); at the previous 7052 it was 2.34x the next-largest
-    // ordering signal and dominated root move choice.
-    i32 lowply_weight: 3018;
+    // Weight of the fork's low-ply-history term in score_quiet. Anchored so its
+    // ply-0 ceiling matches continuation-history lag 1; at the previous 7052 it
+    // was 2.34x the next-largest ordering signal and dominated root move choice.
+    //
+    // 2765, not 3018. The anchor was computed from 1614 -- upstream's four-lag
+    // weight -- but this file replaced that set: `CONTHIST_WEIGHTS[0]` is 1479.
+    // 1479 * 15320 / 8192 = 2765 is the same derivation against the weight
+    // actually in use.
+    i32 lowply_weight: 2765;
     // Split point between `Stage::Quiet` and `Stage::BadQuiet`, compared
     // against the whole quiet score.
     //

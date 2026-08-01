@@ -1495,6 +1495,20 @@ fn search<NODE: NodeType>(
             reduction -= p::lmr_corr() * correction_value.abs() / 1024;
 
             reduction += p::lmr_exact() * (bound == Bound::Exact) as i32;
+            // Scales from the *second* raise, not the first: `lmr_exact` above
+            // already covers "at least one raise" as a flat term, so counting
+            // the first raise again here would double-fire both terms on the
+            // same event (`bound == Bound::Exact` and `alpha_raises >= 1` are
+            // set together, in the same branch). The previous version instead
+            // kept `lmr_exact` hand-offset to `1412 - lmr_alpha_raise` so the
+            // *sum* came out right on the first raise -- correct, but fragile:
+            // retuning either constant independently (which is the entire
+            // point of exposing them to SPSA) silently reintroduces the
+            // overlap. Subtracting 1 here makes the two terms cover disjoint
+            // raise counts by construction, so `lmr_exact` is free to return
+            // to upstream's own value (see its definition) and either constant
+            // can move independently without the other needing to compensate.
+            reduction += p::lmr_alpha_raise() * (alpha_raises - 1).clamp(0, p::lmr_alpha_raise_cap() - 1);
 
             reduction += p::lmr_tt_alpha() * (is_valid(tt_score) && tt_score <= alpha) as i32;
             reduction += p::lmr_tt_depth() * (is_valid(tt_score) && tt_depth < depth) as i32;
@@ -1542,7 +1556,10 @@ fn search<NODE: NodeType>(
             // depth 1 because of one signal. The cap is also what the signal
             // means -- the first few raises say "this node is still improving";
             // the twentieth says nothing the third did not.
-            reduction += p::lmr_alpha_raise() * alpha_raises.min(p::lmr_alpha_raise_cap());
+            //
+            // Applied above, alongside `lmr_exact`, now that the two terms
+            // cover disjoint raise counts rather than both firing on the first
+            // raise -- see the comment there.
             reduction -= p::lmr_complexity() * complexity / 1024;
 
             if td.board.in_check() {

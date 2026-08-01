@@ -65,7 +65,19 @@ define! {
     // by SPSA -- it can never be measured, only re-guessed, which is how
     // `see_q_cutoff` ended up oscillating 15 -> 60 -> 48. Value unchanged, so
     // this is a no-op for the default build.
-    i32 razor_cutoff: 65;
+    // Zeroed. `cutoff_count[ply + 1]` is shared with upstream's `nmp_cutoff`
+    // and this fork's `lmr_cutoff`/`fds_cutoff`/`see_q_cutoff`/`see_n_cutoff`
+    // (see the "SHARED SIGNAL -- FIVE CONSUMERS" comment at the write site in
+    // search.rs) -- three fork-only terms layered onto a signal upstream's own
+    // consumer was tuned assuming it alone read. Unlike `lmr_exact`/
+    // `lmr_alpha_raise`, this isn't one variable double-counted on one event
+    // that a structural fix can disentangle: it's five different techniques
+    // (razoring, NMP, SEE pruning x2, LMR, FDS) each drawing an independent
+    // conclusion from the same shared count, so the honest fix is joint
+    // re-tuning, not a code change. Zeroed pending that; the range is left
+    // open in spsa.config for a run that includes it alongside its four
+    // siblings.
+    i32 razor_cutoff: 0;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -88,6 +100,18 @@ define! {
     // moves the margin by ~20, comparable to `rfp_base` itself. Their divisors
     // (/262144) are on a different scale from this file's /1024, so the value
     // could not be transferred -- only the idea.
+    // Widen the RFP margin when the static eval and the TT's search score
+    // disagree (see `complexity` in search.rs). A real search already found
+    // something the static eval does not see, so this is a worse moment than
+    // usual to trust the static eval and cut.
+    //
+    // Mechanism from Stormphrax and Viridithas, which both carry this signal.
+    // The *magnitude* is mine and unmeasured: sized so a 100-unit disagreement
+    // moves the margin by ~20, comparable to `rfp_base` itself. Their divisors
+    // (/262144) are on a different scale from this file's /1024, so the value
+    // could not be transferred -- only the idea. No structural bug found here
+    // (this is the only RFP consumer of `complexity`), unlike `razor_cutoff`;
+    // left non-zero rather than zeroed pending measurement.
     i32 rfp_complexity: 200;
 
     // Null Move Pruning
@@ -279,17 +303,14 @@ define! {
     i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
-    // 1028, not upstream's 1412. `bound == Bound::Exact` is set on exactly the
-    // event that increments `alpha_raises`, so once `lmr_alpha_raise` was added
-    // both terms fired together: 1412 + 384 = 1796 for a single alpha raise,
-    // where 1412 was tuned as the entire effect. Subtracting one raise's worth
-    // (1412 - 384 = 1028) keeps the first raise at upstream's magnitude and lets
-    // `lmr_alpha_raise` supply only the *additional* raises it was added for.
-    //
-    // Same defect class as the IIR/`lmr_cutnode_null` pair documented above: a
-    // new mechanism on a signal whose existing consumer kept a coefficient tuned
-    // for being the only reader.
-    i32 lmr_exact: 1028;
+    // Restored to upstream's 1412. Previously hand-offset to 1028
+    // (`1412 - lmr_alpha_raise`'s 384) to compensate for `lmr_alpha_raise`
+    // double-firing on the same event as this term -- see the fix at this
+    // term's use site in search.rs, which now scales `lmr_alpha_raise` from
+    // the second raise instead. With the overlap gone structurally, this can
+    // go back to being upstream's own, already-tuned value rather than a
+    // number computed to compensate for a different term.
+    i32 lmr_exact: 1412;
     i32 lmr_tt_alpha: 464;
     i32 lmr_tt_depth: 326;
     i32 lmr_quiet_base: 2171;
@@ -365,6 +386,17 @@ define! {
     // line above increases it, so an oversized value here would silently cancel
     // the `alpha_raise` term rather than act independently. Unmeasured, like
     // its RFP twin.
+    // Reduce less when the static eval and the TT's search score disagree --
+    // the same `complexity` signal as `rfp_complexity`, applied to reductions
+    // rather than to a pruning margin. A disputed position is where a reduced
+    // search is most likely to miss what the full one would find.
+    //
+    // Deliberately smaller relative to its siblings than `lmr_corr` (3417) is
+    // to correction history: this term *decreases* reduction, and the term one
+    // line above increases it, so an oversized value here would silently cancel
+    // the `alpha_raise` term rather than act independently. Unmeasured, like
+    // its RFP twin -- no structural bug found, left non-zero pending
+    // measurement rather than zeroed.
     i32 lmr_complexity: 500;
     // Ceiling on |eval - tt_score| before it is scaled by the two complexity
     // terms. `eval` is clamped to +/-(TB_WIN_IN_MAX - 1) and a non-decisive

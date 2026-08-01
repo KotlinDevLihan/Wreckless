@@ -129,10 +129,15 @@ impl<T> Index<Square> for [T] {
     type Output = T;
 
     fn index(&self, square: Square) -> &Self::Output {
-        debug_assert!((square as usize) < Square::NUM, "Square::None used to index a board-sized slice");
-        // SAFETY: matches IndexMut<Square> below, which already assumes a
-        // Square used for indexing is always a real board square.
-        unsafe { self.get_unchecked(square as usize) }
+        // Checked, as upstream has it. `Square::None` is 64 and these slices are
+        // 64 wide, and it reaches here through `piece_on`/`type_on`/mailbox, so
+        // the out-of-range case is reachable in principle rather than excluded
+        // by construction. An unchecked read turns what would be a panic into
+        // undefined behaviour in release, in exchange for a bounds check the
+        // branch predictor gets right every time -- the one place in this tree
+        // where soundness was traded for something unmeasurable. `IndexMut`
+        // below being unchecked is not an argument for matching it here.
+        &self[square as usize]
     }
 }
 

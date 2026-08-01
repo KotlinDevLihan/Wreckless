@@ -206,6 +206,23 @@ impl TranspositionTable {
         if index < ENTRIES_PER_CLUSTER {
             let entry = cluster.read_entry(index);
 
+            // A never-written slot has key 0, so `lookup_key` matches it for any
+            // position whose verification key is also 0 -- roughly 1 probe in
+            // 65536 -- and returns an all-zero payload as a hit. That is not
+            // harmless: `raw_eval == 0` passes `is_valid`, so the node skips the
+            // network and evaluates the position as dead level, and in qsearch
+            // `Bound::None` falls through to the permissive arm and returns 0 as
+            // a cutoff.
+            //
+            // Distinguishable only because `TtDepth::NONE` is -2 rather than 0:
+            // `to_tt` offsets by +2, so an untouched `offset_depth` of 0 decodes
+            // to NONE and cannot be confused with the `TtDepth::SOME` (-1)
+            // static-eval writes. The replacement scan in `write` already relies
+            // on exactly this test; the probe path simply never used it.
+            if entry.depth() == TtDepth::NONE {
+                return None;
+            }
+
             let hit = Entry {
                 depth: entry.depth(),
                 score: score_from_tt(entry.score as i32, ply, halfmove_clock),

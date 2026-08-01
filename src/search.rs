@@ -57,12 +57,34 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     td.completed_depth = 0;
     td.low_ply_history.shift();
 
+    // Carried over from the *previous* `go` otherwise. Two plies have been
+    // played since it was written, so `previous_pv[ply]` no longer lines up
+    // with the position at that ply, and `follow_pv` matches moves belonging to
+    // a different line -- handing IIR's exemption to the wrong nodes for the
+    // first iteration or two of every search after the first. It is refilled
+    // from `root_moves[0]` at the end of each completed depth, so clearing here
+    // costs nothing beyond depth 1 of the first iteration.
+    td.previous_pv.clear();
+
     td.pv_table.clear(0);
     td.nnue.full_refresh(&td.board);
 
     td.multi_pv = td.multi_pv.min(td.root_moves.len());
 
-    let mut average = vec![td.previous_best_score; td.multi_pv];
+    // `previous_best_score` is whatever `root_moves[0].score` held when the last
+    // search ended, and `RootMove::default()` seeds that at `-Score::INFINITE`.
+    // A search stopped before any root move scored therefore leaves a sentinel
+    // behind, and it centres the next search's first aspiration window on
+    // -32001: the `average^2 / 26394` term below becomes 38799, so the window
+    // opens at [-32001, 6798] -- entirely below the true score and useless for
+    // an iteration or two.
+    //
+    // `is_valid` does not catch this: it only tests against `Score::NONE`, and
+    // `-Score::INFINITE` passes. Testing the magnitude does. Mate scores are
+    // deliberately left alone -- they widen the window, which is wanted when the
+    // previous search found a forced line.
+    let centre = if td.previous_best_score.abs() < Score::INFINITE { td.previous_best_score } else { Score::ZERO };
+    let mut average = vec![centre; td.multi_pv];
     let mut last_best_rootmove = RootMove::default();
 
     let mut eval_stability = 0;
@@ -71,7 +93,10 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
     // Ring buffer of best scores from recent iterations, so the time manager
     // can compare against the score four iterations ago (as in Stockfish).
-    let mut iter_values = [td.previous_best_score; 4];
+    // Same sentinel guard as `centre` above: this seeds the time manager's
+    // two-horizon `recent` term, and `-Score::INFINITE` there pegs the trend
+    // factor to its clamp for the first four iterations.
+    let mut iter_values = [centre; 4];
 
     if td.root_moves.is_empty() {
         if report == Report::Full {
@@ -302,7 +327,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             };
 
             let score_trend = {
-                let difference = td.previous_best_score - td.root_moves[0].score;
+                let difference = centre - td.root_moves[0].score;
                 let recent = iter_value - td.root_moves[0].score;
 
                 // The linear structure is Stockfish's (their 2.035:0.968
@@ -869,7 +894,10 @@ fn search<NODE: NodeType>(
     // Internal Iterative Reductions (IIR): at sufficient depth, reduce PV and
     // expected cut nodes that have no TT move to anchor move ordering. Nodes
     // on the previous iteration's PV are exempt (as in Stockfish).
-    if !NODE::ROOT && !td.stack[ply].follow_pv && (NODE::PV || cut_node) && depth >= 6 && tt_move.is_null() {
+    let iir_applied =
+        !NODE::ROOT && !td.stack[ply].follow_pv && (NODE::PV || cut_node) && depth >= 6 && tt_move.is_null();
+
+    if iir_applied {
         depth -= 1;
     }
 
@@ -1415,6 +1443,13 @@ fn search<NODE: NodeType>(
             } else if cut_node {
                 reduction += p::lmr_cutnode();
                 reduction += p::lmr_cutnode_null() * tt_move.is_null() as i32;
+                // Compensation for IIR having already penalised the same
+                // "no TT move" signal, applied only where IIR actually fired.
+                // It needs depth >= 6 and a non-PV-line node; this bonus fires
+                // at any depth on any cut node, so an unconditional subtraction
+                // under-reduced late moves at depth 2-5 and on previous-PV
+                // nodes, where there was no double-count to correct.
+                reduction -= p::lmr_iir_comp() * (tt_move.is_null() && iir_applied) as i32;
             }
 
             // Capped: `alpha_raises` is bounded only by the move count, so at a
@@ -1528,6 +1563,8 @@ fn search<NODE: NodeType>(
             } else if cut_node {
                 reduction += p::fds_cutnode();
                 reduction += p::fds_cutnode_null() * tt_move.is_null() as i32;
+                // Same conditional IIR compensation as the LMR twin above.
+                reduction -= p::fds_iir_comp() * (tt_move.is_null() && iir_applied) as i32;
             }
 
             if td.cutoff_count[ply + 1] > 2 {
@@ -1558,7 +1595,15 @@ fn search<NODE: NodeType>(
 
             let reduced_depth = new_depth - (reduction >= 2621) as i32 - (reduction >= 5579) as i32;
 
+            // Published for the child, exactly as the LMR branch does. Without
+            // this the FDS half of the tree left `stack[ply].reduction` at the
+            // 0 it was reset to, so all three consumers -- the hindsight
+            // depth adjustments, `lmr_prev_reduction` and `fds_prev_reduction`
+            // -- silently saw "parent was not reduced" for every FDS child and
+            // never fired there.
+            td.stack[ply].reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, !cut_node, ply + 1);
+            td.stack[ply].reduction = 0;
             current_search_count += 1;
         }
 

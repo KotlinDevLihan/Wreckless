@@ -259,7 +259,13 @@ define! {
     // is 1024 units. 2204 - 1024 = 1180 restores upstream's late-move
     // treatment while leaving IIR's effect on the *first* move intact, which is
     // the part IIR is actually for.
-    i32 lmr_cutnode_null: 1180;
+    i32 lmr_cutnode_null: 2204;
+    // Subtracted from the bonus above only when IIR actually fired. Reductions
+    // are 1/1024 plies, so IIR's one ply is exactly 1024 units -- the whole
+    // derivation, now applied where the mechanism it compensates for is live
+    // rather than everywhere. Stockfish pairs the same two mechanisms, with a
+    // bonus of 1127 against this file's 2204 - 1024 = 1180 in the overlap.
+    i32 lmr_iir_comp: 1024;
     // Extra reduction per alpha raise already seen at this node.
     //
     // Absent here, present in at least three independently developed engines:
@@ -332,7 +338,9 @@ define! {
     i32 fds_cutnode: 1260;
     // Same IIR double-count correction as `lmr_cutnode_null` above:
     // 2168 - 1024 = 1144.
-    i32 fds_cutnode_null: 1144;
+    i32 fds_cutnode_null: 2168;
+    // Same conditional IIR compensation as `lmr_iir_comp`.
+    i32 fds_iir_comp: 1024;
     i32 fds_cutoff: 1394;
     i32 fds_cutoff_node: 258;
     i32 fds_singular: 351;

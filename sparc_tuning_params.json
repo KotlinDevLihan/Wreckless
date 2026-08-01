@@ -553,10 +553,18 @@
     },
     {
         "name": "lmr_cutnode_null",
-        "default": 1180.0,
-        "min": 590.0,
-        "max": 1770.0,
-        "ck": 59.0,
+        "default": 2204.0,
+        "min": 1102.0,
+        "max": 3306.0,
+        "ck": 110.2,
+        "rk": 0.002
+    },
+    {
+        "name": "lmr_iir_comp",
+        "default": 1024.0,
+        "min": 512.0,
+        "max": 1536.0,
+        "ck": 51.2,
         "rk": 0.002
     },
     {
@@ -737,10 +745,18 @@
     },
     {
         "name": "fds_cutnode_null",
-        "default": 1144.0,
-        "min": 572.0,
-        "max": 1716.0,
-        "ck": 57.2,
+        "default": 2168.0,
+        "min": 1084.0,
+        "max": 3252.0,
+        "ck": 108.4,
+        "rk": 0.002
+    },
+    {
+        "name": "fds_iir_comp",
+        "default": 1024.0,
+        "min": 512.0,
+        "max": 1536.0,
+        "ck": 51.2,
         "rk": 0.002
     },
     {

@@ -59,12 +59,12 @@ pub fn bishop_attacks_setwise(bb: Bitboard, occupancies: Bitboard) -> Bitboard {
 
         let generate = _mm256_set1_epi64x(bb.0 as i64);
         let propagate = _mm256_and_si256(_mm256_set1_epi64x(!occupancies.0 as i64), mask);
-        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<9, 7, -7, -9>(generate)));
-        let propagate = _mm256_and_si256(propagate, shiftv::<9, 7, -7, -9>(propagate));
-        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<18, 14, -14, -18>(generate)));
-        let propagate = _mm256_and_si256(propagate, shiftv::<18, 14, -14, -18>(propagate));
-        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<36, 28, -28, -36>(generate)));
-        let attacks = _mm256_and_si256(shiftv::<9, 7, -7, -9>(generate), mask);
+        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<-9, -7, 7, 9>(generate)));
+        let propagate = _mm256_and_si256(propagate, shiftv::<-9, -7, 7, 9>(propagate));
+        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<-18, -14, 14, 18>(generate)));
+        let propagate = _mm256_and_si256(propagate, shiftv::<-18, -14, 14, 18>(propagate));
+        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<-36, -28, 28, 36>(generate)));
+        let attacks = _mm256_and_si256(shiftv::<-9, -7, 7, 9>(generate), mask);
 
         fold_to_bitboard(attacks)
     }
@@ -92,12 +92,12 @@ pub fn rook_attacks_setwise(bb: Bitboard, occupancies: Bitboard) -> Bitboard {
 
         let generate = _mm256_set1_epi64x(bb.0 as i64);
         let propagate = _mm256_and_si256(_mm256_set1_epi64x(!occupancies.0 as i64), mask);
-        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<8, 1, -1, -8>(generate)));
-        let propagate = _mm256_and_si256(propagate, shiftv::<8, 1, -1, -8>(propagate));
-        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<16, 2, -2, -16>(generate)));
-        let propagate = _mm256_and_si256(propagate, shiftv::<16, 2, -2, -16>(propagate));
-        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<32, 4, -4, -32>(generate)));
-        let attacks = _mm256_and_si256(shiftv::<8, 1, -1, -8>(generate), mask);
+        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<-8, -1, 1, 8>(generate)));
+        let propagate = _mm256_and_si256(propagate, shiftv::<-8, -1, 1, 8>(propagate));
+        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<-16, -2, 2, 16>(generate)));
+        let propagate = _mm256_and_si256(propagate, shiftv::<-16, -2, 2, 16>(propagate));
+        let generate = _mm256_or_si256(generate, _mm256_and_si256(propagate, shiftv::<-32, -4, 4, 32>(generate)));
+        let attacks = _mm256_and_si256(shiftv::<-8, -1, 1, 8>(generate), mask);
 
         fold_to_bitboard(attacks)
     }

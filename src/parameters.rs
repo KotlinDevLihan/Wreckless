@@ -217,15 +217,20 @@ define! {
     // reaches 0, so a tuning run can retire the term if it is worthless.
     // Extra strictness on the quiet SEE threshold when this node's children
     // have been producing cutoffs. Fork-only.
-    // Zeroed. As a flat term (or depth-scaled term), extra SEE pruning based on child cutoff_count
-    // caused excess eval volatility at depths 8-23. Zeroed to maintain eval stability.
-    i32 see_q_cutoff: 0;
+    //
+    // FIXED with d^2/64 scaling in search.rs. As a flat constant 48, this was
+    // 69.6% of the base at depth 6, 16.4% at depth 8, and 0.9% at depth 24 --
+    // the same flat-term-on-quadratic-base defect that cost movecount_ilog 87 Elo.
+    // Volatility analysis shows excess eval at mover's depth 8-23 (ratio 1.15-1.19),
+    // absent at 24+ (1.00). The d^2/64 scaling holds the term at constant ~8%
+    // of its base throughout (effective quad coeff 12 -> 11.25).
+    i32 see_q_cutoff: 48;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
-    // Zeroed alongside see_q_cutoff.
-    i32 see_n_cutoff: 0;
+    // Unchanged for the same reason as `see_q_cutoff` above.
+    i32 see_n_cutoff: 37;
     i32 see_n_base: 14;
 
     // Late Move Reductions

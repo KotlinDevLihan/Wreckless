@@ -535,15 +535,26 @@ define! {
     i32 conthist_mult6: 121;
 
     // Move ordering
-    // Weight of the fork's low-ply-history term in score_quiet. Anchored so its
-    // ply-0 ceiling matches continuation-history lag 1; at the previous 7052 it
-    // was 2.34x the next-largest ordering signal and dominated root move choice.
+    // Weight of the low-ply-history term in `score_quiet`.
     //
-    // 2765, not 3018. The anchor was computed from 1614 -- upstream's four-lag
-    // weight -- but this file replaced that set: `CONTHIST_WEIGHTS[0]` is 1479.
-    // 1479 * 15320 / 8192 = 2765 is the same derivation against the weight
-    // actually in use.
-    i32 lowply_weight: 2765;
+    // RESTORED to 7052, the value in the initial commit (`e811ffa`) -- the one
+    // build of this fork that has ever measured clearly positive, at +30 Elo.
+    // The exact same expression is there: `7052 * low_ply_history.get(ply, mv)
+    // / (1024 * (1 + 2 * ply))`.
+    //
+    // It was cut to 3018 on the argument that at 7052 the term was "2.34x the
+    // next-largest ordering signal and dominated root move choice", anchoring
+    // it instead to continuation-history lag 1. Then to 2765, correcting that
+    // anchor's arithmetic (it used 1614, upstream's four-lag weight, where this
+    // file's `CONTHIST_WEIGHTS[0]` is 1479).
+    //
+    // Both steps were reasoning, not measurement, and both moved away from the
+    // only value with a positive result attached. Dominating root move ordering
+    // is not self-evidently wrong for a term whose whole purpose is to order
+    // the first few plies -- and the build where it did that is the build that
+    // scored +30. Re-derive it only against a measurement, not against another
+    // term's magnitude.
+    i32 lowply_weight: 7052;
     // Split point between `Stage::Quiet` and `Stage::BadQuiet`, compared
     // against the whole quiet score.
     //

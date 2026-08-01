@@ -224,13 +224,13 @@ define! {
     // Volatility analysis shows excess eval at mover's depth 8-23 (ratio 1.15-1.19),
     // absent at 24+ (1.00). The d^2/64 scaling holds the term at constant ~8%
     // of its base throughout (effective quad coeff 12 -> 11.25).
-    i32 see_q_cutoff: 48;
+    i32 see_q_cutoff: 0;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
     // Unchanged for the same reason as `see_q_cutoff` above.
-    i32 see_n_cutoff: 37;
+    i32 see_n_cutoff: 0;
     i32 see_n_base: 14;
 
     // Late Move Reductions

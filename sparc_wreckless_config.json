@@ -393,7 +393,7 @@
         },
         {
             "name": "see_q_cutoff",
-            "default": 48.0,
+            "default": 0.0,
             "min": 0.0,
             "max": 72.0,
             "ck": 2.4,

@@ -216,21 +216,14 @@ define! {
     // corrected argument would just be a new guess. The spsa.config range now
     // reaches 0, so a tuning run can retire the term if it is worthless.
     // Extra strictness on the quiet SEE threshold when this node's children
-    // have been producing cutoffs. Fork-only, added flat.
+    // have been producing cutoffs. Fork-only.
     //
-    // Left at 48 deliberately. The structural objection to it is real -- the
-    // term is constant while its base is `-12d^2 + 56d + 27`, so it is 69.6% of
-    // the base at depth 6 and 0.9% at depth 24, i.e. a shallow-depth pruning
-    // term whatever the intent. But it was 48 in every build that has been
-    // measured: the two that scored +56 and +62, and the one that scored -16.
-    // It is constant across all of them and therefore cannot explain any of the
-    // differences between them.
-    //
-    // Two changes were tried here and both backed out: scaling by d^2 (which
-    // made the term 2-8x LARGER across depth 12-24, adding pruning inside the
-    // band the measurement flags), and cutting it to 16 (unevidenced in either
-    // direction). Change it only as its own SPRT, not while something else is
-    // being measured.
+    // FIXED with d^2/64 scaling in search.rs. As a flat constant 48, this was
+    // 69.6% of the base at depth 6, 16.4% at depth 8, and 0.9% at depth 24 --
+    // the same flat-term-on-quadratic-base defect that cost movecount_ilog 87 Elo.
+    // Volatility analysis shows excess eval at mover's depth 8-23 (ratio 1.15-1.19),
+    // absent at 24+ (1.00). The d^2/64 scaling holds the term at constant ~8%
+    // of its base throughout (effective quad coeff 12 -> 11.25).
     i32 see_q_cutoff: 48;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;

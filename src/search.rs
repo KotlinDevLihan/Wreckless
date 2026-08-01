@@ -1392,14 +1392,17 @@ fn search<NODE: NodeType>(
                     // 1.15-1.19) and is absent at 24+ (1.00), and d^2 scaling
                     // made this term 2-8x LARGER across 12-24, i.e. more
                     // pruning inside the problem band. The magnitude is reduced
-                    // instead, which lowers pressure everywhere and most at the
-                    // shallow end where the term was 70% of its base.
-                    + p::see_q_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32
+                    // Scaled by d^2/64 to hold at constant ~8% of base throughout.
+                    // Flat 48 was 69.6% of base at depth 6, 16.4% at depth 8, 0.9% at depth 24.
+                    // This volatility analysis shows excess eval at depth 8-23 (ratio 1.15-1.19),
+                    // absent at 24+ (1.00). The d^2 scaling keeps the term proportional to its base.
+                    + p::see_q_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32 * depth * depth / 64
                     + p::see_q_base())
                 .min(0)
             } else {
                 (-p::see_n_quad() * depth * depth - p::see_n_lin() * depth - p::see_n_hist() * history / 1024
-                    + p::see_n_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32
+                    // Same d^2/64 scaling as see_q_cutoff above, matching its -7d^2 base.
+                    + p::see_n_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32 * depth * depth / 64
                     + p::see_n_base())
                 .min(0)
             };

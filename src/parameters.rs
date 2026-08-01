@@ -191,16 +191,27 @@ define! {
     // worst this can do is prune every losing capture) and changing it on a
     // corrected argument would just be a new guess. The spsa.config range now
     // reaches 0, so a tuning run can retire the term if it is worthless.
-    // Applied as `see_q_cutoff * d^2 / 64` -- see the consumer in search.rs.
-    // As a flat constant this was 69.6% of the base at depth 6 and 0.9% at
-    // depth 24; scaled by d^2 it holds ~8% throughout, which is the same
-    // form/magnitude split as `lmr_movecount_ilog` above.
-    i32 see_q_cutoff: 48;
+    // Extra strictness on the quiet SEE threshold when this node's children
+    // have been producing cutoffs. Fork-only, added flat.
+    //
+    // 16, down from 48. The term is constant while its base is `-12d^2 + 56d
+    // + 27`, so it was 69.6% of the base at depth 6, 16.4% at depth 8 and 0.9%
+    // at depth 24 -- overwhelmingly a shallow-depth pruning term regardless of
+    // intent. Measured eval volatility runs 1.15-1.19x base at the mover's own
+    // depth 8-23 and exactly 1.00 at 24+, which is where this bites.
+    //
+    // A d^2-scaled form was tried first, to hold the term at a constant ~8% of
+    // its base. That was the wrong fix: it made the term 2-8x LARGER across
+    // depth 12-24, adding pruning inside the very band the measurement flags.
+    // Reducing the constant instead is strictly less pruning at every depth --
+    // 23% of base at d6, 5.5% at d8 -- so no band gets worse.
+    i32 see_q_cutoff: 16;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
     i32 see_n_lin: 36;
     i32 see_n_hist: 39;
-    i32 see_n_cutoff: 37;
+    // Same reasoning as `see_q_cutoff`, proportioned to the noisy base.
+    i32 see_n_cutoff: 12;
     i32 see_n_base: 14;
 
     // Late Move Reductions
@@ -243,7 +254,12 @@ define! {
     // -87 Elo build was "same depth, thinner search", and this was the same
     // phenomenon one step along. Node count and depth cannot validate a
     // reduction term; only games can.
-    i32 lmr_movecount_ilog: 96;
+    // 48. At 192 this measured -16 Elo with eval volatility 45% above base
+    // (z = +9.0), concentrated at the mover's depth 8-23 where the term is
+    // largest. 96 halved that; 48 is a quarter, putting the term at ~4-6% of
+    // the LMR base -- comparable to the other minor reduction adjustments
+    // rather than to `lmr_cutnode`-scale terms.
+    i32 lmr_movecount_ilog: 48;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // 1028, not upstream's 1412. `bound == Bound::Exact` is set on exactly the
@@ -365,7 +381,8 @@ define! {
     // proportioned to this path's smaller base (207 vs 269).
     // Same form and reasoning as `lmr_movecount_ilog`, proportioned to this
     // path's smaller base (207 vs 269).
-    i32 fds_movecount_ilog: 74;
+    // Proportioned to this path's smaller base (207 vs 269).
+    i32 fds_movecount_ilog: 37;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

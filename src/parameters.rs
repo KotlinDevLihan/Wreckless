@@ -220,7 +220,24 @@ define! {
     // Untested in this form. It is the one term here with a measured negative
     // attached to its predecessor, so it deserves its own SPRT before anything
     // is bundled with it.
-    i32 lmr_movecount_ilog: 192;
+    // Back to 0. The multiplicative form is right -- the additive one applied a
+    // 446%-of-base penalty at depth 2, this one holds it near 13-22% uniformly
+    // -- but fixing the shape did not make the term earn its place.
+    //
+    // Measured at 192 over 437 games: the engine searched 2.6 ply DEEPER than
+    // base at identical time per move, and its evaluation was 45% more likely
+    // to drop at every magnitude from 0.3 to 2.0 pawns (z = +9.0, +4.7, +3.1),
+    // with mean |delta| 14.4% higher. Deeper search with a less stable eval is
+    // a thin tree: nominal depth rises because the tree narrows, the narrow
+    // tree misses things, and later iterations keep correcting the score.
+    // Pentanomial -15.95 Elo over 218 pairs.
+    //
+    // Note the trap here. Depth at fixed nodes went UP when this was enabled,
+    // and that looked like the term converting reduction into search. It is the
+    // opposite: depth is exactly what over-reduction inflates. The -87 Elo
+    // predecessor was described as "same depth, thinner search" -- this is the
+    // same phenomenon one step further along, not a different one.
+    i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // 1028, not upstream's 1412. `bound == Bound::Exact` is set on exactly the
@@ -340,7 +357,8 @@ define! {
     // SPRT.
     // Same multiplicative move-count scaling as `lmr_movecount_ilog`,
     // proportioned to this path's smaller base (207 vs 269).
-    i32 fds_movecount_ilog: 148;
+    // Zeroed alongside `lmr_movecount_ilog`; same evidence.
+    i32 fds_movecount_ilog: 0;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

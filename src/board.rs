@@ -498,37 +498,45 @@ impl Board {
         self.state.pinned = [Bitboard::default(); 2];
         self.state.pinners = [Bitboard::default(); 2];
 
-        for color in [Color::White, Color::Black] {
-            let king = self.king_square(color);
+        // The opponent's king only needs its checking-squares tables; the
+        // slider scan below is skipped for it.
+        let their_king = self.king_square(!stm);
+        self.state.checking_squares[PieceType::Pawn] = pawn_attacks(their_king, !stm);
+        self.state.checking_squares[PieceType::Knight] = knight_attacks(their_king);
+        self.state.checking_squares[PieceType::Bishop] = bishop_attacks(their_king, self.occupancies());
+        self.state.checking_squares[PieceType::Rook] = rook_attacks(their_king, self.occupancies());
+        self.state.checking_squares[PieceType::Queen] =
+            self.checking_squares(PieceType::Bishop) | self.checking_squares(PieceType::Rook);
 
-            if color == stm {
-                self.state.checkers = (pawn_attacks(king, stm) & self.colored_pieces(!stm, PieceType::Pawn))
-                    | (knight_attacks(king) & self.colored_pieces(!stm, PieceType::Knight));
-            } else {
-                self.state.checking_squares[PieceType::Pawn] = pawn_attacks(king, !stm);
-                self.state.checking_squares[PieceType::Knight] = knight_attacks(king);
-                self.state.checking_squares[PieceType::Bishop] = bishop_attacks(king, self.occupancies());
-                self.state.checking_squares[PieceType::Rook] = rook_attacks(king, self.occupancies());
-                self.state.checking_squares[PieceType::Queen] =
-                    self.checking_squares(PieceType::Bishop) | self.checking_squares(PieceType::Rook);
-            }
+        // Pins and discovered checks, for the side to move only.
+        //
+        // The loop used to run for both colours, but the `!stm` pass produced
+        // `pinned[!stm]` and `pinners[stm]` -- and nothing reads either. Every
+        // consumer wants the mover's pins or the opponent's pinners:
+        // `pinned(stm)` in movegen (x3) and see, `pinners(!stm)` in see. Both
+        // of those come out of the `stm` pass. `update_threats` runs on every
+        // `make_move`, so that was a full slider scan -- two setwise attack
+        // generations plus a `between`/`popcount` walk -- discarded per node.
+        //
+        // The arrays are zeroed above, so the unread halves stay empty rather
+        // than holding a stale position's pins.
+        let king = self.king_square(stm);
 
-            let diagonal = diagonal & bishop_attacks(king, self.colors(!color)) & self.colors(!color);
-            let orthogonal = orthogonal & rook_attacks(king, self.colors(!color)) & self.colors(!color);
+        self.state.checkers = (pawn_attacks(king, stm) & self.colored_pieces(!stm, PieceType::Pawn))
+            | (knight_attacks(king) & self.colored_pieces(!stm, PieceType::Knight));
 
-            for square in diagonal | orthogonal {
-                let blockers = between(king, square) & self.colors(color);
-                match blockers.popcount() {
-                    0 => {
-                        debug_assert_eq!(color, stm);
-                        self.state.checkers.set(square);
-                    }
-                    1 => {
-                        self.state.pinners[!color].set(square);
-                        self.state.pinned[color] |= blockers;
-                    }
-                    _ => (),
+        let diagonal = diagonal & bishop_attacks(king, self.colors(!stm)) & self.colors(!stm);
+        let orthogonal = orthogonal & rook_attacks(king, self.colors(!stm)) & self.colors(!stm);
+
+        for square in diagonal | orthogonal {
+            let blockers = between(king, square) & self.colors(stm);
+            match blockers.popcount() {
+                0 => self.state.checkers.set(square),
+                1 => {
+                    self.state.pinners[!stm].set(square);
+                    self.state.pinned[stm] |= blockers;
                 }
+                _ => (),
             }
         }
     }

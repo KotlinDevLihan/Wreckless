@@ -1465,7 +1465,23 @@ fn search<NODE: NodeType>(
             // additive here to match this formula's existing style). Move
             // ordering already sorts likely-best moves first, so a later
             // move index is itself evidence the move is less promising.
-            reduction += p::lmr_movecount_ilog() * (move_count as u32).ilog2() as i32;
+            // Multiplicative in log(depth) x log(move_count), as every
+            // reference formula is -- NOT additive.
+            //
+            // That distinction is what made this term cost 87 Elo at 240. Added
+            // to the base rather than scaled by it, the move-count penalty is
+            // identical at depth 2 and depth 32, so at shallow depths it swamps
+            // the base: at depth 2 / move 32 it was 1200 units of extra
+            // reduction on a 269-unit base -- 446%, or 1.17 plies on top of
+            // 0.26. The measured signature was "same depth, thinner search"
+            // (20.41 vs 20.65 against base), which is exactly over-reduction
+            // that never converts into depth.
+            //
+            // Scaled by log2(depth) the term is a roughly constant fraction of
+            // the base at every depth (~13% at move 8, ~22% at move 32), which
+            // is what late-move reduction is supposed to express: reduce late
+            // moves more, in proportion to how much you were reducing anyway.
+            reduction += p::lmr_movecount_ilog() * depth.ilog2() as i32 * (move_count as u32).ilog2() as i32 / 16;
 
             reduction -= (p::lmr_improvement() * improvement / 128).clamp(-241, 1155);
             reduction -= p::lmr_corr() * correction_value.abs() / 1024;
@@ -1605,7 +1621,8 @@ fn search<NODE: NodeType>(
             // Same move-count scaling as LMR above; FDS covers the
             // move_count == 1 non-PV / move_count >= 2 case and had the same
             // gap.
-            reduction += p::fds_movecount_ilog() * (move_count as u32).ilog2() as i32;
+            // Same multiplicative form as the LMR twin above.
+            reduction += p::fds_movecount_ilog() * depth.ilog2() as i32 * (move_count as u32).ilog2() as i32 / 16;
 
             reduction -= (p::fds_improvement() * improvement / 128).clamp(-206, 1370);
             reduction -= p::fds_corr() * correction_value.abs() / 1024;

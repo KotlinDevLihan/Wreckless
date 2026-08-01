@@ -201,46 +201,26 @@ define! {
 
     // Late Move Reductions
     i32 lmr_ilog: 269;
-    // Missing entirely until now: Stockfish's reduction is fundamentally
-    // reductions[depth] * reductions[moveNumber] (both log-scaled), but this
-    // formula only ever used move_count as an on/off gate (depth >= 2 &&
-    // move_count >= 2), never as a continuous scaling factor. Starting
-    // magnitude mirrors lmr_ilog's own role as a log2-scaled base term;
-    // genuinely untested and needs SPSA/SPRT before trusting the value.
+    // Move-count scaling for LMR, multiplicative in log2(depth) x
+    // log2(move_count) -- see the note at the consumer in search.rs.
     //
-    // PARKED LOW, not tuned. At 240 this single term was doing essentially all
-    // of the engine's over-pruning relative to 0.1.2: zeroing it alone moved
-    // the bench tree from 2.20M to 2.74M nodes, while zeroing hp_noisy_margin,
-    // qs_delta_margin and see_*_cutoff moved it by -19k, +54k and +51k. That
-    // left the engine searching a tree ~16% *smaller* than the last build to
-    // measure neutral, at the same nominal depth -- same depth, thinner
-    // search, which matches what the games showed: level on depth with base
-    // (20.41 vs 20.65) while losing at -87 Elo.
+    // Live again at 192 after being parked at 0. It was parked because at 240,
+    // in the *additive* form, it measured -87 Elo: the engine searched a tree
+    // ~16% smaller at the same nominal depth (20.41 vs 20.65), which is the
+    // signature of reduction that never converts into depth. The cause was the
+    // form, not the magnitude -- an additive term applies the same move-count
+    // penalty at depth 2 as at depth 32, so at shallow depths it dwarfed the
+    // base it was added to (446% of it at depth 2 / move 32).
     //
-    // It reduces every late move by `value * log2(move_count) / 1024`, so at
-    // move 32 and 240 it was removing over a full ply by itself. 6 was picked
-    // to put the bench tree back on 0.1.2's (2.64M against 2.61M); be honest
-    // about what that means -- at this magnitude the term is close to inert
-    // (0.03 ply at move 32). It is parked here rather than deleted so SPSA can
-    // still explore it -- which it could not actually do until the range in
-    // spsa.config was widened from the degenerate [0, 0] that a 0 default
-    // generates to an explicit [0, 48], chosen to stay well clear of the 240
-    // that measured -87 Elo. And because the response is badly non-monotonic
-    // (240 -> 2.20M, 90 -> 2.25M, 40 -> 2.50M, 22 -> 2.41M, 12 -> 2.71M,
-    // 6 -> 2.64M, 0 -> 2.74M), which is itself a reason not to trust any
-    // hand-picked value here.
+    // Scaled by log2(depth) instead, 192 puts the term at ~13% of the base at
+    // move 8 and ~22% at move 32, uniformly across depths. The old bench curve
+    // (240 -> 2.20M nodes, 0 -> 2.74M) does not transfer: those points were
+    // measured on the additive form and say nothing about this one.
     //
-    // Move-count scaling is a real technique and upstream uses it; this is not
-    // a verdict on the idea, only on shipping an untested magnitude for it.
-    // Re-introduce it as its own SPRT, not bundled with anything else.
-    // Zeroed rather than left at the "parked" 6. 6 was picked only to match
-    // 0.1.2's bench tree size, not because it was measured neutral or good --
-    // the comment above documents the response as badly non-monotonic
-    // (240 -> 2.20M nodes, 90 -> 2.25M, 40 -> 2.50M, 22 -> 2.41M, 12 -> 2.71M,
-    // 6 -> 2.64M, 0 -> 2.74M). 6 is untested, not safe; 0 is the one point on
-    // that curve that is actually verified (it's simply the term switched
-    // off). Re-enable only behind its own isolated SPRT, per the note above.
-    i32 lmr_movecount_ilog: 0;
+    // Untested in this form. It is the one term here with a measured negative
+    // attached to its predecessor, so it deserves its own SPRT before anything
+    // is bundled with it.
+    i32 lmr_movecount_ilog: 192;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // 1028, not upstream's 1412. `bound == Bound::Exact` is set on exactly the
@@ -358,7 +338,9 @@ define! {
     // untested FDS twin, scaled down by the same ratio but never itself
     // measured at any nonzero value. Re-enable only behind its own isolated
     // SPRT.
-    i32 fds_movecount_ilog: 0;
+    // Same multiplicative move-count scaling as `lmr_movecount_ilog`,
+    // proportioned to this path's smaller base (207 vs 269).
+    i32 fds_movecount_ilog: 148;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

@@ -191,6 +191,10 @@ define! {
     // worst this can do is prune every losing capture) and changing it on a
     // corrected argument would just be a new guess. The spsa.config range now
     // reaches 0, so a tuning run can retire the term if it is worthless.
+    // Applied as `see_q_cutoff * d^2 / 64` -- see the consumer in search.rs.
+    // As a flat constant this was 69.6% of the base at depth 6 and 0.9% at
+    // depth 24; scaled by d^2 it holds ~8% throughout, which is the same
+    // form/magnitude split as `lmr_movecount_ilog` above.
     i32 see_q_cutoff: 48;
     i32 see_q_base: 27;
     i32 see_n_quad: 7;
@@ -220,24 +224,26 @@ define! {
     // Untested in this form. It is the one term here with a measured negative
     // attached to its predecessor, so it deserves its own SPRT before anything
     // is bundled with it.
-    // Back to 0. The multiplicative form is right -- the additive one applied a
-    // 446%-of-base penalty at depth 2, this one holds it near 13-22% uniformly
-    // -- but fixing the shape did not make the term earn its place.
+    // Move-count scaling for LMR, multiplicative in log2(depth) x log2(move_count).
     //
-    // Measured at 192 over 437 games: the engine searched 2.6 ply DEEPER than
-    // base at identical time per move, and its evaluation was 45% more likely
-    // to drop at every magnitude from 0.3 to 2.0 pawns (z = +9.0, +4.7, +3.1),
-    // with mean |delta| 14.4% higher. Deeper search with a less stable eval is
-    // a thin tree: nominal depth rises because the tree narrows, the narrow
-    // tree misses things, and later iterations keep correcting the score.
-    // Pentanomial -15.95 Elo over 218 pairs.
+    // The FORM is the fix. Additive -- as the -87 Elo predecessor was -- applies
+    // the same move-count penalty at depth 2 as at depth 32, so it was 446% of
+    // the base at depth 2 and shrank to nothing deep. Multiplied by log2(depth)
+    // it is a roughly constant share of the base at every depth, which is what
+    // late-move reduction is supposed to express.
     //
-    // Note the trap here. Depth at fixed nodes went UP when this was enabled,
-    // and that looked like the term converting reduction into search. It is the
-    // opposite: depth is exactly what over-reduction inflates. The -87 Elo
-    // predecessor was described as "same depth, thinner search" -- this is the
-    // same phenomenon one step further along, not a different one.
-    i32 lmr_movecount_ilog: 0;
+    // The MAGNITUDE is 96, halved from a measured 192. At 192 the term ran
+    // 13-22% of the LMR base and cost ~16 Elo over 437 games, with eval
+    // volatility 45% above base at every magnitude (z = +9.0) concentrated at
+    // the mover's own depth 8-23 -- the band this term is largest in. At 96 it
+    // is 7-11% of the base, peaking at 0.15 ply.
+    //
+    // Note the trap that made 192 look healthy: depth at fixed nodes went UP
+    // when it was enabled. Depth is exactly what over-reduction inflates -- the
+    // -87 Elo build was "same depth, thinner search", and this was the same
+    // phenomenon one step along. Node count and depth cannot validate a
+    // reduction term; only games can.
+    i32 lmr_movecount_ilog: 96;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // 1028, not upstream's 1412. `bound == Bound::Exact` is set on exactly the
@@ -357,8 +363,9 @@ define! {
     // SPRT.
     // Same multiplicative move-count scaling as `lmr_movecount_ilog`,
     // proportioned to this path's smaller base (207 vs 269).
-    // Zeroed alongside `lmr_movecount_ilog`; same evidence.
-    i32 fds_movecount_ilog: 0;
+    // Same form and reasoning as `lmr_movecount_ilog`, proportioned to this
+    // path's smaller base (207 vs 269).
+    i32 fds_movecount_ilog: 74;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

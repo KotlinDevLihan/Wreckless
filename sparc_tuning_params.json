@@ -417,10 +417,10 @@
     },
     {
         "name": "lmr_movecount_ilog",
-        "default": 0.0,
+        "default": 96.0,
         "min": 0.0,
-        "max": 48.0,
-        "ck": 2.4,
+        "max": 144.0,
+        "ck": 4.8,
         "rk": 0.002
     },
     {
@@ -665,10 +665,10 @@
     },
     {
         "name": "fds_movecount_ilog",
-        "default": 0.0,
+        "default": 74.0,
         "min": 0.0,
-        "max": 37.0,
-        "ck": 1.9,
+        "max": 111.0,
+        "ck": 3.7,
         "rk": 0.002
     },
     {

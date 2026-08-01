@@ -1386,12 +1386,21 @@ fn search<NODE: NodeType>(
                 // so instead of pruning every losing quiet the engine only
                 // prunes those dropping nearly four pawns.
                 (-p::see_q_quad() * depth * depth + p::see_q_lin() * depth - p::see_q_hist() * history / 1024
-                    + p::see_q_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32
+                    // Scaled by d^2, matching the base it modifies. As a flat
+                    // constant this was 69.6% of the base at depth 6 and 0.9%
+                    // at depth 24 -- the same flat-term-on-a-scaled-base defect
+                    // that cost `lmr_movecount_ilog` 87 Elo, and it landed in
+                    // exactly the depth band where measured eval volatility ran
+                    // 1.15-1.19x base (depth 8-23) against 1.00 at depth 24+.
+                    // Dividing by 64 makes it a constant ~8% of the base, i.e.
+                    // it lowers the effective `see_q_quad` from 12 to 11.25.
+                    + p::see_q_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32 * depth * depth / 64
                     + p::see_q_base())
                 .min(0)
             } else {
                 (-p::see_n_quad() * depth * depth - p::see_n_lin() * depth - p::see_n_hist() * history / 1024
-                    + p::see_n_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32
+                    // Same d^2 scaling as the quiet twin above.
+                    + p::see_n_cutoff() * (td.cutoff_count[ply + 1] > 2) as i32 * depth * depth / 64
                     + p::see_n_base())
                 .min(0)
             };

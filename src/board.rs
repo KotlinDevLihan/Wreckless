@@ -470,20 +470,27 @@ impl Board {
         //
         // This "hack" is used to speed up the implementation of `Board::is_legal`.
         let stm = self.side_to_move();
-        let occupancies = self.occupancies() ^ self.colored_pieces(stm, PieceType::King);
+        let all = self.occupancies();
+        let occupancies = all ^ self.colored_pieces(stm, PieceType::King);
 
-        self.state.piece_threats[PieceType::Pawn] =
-            pawn_attacks_setwise(self.colored_pieces(!stm, PieceType::Pawn), !stm);
-        self.state.piece_threats[PieceType::Knight] =
-            knight_attacks_setwise(self.colored_pieces(!stm, PieceType::Knight));
+        // Their piece sets, resolved once. `colored_pieces` is
+        // `colors(c) & pieces(pt)`, and pawns, knights and queens were each
+        // being recomputed -- queens twice in one expression, pawns and knights
+        // again in the checker test below. This runs on every `make_move`.
+        let their = !stm;
+        let their_pawns = self.colored_pieces(their, PieceType::Pawn);
+        let their_knights = self.colored_pieces(their, PieceType::Knight);
+        let their_queens = self.colored_pieces(their, PieceType::Queen);
+
+        self.state.piece_threats[PieceType::Pawn] = pawn_attacks_setwise(their_pawns, their);
+        self.state.piece_threats[PieceType::Knight] = knight_attacks_setwise(their_knights);
         self.state.piece_threats[PieceType::Bishop] =
-            bishop_attacks_setwise(self.colored_pieces(!stm, PieceType::Bishop), occupancies);
+            bishop_attacks_setwise(self.colored_pieces(their, PieceType::Bishop), occupancies);
         self.state.piece_threats[PieceType::Rook] =
-            rook_attacks_setwise(self.colored_pieces(!stm, PieceType::Rook), occupancies);
-        self.state.piece_threats[PieceType::Queen] =
-            bishop_attacks_setwise(self.colored_pieces(!stm, PieceType::Queen), occupancies)
-                | rook_attacks_setwise(self.colored_pieces(!stm, PieceType::Queen), occupancies);
-        self.state.piece_threats[PieceType::King] = king_attacks(self.king_square(!stm));
+            rook_attacks_setwise(self.colored_pieces(their, PieceType::Rook), occupancies);
+        self.state.piece_threats[PieceType::Queen] = bishop_attacks_setwise(their_queens, occupancies)
+            | rook_attacks_setwise(their_queens, occupancies);
+        self.state.piece_threats[PieceType::King] = king_attacks(self.king_square(their));
 
         self.state.all_threats = self.piece_threats(PieceType::Pawn)
             | self.piece_threats(PieceType::Knight)
@@ -515,13 +522,13 @@ impl Board {
             let king = self.king_square(color);
 
             if color == stm {
-                self.state.checkers = (pawn_attacks(king, stm) & self.colored_pieces(!stm, PieceType::Pawn))
-                    | (knight_attacks(king) & self.colored_pieces(!stm, PieceType::Knight));
+                self.state.checkers =
+                    (pawn_attacks(king, stm) & their_pawns) | (knight_attacks(king) & their_knights);
             } else {
-                self.state.checking_squares[PieceType::Pawn] = pawn_attacks(king, !stm);
+                self.state.checking_squares[PieceType::Pawn] = pawn_attacks(king, their);
                 self.state.checking_squares[PieceType::Knight] = knight_attacks(king);
-                self.state.checking_squares[PieceType::Bishop] = bishop_attacks(king, self.occupancies());
-                self.state.checking_squares[PieceType::Rook] = rook_attacks(king, self.occupancies());
+                self.state.checking_squares[PieceType::Bishop] = bishop_attacks(king, all);
+                self.state.checking_squares[PieceType::Rook] = rook_attacks(king, all);
                 self.state.checking_squares[PieceType::Queen] =
                     self.checking_squares(PieceType::Bishop) | self.checking_squares(PieceType::Rook);
             }

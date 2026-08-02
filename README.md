@@ -218,13 +218,26 @@ within a few hundredths of a pawn is a bug, not a tuning choice.
 - **Qsearch delta pruning mixed unit systems.** The captured piece was credited with a raw
   `PieceType::value()` against an `eval`-scaled margin, understating every capture roughly
   threefold. Now converted (`qs_delta_piece_scale`, 192/64 ≈ 3.0, against a true ratio of ~2.94).
-- **The time manager's falling-eval factor was a two-level switch.** The linear structure is
-  Stockfish's and the coefficient ratio was preserved, but the constants were carried across
-  unscaled from a scale where a pawn is ~208 to one where it is ~321–382. The result cleared its
-  clamp ceiling after a **0.04-pawn** score drop and sat on the floor for any gain at all — no
-  proportional band, and therefore no gradient for SPSA to have tuned it against. Rescaled so the
-  ceiling is reached at ~0.37 pawns, matching Stockfish's band in pawn terms, and moved into
-  `parameters.rs` as fixed point so it can actually be tuned now that there is a gradient.
+- **The time manager's falling-eval factor is a two-level switch — diagnosed, not fixed.** The
+  linear structure is Stockfish's and the coefficient ratio was preserved, but the constants were
+  carried across unscaled from a scale where a pawn is ~208 to one where it is ~321–382. With
+  `tm_trend_base 7426`, `tm_trend_diff 480` and the `[7214, 14031]` clamp, the ceiling is cleared
+  after `(14031-7426)/480` = **13.8 units, or 0.043 pawns**, and the floor sits under any gain at
+  all. It is bang-bang with essentially no proportional band, and `tm_trend_recent` stacks a second
+  saturating term on an already-saturated one — which is also why SPSA has never found signal here.
+  There is no gradient inside the clamp.
+
+  An earlier revision rescaled these so the ceiling sat ~0.37 pawns out, matching Stockfish's band in
+  pawn terms. **That was reverted** in favour of upstream's untouched values, on the grounds that
+  those are the measured ones and a bad constant in a time-management path costs games rather than
+  nodes. This README went on describing the rescale for some time after it no longer existed; the
+  shipped behaviour is the 0.043-pawn switch described above.
+
+  What has changed is only that the values live in `parameters.rs` as fixed point, and that their
+  SPSA bounds were widened (`tm_trend_diff` floor 240 → 40, `tm_trend_recent` 115 → 20). The
+  proportional band would need roughly `diff 51 / recent 25`, and the old floors were 4.7x too high
+  to reach it — tuning was locked inside the saturated regime it was supposed to escape. Defaults
+  are unchanged; this makes the region reachable, it does not assume it is better.
 - **Continuation-history updates used a running prefix count.** `positive_count` was incremented and
   used to index the consistency multipliers within the same loop iteration, so lag 1 could only ever
   reach `multipliers[1]` while lag 6 could reach `multipliers[6]`. The nearest lags — the ones move
@@ -276,6 +289,19 @@ within a few hundredths of a pawn is a bug, not a tuning choice.
   tuned pruning coefficients at once.
 - **Qsearch delta pruning ignored promotion value.** For a non-capture promotion, `type_on()` reads
   an empty square, crediting nothing for the ~1133cp actually gained. Now credited separately.
+- **The soft/hard time split disabled itself in the middlegame.** `soft_limit` scales the soft bound
+  by a multiplier that is the product of five independently-bounded factors — node fraction, PV
+  stability, eval stability, score trend, best-move stability — with no joint cap. Its ceiling is
+  ~8.4x with a perfectly stable best move and ~16–18x once the best move has changed a few times.
+  The Fischer hard/soft ratio is `0.7281/soft_scale`, and `soft_scale` *rises* with move number: 28x
+  at move 10, 19.9x at move 20, 16.6x at move 30, 13.3x at move 60. So from roughly move 20 onward
+  an unstable position produces a scaled soft bound sitting past the hard bound, and the soft limit
+  stops binding entirely — the hard bound decides the move, spending 72.8% of the remaining clock on
+  it. Worse, the hard bound is polled mid-search rather than between iterations, so the cutoff lands
+  part-way through an iteration and that partial work is discarded. The split silently switched
+  itself off exactly when instability meant it mattered most. The scaled soft bound is now clamped to
+  the hard bound, which keeps the stop on an iteration boundary at every move number and cannot make
+  the engine think longer than it already would.
 - **Cyclic (`movestogo`) hard bound could consume the whole clock.** With a small `movestogo`, five
   times the per-move allocation already exceeds what remains, collapsing the safety bound to
   "everything left" with another move still due. Now reserves one allocation.
@@ -346,8 +372,22 @@ a difference means something changed semantically and needs investigating.
 - **PEXT bitboards** — sliding-piece attacks indexed with the BMI2 `pext` instruction where
   supported, with classical magic multiplication as fallback. Disabled automatically on AMD Zen 1/2,
   where `pext` is microcoded and slower than the fallback.
-- **Windows large pages** — the transposition table and continuation-history tables use 2 MB pages
-  where the OS grants the privilege.
+- **Windows large pages** — the transposition table, the continuation-history tables and the NNUE
+  network use 2 MB pages where the OS grants the privilege.
+- **The NNUE network on large pages.** The network was read straight out of the binary's `.rodata`
+  via `include_bytes!` — zero-copy, which is the right instinct, but it leaves 60 MB of weights on
+  4 KB pages: **15,446 page-table entries against an L2 TLB of roughly 2,048**. The feature
+  transformer is indexed by feature number, so its accesses scatter across the whole table, and every
+  accumulator update touches it. It is the hottest random-access structure in the engine and the one
+  most punished by TLB misses, and it was the only large table not already using the large-page
+  allocator the TT and history tables share. Copying it into a `HugeBox` at startup makes it **30
+  entries**. Costs ~60 MB of RSS and one `memcpy`, and falls back to normal pages automatically when
+  the privilege is unavailable.
+
+  Measured on an 8C/16T Zen 3, PGO-instrumented builds, same bench: **2,826,642 nodes at 779,649 nps
+  before, 2,826,642 nodes at 828,153 nps after** — node count identical to the unit, throughput
+  **+6.2%**. Instrumented builds are noisy, so treat the magnitude as approximate; the node identity
+  is what confirms the change is purely a memory-system one.
 - **Hoisted mailbox reads in move scoring.** Continuation history was read through a per-lag helper
   that resolved `piece_on(mv.from())` internally, so six lag lookups meant six reads of the same
   square — loop-invariant, but the read through a raw pointer inside `get` stops the optimizer
@@ -413,6 +453,23 @@ negative result on any of them would be useful information.
 
 **Pruning and extensions:**
 
+- **Threat density as a contextual pruning signal.** The search had exactly one position-type signal
+  feeding a pruning margin, and it was a boolean: `rfp_no_threats * (all_threats & our_pieces)
+  .is_empty()`. A position with one loose knight and a position with the queen, both rooks and a
+  bishop hanging are both merely "not empty", and were treated identically. Replaced with a capped
+  popcount of our own attacked pieces, widening the RFP and futility margins (pruning *less*) as more
+  of our material comes under attack — the case where a static eval is most likely to be refuted by a
+  capture the search has not seen, and where a "quiet" move may be the one that saves the piece. The
+  old boolean is kept and cannot fight the new term: it fires only at density zero, the new term only
+  above it, so they are mutually exclusive by construction. Cost is one AND and one popcount per
+  node; both bitboards are already materialised by `update_threats`.
+- **ProbCut acceptance history.** ProbCut is speculative execution: the qsearch draft proposes and a
+  shallow search verifies. Nothing recorded how often the verification actually agreed. A
+  gravity-bounded counter now does, and feeds ProbCut's own threshold — raising the bar when
+  verification keeps disagreeing, lowering it when it keeps agreeing. Only moves where a verification
+  search actually ran are scored; if the draft never cleared the bar there is nothing to have agreed
+  with, and counting those would measure the draft against itself.
+
 - Qsearch delta pruning — a standard technique, but one upstream does not have at all, so every move
   it prunes is one the baseline searches.
 - Recapture extension — a capture landing where the opponent's last move captured, that doesn't lose
@@ -454,6 +511,17 @@ negative result on any of them would be useful information.
   negative singular decision.
 
 **Structure and time:**
+
+- **Root fail-lows extend the search.** PV stability, eval stability and best-move changes all
+  describe how the answer is *moving*; none of them says the answer just got *worse*. A root fail-low
+  means the move being played for is worse than the last iteration promised and there is no
+  replacement yet — arguably the most valuable moment to keep thinking. Now counted per iteration and
+  fed into the time multiplier, capped at two because repeated fail-lows at one depth are the
+  aspiration window widening, not new evidence. `tm_fail_low` tunes to 0 to retire it.
+- **Single legal move stops early.** With one legal root move there is nothing to choose between.
+  The search now runs to depth 8 — enough for a ponder move and a sane score — and then banks the
+  clock. Forced recaptures and single-reply checks are common enough for this to be worth real time,
+  but it does shorten the ponder line, which is the reason it is listed here rather than as a fix.
 
 - **Internal Iterative Reductions** — PV and expected-cut nodes without a TT move are reduced a ply
   from depth 6, exempting nodes on the previous iteration's principal variation. Upstream has no IIR;

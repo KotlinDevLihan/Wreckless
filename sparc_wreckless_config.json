@@ -1198,6 +1198,22 @@
       "max": 4.0,
       "ck": 1.0,
       "rk": 0.002
+    },
+    {
+      "name": "tm_mate_moves",
+      "default": 5.0,
+      "min": 0.0,
+      "max": 10.0,
+      "ck": 1.0,
+      "rk": 0.002
+    },
+    {
+      "name": "tm_mate_confirm",
+      "default": 2.0,
+      "min": 0.0,
+      "max": 6.0,
+      "ck": 1.0,
+      "rk": 0.002
     }
   ]
 }

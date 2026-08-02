@@ -319,6 +319,11 @@ within a few hundredths of a pawn is a bug, not a tuning choice.
   reachable case was a root FEN with a clock above 200 feeding a *negated* static eval into
   aspiration and every margin that reads it. Clamped. Unreachable from legal play (the rule ends the
   game at 100), so it is inert for normal games.
+- **`go mate N` stopped when *being* mated.** The condition tested
+  `Score::MATE - score.abs() <= moves * 2`, and the `.abs()` made a mate against us satisfy it just
+  as well as one we had found -- so `go mate 3` in a lost position stopped and reported the mate
+  being delivered *to* us as its answer. UCI asks for a mate in N, not for any decisive line within
+  N; searching on is what already happens when no mate exists.
 - **`go movetime` ignored Move Overhead.** Only the fixed 15 ms was subtracted, so a GUI on the
   default 100 ms overhead got `ms - 15` of thinking and could flag on a slow connection. Now
   `saturating_sub(move_overhead)`, matching the Fischer and Cyclic branches.
@@ -518,6 +523,15 @@ negative result on any of them would be useful information.
   replacement yet — arguably the most valuable moment to keep thinking. Now counted per iteration and
   fed into the time multiplier, capped at two because repeated fail-lows at one depth are the
   aspiration window widening, not new evidence. `tm_fail_low` tunes to 0 to retire it.
+- **A proven short mate stops the search.** Nothing did this outside `go mate`. The ordinary damping
+  signals barely notice a mate: the node fraction collapses to ~0.66 and `score_trend` pins to its
+  0.7214 floor, but `pv_stability`, `eval_stability` (which *resets* on the eval jump) and best-move
+  stability push back, leaving **~0.83x of a full allocation** spent on a proven mate in 1. Any
+  forced mate wins, so a shorter one found two iterations later is worth nothing on the clock.
+  Guarded to wins only (being mated is exactly when to keep looking for a defence), to true mate
+  scores rather than TB wins, to exact scores rather than bounds, to single-PV, and to thread 0 --
+  there is no best-thread vote, so a helper stopping everyone could leave the reporting thread
+  emitting a non-mating move. `depth` must clear the mate distance by `tm_mate_confirm`.
 - **Single legal move stops early.** With one legal root move there is nothing to choose between.
   The search now runs to depth 8 — enough for a ponder move and a sane score — and then banks the
   clock. Forced recaptures and single-reply checks are common enough for this to be worth real time,

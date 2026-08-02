@@ -318,9 +318,15 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             break;
         }
 
+        // `.abs()` here meant a mate *against* us satisfied the condition just as
+        // well as one we had found, so `go mate 3` in a lost position stopped
+        // and reported the mate being delivered to us as the answer. UCI asks
+        // for a mate in N, not for any decisive line within N; searching on is
+        // the same thing that already happens when no mate exists at all.
         if td.id == 0
             && let Limits::Mate(moves) = td.time_manager.limits()
-            && Score::MATE - td.root_moves[0].score.abs() <= moves as i32 * 2
+            && is_win(td.root_moves[0].score)
+            && Score::MATE - td.root_moves[0].score <= moves as i32 * 2
         {
             td.shared.status.set(Status::STOPPED);
             break;
@@ -391,12 +397,47 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             nodes * pv_stability * eval_stability * score_trend * best_move_stability * fail_low
         };
 
+        // A proven forced mate needs no further thought: any forced mate wins,
+        // so a shorter one found two iterations later is worth nothing on the
+        // clock. Nothing stopped for this before -- the only mate-aware exit is
+        // the `go mate` branch above -- and the ordinary damping signals barely
+        // notice. At a freshly-proven mate the node fraction collapses to ~0.66
+        // and `score_trend` pins to its 0.7214 floor, but `pv_stability`,
+        // `eval_stability` (which *resets* on the eval jump) and best-move
+        // stability push back, leaving ~0.83x of a full allocation spent on a
+        // mate in 1.
+        //
+        // Guards: wins only, since being mated is exactly when to keep looking
+        // for a defence; true mate scores only, not TB wins, hence
+        // `MATE_IN_MAX` rather than `is_win`; an exact score, since a bound is
+        // an artifact of an unresolved window; and single-PV only, because
+        // analysis asked for the other lines. `depth` must clear the mate
+        // distance by `tm_mate_confirm` so one iteration's fail-high cannot end
+        // the search on its own.
+        // Thread 0 is the one that reports the move and there is no best-thread
+        // vote, so a helper proving the mate and stopping everyone could leave
+        // thread 0 emitting whatever it happened to have -- not the mate. Only
+        // the reporting thread may end the search on its own result.
+        if td.id == 0
+            && td.time_manager.use_time_management()
+            && td.multi_pv == 1
+            && td.root_moves[0].score >= Score::MATE_IN_MAX
+            && !td.root_moves[0].upperbound
+            && !td.root_moves[0].lowerbound
+        {
+            let mate_plies = Score::MATE - td.root_moves[0].score;
+            if mate_plies <= 2 * p::tm_mate_moves() && depth >= mate_plies + p::tm_mate_confirm() {
+                td.shared.status.set(Status::STOPPED);
+                break;
+            }
+        }
+
         // With one legal move there is nothing to choose between, and every
         // further iteration buys only a deeper ponder move. Kept searching to a
         // small floor so a ponder move and a sane score still exist, then stop
         // and bank the clock -- forced recaptures and single-reply checks are
         // common enough in real games for this to be worth real time.
-        if td.time_manager.use_time_management() && td.root_moves.len() == 1 && depth >= 8 {
+        if td.id == 0 && td.time_manager.use_time_management() && td.root_moves.len() == 1 && depth >= 8 {
             td.shared.status.set(Status::STOPPED);
             break;
         }

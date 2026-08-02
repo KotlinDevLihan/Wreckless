@@ -119,6 +119,14 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
         td.root_depth = depth;
         td.best_move_changes = 0;
 
+        // A root fail-low means the move we have been playing for is worse than
+        // the last iteration promised and we do not yet have a replacement.
+        // That is the single most valuable moment to keep thinking, and it was
+        // the one instability signal the multiplier did not see: PV stability,
+        // eval stability and best-move changes all describe how the answer is
+        // moving, none of them that the answer just got *worse*.
+        let mut root_fail_lows = 0;
+
         td.pv_start = 0;
         td.pv_end = 0;
 
@@ -196,6 +204,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
                         alpha = (score - delta).max(-Score::INFINITE);
                         beta = (alpha + delta).min(beta);
                         delta += 26 * delta / 128;
+                        root_fail_lows += 1;
                     }
                     s if s >= beta => {
                         alpha = (beta - delta).max(alpha);
@@ -372,8 +381,25 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
             let best_move_stability = 1.1500 + (0.2526 * td.best_move_changes as f32).ln_1p();
 
-            nodes * pv_stability * eval_stability * score_trend * best_move_stability
+            // Capped: the first fail-low carries nearly all the information,
+            // and repeated ones at the same depth are the aspiration window
+            // widening, not new evidence.
+            let fail_low = 1.0
+                + p::tm_fail_low() as f32 / 1000.0
+                    * root_fail_lows.min(p::tm_fail_low_cap()) as f32;
+
+            nodes * pv_stability * eval_stability * score_trend * best_move_stability * fail_low
         };
+
+        // With one legal move there is nothing to choose between, and every
+        // further iteration buys only a deeper ponder move. Kept searching to a
+        // small floor so a ponder move and a sane score still exist, then stop
+        // and bank the clock -- forced recaptures and single-reply checks are
+        // common enough in real games for this to be worth real time.
+        if td.time_manager.use_time_management() && td.root_moves.len() == 1 && depth >= 8 {
+            td.shared.status.set(Status::STOPPED);
+            break;
+        }
 
         if td.time_manager.use_time_management() {
             if td.time_manager.soft_limit(td, multiplier) {

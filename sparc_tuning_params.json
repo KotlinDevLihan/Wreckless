@@ -1066,17 +1066,17 @@
   {
     "name": "tm_trend_diff",
     "default": 480.0,
-    "min": 240.0,
+    "min": 40.0,
     "max": 720.0,
-    "ck": 24.0,
+    "ck": 34.0,
     "rk": 0.002
   },
   {
     "name": "tm_trend_recent",
     "default": 230.0,
-    "min": 115.0,
+    "min": 20.0,
     "max": 345.0,
-    "ck": 11.5,
+    "ck": 16.2,
     "rk": 0.002
   },
   {
@@ -1141,6 +1141,22 @@
     "min": 0.0,
     "max": 600.0,
     "ck": 30.0,
+    "rk": 0.002
+  },
+  {
+    "name": "tm_fail_low",
+    "default": 250.0,
+    "min": 0.0,
+    "max": 700.0,
+    "ck": 35.0,
+    "rk": 0.002
+  },
+  {
+    "name": "tm_fail_low_cap",
+    "default": 2.0,
+    "min": 0.0,
+    "max": 4.0,
+    "ck": 1.0,
     "rk": 0.002
   }
 ]

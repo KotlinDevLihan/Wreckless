@@ -122,7 +122,32 @@ impl TimeManager {
             // taking `go movetime` out of the soft/hard split and out of the
             // `multiplier()` extension logic entirely.
             Limits::Time(_) => self.search_elapsed(td) >= self.soft_bound,
-            _ => self.search_elapsed(td) >= Duration::from_secs_f32(self.soft_bound.as_secs_f32() * multiplier()),
+            _ => {
+                // The multiplier is a product of five independent factors, none
+                // of which is bounded jointly with the others. Its ceiling is
+                // ~8.4x with a perfectly stable best move and ~16-18x once the
+                // best move has changed a few times.
+                //
+                // The Fischer hard/soft ratio is 0.7281/soft_scale, and
+                // soft_scale rises with move number: 28x at move 10, 19.9x at
+                // move 20, 16.6x at move 30, 13.3x at move 60. So from the
+                // middlegame onward an unstable position produces a scaled soft
+                // bound that sits *past* the hard bound -- the soft limit stops
+                // binding entirely and the hard bound decides the move.
+                //
+                // That is the worst of both: the soft/hard split silently
+                // disables itself exactly when instability means it matters
+                // most, and because the hard bound is polled mid-search rather
+                // than between iterations, the cutoff lands part-way through an
+                // iteration and that partial work is discarded.
+                //
+                // Clamping to the hard bound keeps the stop on an iteration
+                // boundary and preserves the split at every move number. It
+                // cannot make the engine think longer than it already would.
+                let scaled = self.soft_bound.as_secs_f32() * multiplier();
+                let capped = scaled.min(self.hard_bound.as_secs_f32());
+                self.search_elapsed(td) >= Duration::from_secs_f32(capped)
+            }
         }
     }
 

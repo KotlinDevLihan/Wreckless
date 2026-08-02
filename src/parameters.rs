@@ -684,6 +684,11 @@ define! {
     // (~321-382), so the two scales are effectively 1:1 and no rescale is
     // warranted. Restored to the untouched upstream fixed-point constants.
     // base/min/max are unaffected by this and are kept as measured.
+    // Extend when the root fails low; see the iterative deepening loop.
+    // Applied as 1 + tm_fail_low/1000 * min(fail_lows, cap), so 250 means the
+    // first fail-low buys 25% more time. Lower bound 0 retires it.
+    i32 tm_fail_low: 250;
+    i32 tm_fail_low_cap: 2;
     i32 tm_trend_base: 7426;
     i32 tm_trend_diff: 480;
     i32 tm_trend_recent: 230;

@@ -421,17 +421,12 @@ pub struct ParametersHandle {
 
 #[derive(Clone)]
 enum ParametersStorage {
-    Embedded(&'static Parameters),
     Owned(Arc<Parameters>),
     /// Large-page copy; see `Parameters::allocate_huge`.
     Huge(Arc<crate::history::HugeBox<Parameters>>),
 }
 
 impl ParametersHandle {
-    fn embedded() -> Self {
-        Self { inner: ParametersStorage::Embedded(Parameters::embedded()) }
-    }
-
     const fn owned(parameters: Arc<Parameters>) -> Self {
         Self { inner: ParametersStorage::Owned(parameters) }
     }
@@ -446,7 +441,6 @@ impl std::ops::Deref for ParametersHandle {
 
     fn deref(&self) -> &Self::Target {
         match &self.inner {
-            ParametersStorage::Embedded(parameters) => parameters,
             ParametersStorage::Owned(parameters) => parameters.as_ref(),
             ParametersStorage::Huge(parameters) => &***parameters,
         }

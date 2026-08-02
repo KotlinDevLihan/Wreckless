@@ -89,6 +89,22 @@ define! {
     // term restored alongside it in search.rs.
     i32 rfp_worsening: 20;
     i32 rfp_no_threats: 54;
+    // Dynamic contextual processing: scale the RFP margin by how many of our
+    // own pieces are currently attacked. `rfp_no_threats` above is the same
+    // idea collapsed to a single bit -- it fires only when the count is zero,
+    // so the two terms are mutually exclusive and cannot fight each other.
+    //
+    // A position with one loose knight and one with the queen, both rooks and
+    // a bishop hanging are both merely "not empty" to a boolean, and got the
+    // same treatment. They are not the same position. The more of our material
+    // is under attack, the more likely a static eval is about to be refuted by
+    // a capture the search has not seen yet, so widen the margin (prune less).
+    //
+    // The count is free: `all_threats` is already computed by update_threats
+    // and `colors(stm)` is a field read, so this is one AND and one popcount.
+    // Capped because past ~6 attacked pieces the signal stops discriminating.
+    i32 rfp_threat_density: 14;
+    i32 threat_density_cap: 6;
     i32 rfp_base: 19;
     // Widen the RFP margin when the static eval and the TT's search score
     // disagree (see `complexity` in search.rs). A real search already found
@@ -161,6 +177,12 @@ define! {
     i32 probcut_tt_margin: 428;
     i32 probcut_base: 254;
     i32 probcut_improving: 85;
+    // See the ProbCut block in search.rs. Divided by 8192, the gravity bound
+    // on `probcut_history`, so this is the full swing of the threshold between
+    // "verification always agrees" and "verification never agrees".
+    i32 probcut_hist: 40;
+    i32 probcut_hist_bonus: 190;
+    i32 probcut_hist_malus: 130;
     i32 probcut_score_div: 319;
     i32 probcut_beta_step: 197;
 
@@ -175,6 +197,12 @@ define! {
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;
     i32 fp_corr: 555;
+    // Same contextual signal applied to futility pruning; see
+    // `rfp_threat_density`. Futility prunes quiets at shallow depth on the
+    // assumption that a quiet move cannot recover a large deficit -- an
+    // assumption that is weakest exactly when our pieces are hanging, because
+    // the "quiet" move may be the one that saves the piece.
+    i32 fp_threat_density: 20;
     i32 fp_base: 127;
 
     // Bad Noisy Futility Pruning

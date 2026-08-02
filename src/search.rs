@@ -742,6 +742,13 @@ fn search<NODE: NodeType>(
     // the eval and the search have simply diverged, and "more diverged" is not
     // more informative. Same treatment `qs_see_corr_cap` already gives
     // `correction_value` in qsearch.
+    // Dynamic contextual processing: how tactical is this position, right now,
+    // for the side to move? Counts our own pieces standing on squares the
+    // opponent attacks. Both bitboards are already materialised, so this costs
+    // one AND and one popcount per node. Consumers: RFP and FP margins.
+    let threat_density = ((td.board.all_threats() & td.board.colors(stm)).popcount() as i32)
+        .min(p::threat_density_cap());
+
     let complexity = if is_valid(eval) && is_valid(tt_score) && !is_decisive(tt_score) {
         (eval - tt_score).abs().min(p::complexity_cap())
     } else {
@@ -783,7 +790,8 @@ fn search<NODE: NodeType>(
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
                     + p::rfp_complexity() * complexity / 1024
-                    - p::rfp_no_threats() * (td.board.all_threats() & td.board.colors(stm)).is_empty() as i32
+                    - p::rfp_no_threats() * (threat_density == 0) as i32
+                    + p::rfp_threat_density() * threat_density
                     - p::rfp_worsening() * opponent_worsening as i32
                     - p::rfp_base())
                 .max(2)
@@ -938,7 +946,15 @@ fn search<NODE: NodeType>(
     }
 
     // ProbCut
-    let mut probcut_beta = beta + p::probcut_base() - p::probcut_improving() * improving as i32;
+    // Dynamic contextual processing applied to ProbCut's own threshold. The
+    // qsearch draft proposes, the shallow search verifies; `probcut_history`
+    // is the running gravity-bounded record of how often that verification
+    // agreed. When it keeps disagreeing the draft is miscalibrated for this
+    // search, so raise the bar and let ProbCut fire less often; when it keeps
+    // agreeing, lower it. Sign: history negative -> subtracting it widens.
+    let mut probcut_beta = beta + p::probcut_base()
+        - p::probcut_improving() * improving as i32
+        - p::probcut_hist() * td.probcut_history / 8192;
 
     // The `!in_check` guard is not cosmetic. At an in-check node there is no
     // static evaluation, so `eval` is the Score::NONE sentinel (32002):
@@ -987,7 +1003,13 @@ fn search<NODE: NodeType>(
             let base_depth = (depth - 4 - improving as i32).max(0);
             let mut probcut_depth = (base_depth - (score - probcut_beta) / p::probcut_score_div().max(1)).clamp(0, base_depth);
 
-            if score >= probcut_beta && probcut_depth > 0 {
+            // Only outcomes where a verification search actually ran are
+            // evidence about verification. If the qsearch draft never cleared
+            // the bar there is nothing to have agreed or disagreed with, and
+            // scoring those would just measure the draft against itself.
+            let verified = score >= probcut_beta && probcut_depth > 0;
+
+            if verified {
                 let adjusted_beta =
                     (probcut_beta + p::probcut_beta_step() * (base_depth - probcut_depth)).min(Score::INFINITE);
 
@@ -1005,6 +1027,14 @@ fn search<NODE: NodeType>(
 
             if td.shared.status.get() == Status::STOPPED {
                 return Score::ZERO;
+            }
+
+            // Feed the verification outcome back into the threshold above.
+            if verified {
+                update_probcut_history(
+                    td,
+                    if score >= probcut_beta { p::probcut_hist_bonus() } else { -p::probcut_hist_malus() },
+                );
             }
 
             if score >= probcut_beta {
@@ -1349,6 +1379,7 @@ fn search<NODE: NodeType>(
                 + p::fp_history() * history / history_divisor
                 + p::fp_beta_bonus() * (eval >= beta) as i32
                 + p::fp_corr() * correction_value.abs() / 1024
+                + p::fp_threat_density() * threat_density
                 - p::fp_base();
 
             if !in_check && !is_direct_check && is_quiet && depth < 14 && futility_value <= alpha {

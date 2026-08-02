@@ -2490,6 +2490,14 @@ fn update_continuation_histories_in_check(
 
 /// Gravity-style update of the global TT-move reliability statistic, bounded
 /// to roughly [-8192, 8192] like Stockfish's `TTMoveHistory`.
+/// Gravity update for ProbCut's acceptance rate. Same form and bound as
+/// `update_tt_move_history`.
+fn update_probcut_history(td: &mut ThreadData, bonus: i32) {
+    let bonus = bonus.clamp(-8192, 8192);
+    let entry = td.probcut_history;
+    td.probcut_history = entry + bonus - entry * bonus.abs() / 8192;
+}
+
 fn update_tt_move_history(td: &mut ThreadData, bonus: i32) {
     // Unlike every other gravity-style history update in the codebase, this
     // one was missing the initial clamp -- the multicut caller can pass

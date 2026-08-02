@@ -372,6 +372,30 @@ impl Parameters {
         &EMBEDDED
     }
 
+    /// Copies the weights into a large-page allocation.
+    ///
+    /// The network is 60 MB. Read straight out of the binary's rodata -- which
+    /// is what `embedded()` hands back -- that is 15,446 pages of 4 KB against
+    /// an L2 TLB of roughly 2048 entries on current x86. The feature
+    /// transformer is indexed by feature number, so accesses are scattered
+    /// across the whole table and every accumulator update touches it: it is
+    /// the hottest random-access structure in the engine and the one most
+    /// punished by TLB misses.
+    ///
+    /// On 2 MB pages the same table is 30 entries. The transposition table
+    /// already allocates this way, and `HugeBox` wraps the same allocator for
+    /// the history tables; the network was the one large structure left out.
+    ///
+    /// Costs 60 MB of RSS and one memcpy at startup, and falls back to normal
+    /// pages automatically when the large-page privilege is unavailable.
+    fn allocate_huge() -> Arc<crate::history::HugeBox<Self>> {
+        let mut huge = crate::history::HugeBox::<Self>::new_zeroed();
+        unsafe {
+            std::ptr::copy_nonoverlapping(Self::embedded() as *const Self, &raw mut *huge, 1);
+        }
+        Arc::new(huge)
+    }
+
     fn allocate_owned() -> Arc<Self> {
         // `Box::new(MaybeUninit::uninit())` builds the MaybeUninit as a
         // temporary and leans on the optimiser to elide the move into the box.
@@ -399,6 +423,8 @@ pub struct ParametersHandle {
 enum ParametersStorage {
     Embedded(&'static Parameters),
     Owned(Arc<Parameters>),
+    /// Large-page copy; see `Parameters::allocate_huge`.
+    Huge(Arc<crate::history::HugeBox<Parameters>>),
 }
 
 impl ParametersHandle {
@@ -409,6 +435,10 @@ impl ParametersHandle {
     const fn owned(parameters: Arc<Parameters>) -> Self {
         Self { inner: ParametersStorage::Owned(parameters) }
     }
+
+    fn huge() -> Self {
+        Self { inner: ParametersStorage::Huge(Parameters::allocate_huge()) }
+    }
 }
 
 impl std::ops::Deref for ParametersHandle {
@@ -418,6 +448,7 @@ impl std::ops::Deref for ParametersHandle {
         match &self.inner {
             ParametersStorage::Embedded(parameters) => parameters,
             ParametersStorage::Owned(parameters) => parameters.as_ref(),
+            ParametersStorage::Huge(parameters) => &***parameters,
         }
     }
 }
@@ -428,7 +459,10 @@ impl NumaReplicable for ParametersHandle {
     }
 
     fn allocate_shared() -> Option<Arc<Self>> {
-        Arc::new(Self::embedded()).into()
+        // Single-NUMA-node systems land here, which is the common case. It used
+        // to hand back the rodata pointer -- zero copy, but 4 KB pages. See
+        // `Parameters::allocate_huge`.
+        Arc::new(Self::huge()).into()
     }
 }
 

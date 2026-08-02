@@ -252,6 +252,16 @@ pub struct ThreadData {
     pub best_move_changes: usize,
     pub optimism: [i32; 2],
     pub tt_move_history: i32,
+    /// Running acceptance rate of ProbCut's speculative cutoff, gravity-updated
+    /// into [-8192, 8192] like `tt_move_history`.
+    ///
+    /// ProbCut is speculative decoding: qsearch drafts a cutoff, a shallow
+    /// search verifies it, and a rejected draft falls back to a full-depth
+    /// re-search. Speculative decoders adapt their threshold to the measured
+    /// acceptance rate -- speculate harder while drafts are landing, back off
+    /// when they are not. Nothing here measured that, so the margin was static
+    /// regardless of whether speculation had been paying off in this search.
+    pub probcut_history: i32,
     pub previous_pv: Vec<Move>,
     pub root_depth: i32,
     pub root_delta: i32,
@@ -291,6 +301,7 @@ impl ThreadData {
             best_move_changes: 0,
             optimism: [0; 2],
             tt_move_history: 0,
+            probcut_history: 0,
             previous_pv: Vec::new(),
             root_depth: 0,
             root_delta: 0,

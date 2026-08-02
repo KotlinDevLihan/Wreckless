@@ -6,7 +6,7 @@ type FromToHistory<T> = [[T; 64]; 64];
 pub type PieceToHistory<T> = [[T; 64]; 13];
 type ContinuationHistoryType = [[[[PieceToHistory<i16>; 64]; 13]; 2]; 2];
 
-struct HugeBox<T> {
+pub struct HugeBox<T> {
     ptr: std::ptr::NonNull<T>,
 }
 
@@ -14,7 +14,7 @@ unsafe impl<T: Send> Send for HugeBox<T> {}
 unsafe impl<T: Sync> Sync for HugeBox<T> {}
 
 impl<T> HugeBox<T> {
-    fn new_zeroed() -> Self {
+    pub fn new_zeroed() -> Self {
         #[cfg(target_os = "linux")]
         let ptr = unsafe {
             use libc::{MADV_HUGEPAGE, MAP_ANONYMOUS, MAP_FAILED, MAP_PRIVATE, PROT_READ, PROT_WRITE, madvise, mmap};

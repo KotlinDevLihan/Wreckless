@@ -369,6 +369,18 @@ define! {
     // dominating the whole reduction. Bounds the contribution without changing
     // it in the range that actually occurs (typically 1-5).
     i32 lmr_alpha_raise_cap: 6;
+    // Cap on double/triple singular extensions accumulated along one line.
+    //
+    // Neither this fork nor upstream tracked the cumulative total, so a
+    // tactical line could keep taking the +2/+3 tiers with nothing but MAX_PLY
+    // to stop it -- that bounds the recursion, not the tree. Stockfish and
+    // Berserk both gate their upper tiers this way (`ss->doubleExtensions`,
+    // `ss->de <= 6/7`).
+    //
+    // 8 is deliberately loose: a backstop against runaway lines, not a tuning
+    // knob. Ordinary singular behaviour is unchanged because the base +1 does
+    // not consume budget -- only the tiers above it do.
+    i32 max_double_extensions: 8;
     // Reduce less when the static eval and the TT's search score disagree --
     // the same `complexity` signal as `rfp_complexity`, applied to reductions
     // rather than to a pruning margin. A disputed position is where a reduced

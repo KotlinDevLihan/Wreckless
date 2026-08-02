@@ -1120,9 +1120,22 @@ fn search<NODE: NodeType>(
                 + 36)
                 .max(0);
 
+            // Upper tiers gated on how many have already been granted above
+            // this node. Each singular node can hand out +3 plies, and nothing
+            // tracked the cumulative total, so a tactical line could keep
+            // extending -- `MAX_PLY` bounds the recursion but not the tree.
+            // Stockfish and Berserk both gate their tiers this way
+            // (`ss->doubleExtensions`, `ss->de`).
+            //
+            // The limit is deliberately loose. This is a backstop against
+            // runaway lines, not a tuning knob: at the default it does not bind
+            // in normal play, so ordinary singular behaviour is unchanged.
+            let de = td.stack[ply].double_extensions;
             extension = 1;
-            extension += (singular_score < singular_beta - double_margin) as i32;
-            extension += (singular_score < singular_beta - triple_margin) as i32;
+            if de < p::max_double_extensions() {
+                extension += (singular_score < singular_beta - double_margin) as i32;
+                extension += (singular_score < singular_beta - triple_margin) as i32;
+            }
         }
         // Multi-Cut
         else if singular_score >= beta && !is_decisive(singular_score) {
@@ -1442,6 +1455,12 @@ fn search<NODE: NodeType>(
         }
 
         let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 };
+
+        // Carry the extension budget down. Only the amount *beyond* the base
+        // single extension counts -- +1 is ordinary singularity and should not
+        // consume budget; the double and triple tiers are what can compound.
+        td.stack[ply + 1].double_extensions =
+            td.stack[ply].double_extensions + if move_count == 1 { (extension - 1).max(0) } else { 0 };
 
         // Recapture extension: a capture landing on the square the
         // opponent's last move *captured* on, that doesn't lose material

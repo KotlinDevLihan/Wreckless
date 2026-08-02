@@ -51,6 +51,14 @@ pub struct StackEntry {
     pub move_count: u16,
     pub reduction: i32,
     pub follow_pv: bool,
+    /// Double/triple singular extensions accumulated along this line.
+    ///
+    /// Each singular node can grant up to +3 plies and nothing tracked how often
+    /// that had already happened above it, so a tactical line could keep
+    /// extending. `MAX_PLY` bounds the damage but not the tree. Stockfish and
+    /// Berserk both carry an equivalent counter (`ss->doubleExtensions`,
+    /// `ss->de`) and gate their upper extension tiers on it.
+    pub double_extensions: i32,
     pub conthist: *mut [[i16; 64]; 13],
     pub contcorrhist: *mut [[i16; 64]; 13],
 }
@@ -68,6 +76,7 @@ impl Default for StackEntry {
             move_count: 0,
             reduction: 0,
             follow_pv: false,
+            double_extensions: 0,
             conthist: std::ptr::null_mut(),
             contcorrhist: std::ptr::null_mut(),
         }

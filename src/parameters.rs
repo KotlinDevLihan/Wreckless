@@ -688,7 +688,7 @@ define! {
     // deepening loop). 0 restores the previous behaviour, where every helper
     // thread searched every depth. Not a magnitude -- purely on/off, so that a
     // single SPRT can settle whether the schedule helps this engine.
-    i32 lazy_smp_skip: 0;
+    i32 lazy_smp_skip: 1;
 
     // Stop the search once a forced mate this short is proven and has been
     // confirmed for `tm_mate_confirm` plies of extra depth. Set to 0 to retire.

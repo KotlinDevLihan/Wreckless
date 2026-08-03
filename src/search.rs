@@ -90,6 +90,8 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     let mut eval_stability = 0;
     let mut pv_stability = 0;
     let mut soft_stop_voted = false;
+    // Last iteration's time multiplier, so skipped depths can still vote.
+    let mut last_multiplier = 1.0f32;
 
     // Ring buffer of best scores from recent iterations, so the time manager
     // can compare against the score four iterations ago (as in Stockfish).
@@ -133,31 +135,35 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
 
     // Iterative Deepening
     for depth in 1..MAX_PLY as i32 {
-        // KNOWN INTERACTION -- read before enabling this.
+        // This used to be a `continue` straight past the loop body, which took
+        // the soft-stop vote block with it. The stop needs a 65% majority and
+        // votes are cast only at iteration boundaries, so a helper inside one
+        // of the longer iterations this schedule creates could neither cast nor
+        // retract a vote; with enough helpers stalled the majority never landed,
+        // thread 0 sailed past its soft bound, and only the hard bound stopped
+        // it -- 72.8% of the remaining clock on one move. The skip path now
+        // votes before continuing, using the multiplier from its last real
+        // iteration, so vote cadence no longer depends on the schedule.
         //
-        // The soft stop needs a 65% majority of threads to vote, and votes are
-        // cast only at iteration boundaries. `continue` skips the whole loop
-        // body, the vote block included, so a skipping helper votes less often
-        // and -- while it is inside one of the longer iterations this schedule
-        // creates -- cannot vote at all. If enough helpers are mid-jump the
-        // majority is never reached, thread 0 sails past its soft bound, and
-        // only the hard bound stops it: 72.8% of the remaining clock on one
-        // move. That is the exact time-loss mode the rest of this work removed.
-        //
-        // Mitigated, not eliminated: skip sizes are capped at 3, so the worst
-        // jump is 3 plies (~8x the work of one iteration at EBF 2) rather than
-        // the 6 plies (~64x) an uncapped table produces. Votes are also
-        // level-triggered rather than edge-triggered -- a thread that has voted
-        // stays voted until it retracts -- which bounds the damage further.
-        //
-        // Because it perturbs a time-management path and has no measurement
-        // behind it, `lazy_smp_skip` defaults to 0. Set it to 1 to test the
-        // schedule; the correct fix if it proves worth keeping is to let the
-        // vote block run on skipped depths rather than to shorten the jumps.
+        // Skip sizes stay capped at 3 regardless: a size-6 helper jumping depth
+        // 20 -> 26 does ~64x the work of one iteration at EBF 2, which is a long
+        // time to hold a stale vote even though it can now hold one at all.
         if td.id > 0 && p::lazy_smp_skip() > 0 {
             let i = (td.id - 1) % SKIP_SIZE.len();
             let size = SKIP_SIZE[i];
             if size > 1 && (depth + td.board.fullmove_number() as i32 + SKIP_PHASE[i]) % size != 0 {
+                // Vote before skipping. A skipped depth does no work, but the
+                // clock still runs, and a thread that never reaches an
+                // iteration boundary can neither cast nor retract a vote --
+                // which is what let the 65% majority stall. Its search state is
+                // unchanged since its last real iteration, so that iteration's
+                // multiplier is the correct stand-in.
+                soft_stop_vote(td, thread_count, &mut soft_stop_voted, last_multiplier);
+
+                if td.shared.status.get() == Status::STOPPED {
+                    break;
+                }
+
                 continue;
             }
         }
@@ -497,22 +503,10 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             break;
         }
 
-        if td.time_manager.use_time_management() {
-            if td.time_manager.soft_limit(td, multiplier) {
-                if !soft_stop_voted {
-                    soft_stop_voted = true;
-
-                    let votes = td.shared.soft_stop_votes.fetch_add(1, Ordering::AcqRel) + 1;
-                    let majority = (thread_count * 65).div_ceil(100);
-                    if votes >= majority {
-                        td.shared.status.set(Status::STOPPED);
-                    }
-                }
-            } else if soft_stop_voted {
-                soft_stop_voted = false;
-                td.shared.soft_stop_votes.fetch_sub(1, Ordering::AcqRel);
-            }
-        }
+        // Evaluated eagerly and cached so a subsequent skipped depth can vote
+        // with this thread's most recent view; it is a handful of float ops.
+        last_multiplier = multiplier();
+        soft_stop_vote(td, thread_count, &mut soft_stop_voted, last_multiplier);
 
         if td.shared.status.get() == Status::STOPPED {
             break;
@@ -2645,6 +2639,33 @@ fn update_continuation_histories_in_check(
 /// to roughly [-8192, 8192] like Stockfish's `TTMoveHistory`.
 /// Gravity update for ProbCut's acceptance rate. Same form and bound as
 /// `update_tt_move_history`.
+/// Casts or retracts this thread's soft-stop vote.
+///
+/// Votes are level-triggered, not edge-triggered: a thread that has voted stays
+/// voted until it retracts, and the search stops once 65% of threads agree.
+/// That only works if every thread keeps reaching a point where it can answer,
+/// which is why the Lazy SMP skip path calls this too.
+fn soft_stop_vote(td: &mut ThreadData, thread_count: usize, voted: &mut bool, multiplier: f32) {
+    if !td.time_manager.use_time_management() {
+        return;
+    }
+
+    if td.time_manager.soft_limit(td, || multiplier) {
+        if !*voted {
+            *voted = true;
+
+            let votes = td.shared.soft_stop_votes.fetch_add(1, Ordering::AcqRel) + 1;
+            let majority = (thread_count * 65).div_ceil(100);
+            if votes >= majority {
+                td.shared.status.set(Status::STOPPED);
+            }
+        }
+    } else if *voted {
+        *voted = false;
+        td.shared.soft_stop_votes.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 fn update_probcut_history(td: &mut ThreadData, bonus: i32) {
     let bonus = bonus.clamp(-8192, 8192);
     let entry = td.probcut_history;

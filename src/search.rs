@@ -105,8 +105,63 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
         return;
     }
 
+    // Lazy SMP thread differentiation.
+    //
+    // Every thread ran `1..MAX_PLY` identically, and the *only* thing making
+    // helpers diverge was the `td.id`-seeded jitter on the LMR reduction. That
+    // desynchronises which lines get reduced, but it does not stop every thread
+    // arriving at the same depth at roughly the same time and re-deriving the
+    // same iteration. Threads that reach different depths at different times
+    // put a wider spread of depths and bounds into the shared TT, which is the
+    // entire mechanism by which Lazy SMP gains anything.
+    //
+    // This is the classic skip-phase/skip-size schedule: helper `i` searches
+    // only depths where `(depth + ply + phase[i]) % size[i] == 0`, so different
+    // helpers walk different subsequences and none of them tracks thread 0.
+    // Mixing in `fullmove_number` keeps a given helper from drawing the same
+    // subsequence on every move of the game.
+    //
+    // Thread 0 is deliberately excluded: it reports the move, it owns the time
+    // manager, and both early exits above depend on it seeing every depth.
+    // Every (size, phase) pair is distinct and `phase < size`. Stockfish's
+    // historical table contains pairs where `phase >= size`, which alias onto
+    // `phase % size` -- with that table threads 3 and 5 draw an identical
+    // subsequence and duplicate each other's work outright, which is precisely
+    // what this schedule exists to prevent.
+    const SKIP_SIZE: [i32; 20] = [1, 2, 2, 3, 3, 3, 1, 2, 2, 3, 3, 3, 1, 2, 2, 3, 3, 3, 1, 2];
+    const SKIP_PHASE: [i32; 20] = [0, 0, 1, 0, 1, 2, 0, 0, 1, 0, 1, 2, 0, 0, 1, 0, 1, 2, 0, 0];
+
     // Iterative Deepening
     for depth in 1..MAX_PLY as i32 {
+        // KNOWN INTERACTION -- read before enabling this.
+        //
+        // The soft stop needs a 65% majority of threads to vote, and votes are
+        // cast only at iteration boundaries. `continue` skips the whole loop
+        // body, the vote block included, so a skipping helper votes less often
+        // and -- while it is inside one of the longer iterations this schedule
+        // creates -- cannot vote at all. If enough helpers are mid-jump the
+        // majority is never reached, thread 0 sails past its soft bound, and
+        // only the hard bound stops it: 72.8% of the remaining clock on one
+        // move. That is the exact time-loss mode the rest of this work removed.
+        //
+        // Mitigated, not eliminated: skip sizes are capped at 3, so the worst
+        // jump is 3 plies (~8x the work of one iteration at EBF 2) rather than
+        // the 6 plies (~64x) an uncapped table produces. Votes are also
+        // level-triggered rather than edge-triggered -- a thread that has voted
+        // stays voted until it retracts -- which bounds the damage further.
+        //
+        // Because it perturbs a time-management path and has no measurement
+        // behind it, `lazy_smp_skip` defaults to 0. Set it to 1 to test the
+        // schedule; the correct fix if it proves worth keeping is to let the
+        // vote block run on skipped depths rather than to shorten the jumps.
+        if td.id > 0 && p::lazy_smp_skip() > 0 {
+            let i = (td.id - 1) % SKIP_SIZE.len();
+            let size = SKIP_SIZE[i];
+            if size > 1 && (depth + td.board.fullmove_number() as i32 + SKIP_PHASE[i]) % size != 0 {
+                continue;
+            }
+        }
+
         if td.id == 0
             && let Limits::Depth(maximum) = td.time_manager.limits()
             && depth > maximum

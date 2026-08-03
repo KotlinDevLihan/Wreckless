@@ -129,12 +129,18 @@ struct SparseEntry {
     count: usize,
 }
 
-#[derive(Clone)]
+// Not `Clone`: `Network` is built once per thread by `Network::new` and never
+// copied. The derive was vestigial, and keeping it would force a `Clone` impl
+// on `HugeBox` whose natural form materialises a `T` temporary -- here a 737 KB
+// array, which is a plausible stack overflow on a default thread stack.
 pub struct Network {
     parameters: Arc<ParametersHandle>,
     index: usize,
-    pst_stack: Box<[PstAccumulator]>,
-    threat_stack: Box<[ThreatAccumulator]>,
+    // Large-page backed; see the initialiser. These are the NNUE's KV cache --
+    // touched on every make and unmake -- and at 246 plies x 3072 B each they
+    // are ~0.72 MB apiece, or 369 4 KB pages per thread for the pair.
+    pst_stack: crate::history::HugeBox<[PstAccumulator; MAX_PLY]>,
+    threat_stack: crate::history::HugeBox<[ThreatAccumulator; MAX_PLY]>,
     cache: AccumulatorCache,
     nnz_table: Box<[SparseEntry]>,
 }
@@ -159,8 +165,25 @@ impl Network {
         Self {
             parameters: parameters.clone(),
             index: 0,
-            pst_stack: vec![PstAccumulator::new(&parameters); MAX_PLY].into_boxed_slice(),
-            threat_stack: vec![ThreatAccumulator::new(); MAX_PLY].into_boxed_slice(),
+            pst_stack: {
+                // Same reasoning as the network (see `Parameters::allocate_huge`),
+                // applied to the hottest *per-thread* structure. The pair of
+                // stacks is ~1.4 MB, and `vec![X; MAX_PLY]` clones into every
+                // slot, so all of it is faulted in at startup rather than left
+                // lazily untouched. On 2 MB pages that is one page per stack
+                // instead of ~185.
+                //
+                // Allocated zeroed and then written slot by slot, because
+                // `PstAccumulator::new` seeds `ft_biases` rather than zeros --
+                // zeroed memory is not a valid starting accumulator. `ptr::write`
+                // rather than assignment so the zeroed slot is never dropped;
+                // both accumulator types are plain data (`ArrayVec<T: Copy>`),
+                // so this is sound either way, but it does not rely on that.
+                crate::history::HugeBox::new_array_with(|_| PstAccumulator::new(&parameters))
+            },
+            threat_stack: {
+                crate::history::HugeBox::new_array_with(|_| ThreatAccumulator::new())
+            },
             cache: AccumulatorCache::new(&parameters),
             nnz_table: nnz_table.into_boxed_slice(),
         }

@@ -51,6 +51,30 @@ impl<T> HugeBox<T> {
     }
 }
 
+impl<T, const N: usize> HugeBox<[T; N]> {
+    /// Builds each element in place inside a fresh large-page allocation.
+    ///
+    /// `new_zeroed` followed by `iter_mut` would be the obvious way to do this,
+    /// but it forms `&mut T` over zeroed bytes before anything valid has been
+    /// written there. That is only sound when all-zero happens to be a valid
+    /// `T` -- fine for integers, not guaranteed for an enum whose discriminants
+    /// do not include 0. Writing through a raw pointer never asserts validity
+    /// of what is already in the slot, so this holds for any `T`.
+    ///
+    /// `ptr::write` also means the zeroed slot is never dropped, which is what
+    /// we want: there is nothing there to drop.
+    pub fn new_array_with(mut f: impl FnMut(usize) -> T) -> Self {
+        let boxed = Self::new_zeroed();
+        let base = boxed.ptr.as_ptr().cast::<T>();
+
+        for i in 0..N {
+            unsafe { std::ptr::write(base.add(i), f(i)) };
+        }
+
+        boxed
+    }
+}
+
 impl<T> std::ops::Deref for HugeBox<T> {
     type Target = T;
     fn deref(&self) -> &T {

@@ -684,6 +684,12 @@ define! {
     // (~321-382), so the two scales are effectively 1:1 and no rescale is
     // warranted. Restored to the untouched upstream fixed-point constants.
     // base/min/max are unaffected by this and are kept as measured.
+    // Master switch for Lazy SMP depth differentiation (see the iterative
+    // deepening loop). 0 restores the previous behaviour, where every helper
+    // thread searched every depth. Not a magnitude -- purely on/off, so that a
+    // single SPRT can settle whether the schedule helps this engine.
+    i32 lazy_smp_skip: 0;
+
     // Stop the search once a forced mate this short is proven and has been
     // confirmed for `tm_mate_confirm` plies of extra depth. Set to 0 to retire.
     i32 tm_mate_moves: 5;

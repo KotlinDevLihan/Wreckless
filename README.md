@@ -743,6 +743,16 @@ fastchess \
 logical core leaves nothing for the harness and makes per-move timing erratic, which shows up as
 spurious losses on time.
 
+**Halve that again if both engines ponder.** Without pondering, only one engine per game is searching
+at a time, so `concurrency` games cost `concurrency` busy threads. With `Ponder` enabled on both
+sides there is no idle gap — one engine thinks while the other ponders, continuously — so the same
+setting costs **twice** the threads. On an 8-core machine, `-concurrency 4` with both engines
+pondering is 8 permanently busy threads plus the harness, and the resulting jitter produces losses on
+time that have nothing to do with either engine's time management.
+
+Pondering also makes every game's node counts irreproducible, so most SPRT testing here is done with
+it off. Turn it on to test pondering itself, not as a default.
+
 **Choose bounds that match the question.** `elo0=0 elo1=5` asks "does this gain at least 5 nElo" and
 is right for a change meant to add strength. For a correctness fix or a simplification, use
 `elo0=-5 elo1=0` — "does this lose anything" — which resolves far sooner. A test whose true effect

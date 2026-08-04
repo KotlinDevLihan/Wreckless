@@ -171,6 +171,12 @@ pub struct SharedContext {
     pub syzygy_probe_depth: AtomicI32,
     pub syzygy_probe_limit: AtomicUsize,
     pub ponder: AtomicBool,
+    /// Whether the search currently running was started by `go ponder`, which
+    /// stays true across `ponderhit` -- unlike [`Self::ponder`], which the hit
+    /// clears while the search carries on. The GUI is only ever obliged to wait
+    /// for a `bestmove` from a search it did not abandon, and a ponder search
+    /// remains abandonable for its whole life.
+    pub ponder_search: AtomicBool,
     /// Set when a ponder search is torn down because the game moved on rather
     /// than because the GUI asked for the move. `go()` must then return
     /// silently: the `bestmove` would answer a `go ponder` the GUI has already
@@ -199,6 +205,7 @@ impl Default for SharedContext {
             syzygy_probe_depth: AtomicI32::new(1),
             syzygy_probe_limit: AtomicUsize::new(7),
             ponder_abandoned: AtomicBool::new(false),
+            ponder_search: AtomicBool::new(false),
             ponder: AtomicBool::new(false),
             ponderhit_time: Mutex::new(None),
             show_wdl: AtomicBool::new(false),

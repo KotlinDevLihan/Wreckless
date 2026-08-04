@@ -185,8 +185,20 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
                     // silent-ignore rule below still applies to it.
                     let command = message.split_whitespace().next().unwrap_or_default();
 
+                    // Tests `ponder_search`, not `ponder`. `ponderhit` clears
+                    // `ponder` while the search keeps running, and a game that
+                    // ends in *that* window -- the opponent flags, or is mated,
+                    // while we are converting a ponder into a real search --
+                    // left the command dropped exactly as before.
+                    //
+                    // That window is why this only reproduces with both engines
+                    // pondering: with one side pondering the engine is idle
+                    // between its own moves, so a game ending lands in the idle
+                    // gap and everything is forwarded normally. With both, there
+                    // is no idle gap -- the engine is inside a search whenever
+                    // the game can end.
                     if matches!(command, "ucinewgame" | "position" | "go")
-                        && shared.ponder.load(std::sync::atomic::Ordering::Acquire)
+                        && shared.ponder_search.load(std::sync::atomic::Ordering::Acquire)
                     {
                         // Mark it abandoned BEFORE releasing the search, so
                         // `go()` cannot reach its `bestmove` between the two
@@ -288,6 +300,7 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
 
     *shared.ponderhit_time.lock().unwrap() = None;
     shared.ponder_abandoned.store(false, std::sync::atomic::Ordering::Release);
+    shared.ponder_search.store(ponder, std::sync::atomic::Ordering::Release);
     shared.ponder.store(ponder, std::sync::atomic::Ordering::Release);
 
     threads.execute_searches_filtered(time_manager, settings.report, settings.multi_pv, board, shared, &search_moves);
@@ -306,7 +319,10 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
     // the time, and silently wrong the rest. Emitting it desynchronises the
     // stream by exactly one `bestmove` for the remainder of the game, which is
     // what an arbiter reports as an illegal move or a disconnect.
-    if shared.ponder_abandoned.swap(false, std::sync::atomic::Ordering::AcqRel) {
+    let abandoned = shared.ponder_abandoned.swap(false, std::sync::atomic::Ordering::AcqRel);
+    shared.ponder_search.store(false, std::sync::atomic::Ordering::Release);
+
+    if abandoned {
         return;
     }
 

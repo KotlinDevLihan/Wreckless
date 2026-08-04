@@ -952,27 +952,11 @@
       "rk": 0.002
     },
     {
-      "name": "conthist_lag3",
-      "default": 195.0,
-      "min": 98.0,
-      "max": 293.0,
-      "ck": 9.8,
-      "rk": 0.002
-    },
-    {
       "name": "conthist_lag4",
       "default": 700.0,
       "min": 350.0,
       "max": 1050.0,
       "ck": 35.0,
-      "rk": 0.002
-    },
-    {
-      "name": "conthist_lag5",
-      "default": 89.0,
-      "min": 45.0,
-      "max": 134.0,
-      "ck": 4.5,
       "rk": 0.002
     },
     {

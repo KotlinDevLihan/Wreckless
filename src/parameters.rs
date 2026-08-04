@@ -571,9 +571,7 @@ define! {
     // forever as unverified literals.
     i32 conthist_lag1: 700;
     i32 conthist_lag2: 700;
-    i32 conthist_lag3: 195;
     i32 conthist_lag4: 700;
-    i32 conthist_lag5: 89;
     // 700. A halving to 350 was tried, on the argument that the write should
     // mirror `search()`'s 1/2 read weight. That argument does not survive
     // checking: the two read sites already disagree on this lag (search 0.50,

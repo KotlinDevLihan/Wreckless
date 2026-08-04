@@ -2557,16 +2557,17 @@ fn update_continuation_histories_in_check(
     // Per-lag weights and positive-consistency multipliers, as in Stockfish:
     // all six lags are updated, and the more continuation entries for this
     // move are already positive, the stronger the update. Lags 1/2/4/6 are
-    // weighted equally (matching the original, already-tuned baseline, which
-    // treated those four lags at full and equal strength); lags 3/5 are new
-    // additions kept at Stockfish's relative ratio to the primary weight.
-    // Both SPSA-tunable now (previously hardcoded consts).
-    let conthist_bonuses: [(isize, i32); 6] = [
+    // Weighted equally, matching the already-tuned baseline, which treated
+    // these four lags at full and equal strength. SPSA-tunable.
+    // Lags 3 and 5 removed; see `CONTHIST_LAGS` in movepick.rs. Both tables were
+    // tuned independently and both drove those two lags to a fraction of the
+    // others -- 195 and 89 here against 700, and 277 and 126 there against
+    // ~1000-1600. Redistributing the scoring table's dead weight proportionally
+    // reproduced upstream's four-lag set exactly, which is what settled it.
+    let conthist_bonuses: [(isize, i32); 4] = [
         (1, p::conthist_lag1()),
         (2, p::conthist_lag2()),
-        (3, p::conthist_lag3()),
         (4, p::conthist_lag4()),
-        (5, p::conthist_lag5()),
         (6, p::conthist_lag6()),
     ];
     let multipliers: [i32; 7] = [
@@ -2595,7 +2596,7 @@ fn update_continuation_histories_in_check(
     // which this function -- called on every cutoff -- should not pay for. So
     // the first pass caches each eligible entry's subtable pointer and the
     // second reuses them, leaving exactly one stack traversal as before.
-    let mut targets = [(std::ptr::null_mut::<[[i16; 64]; 13]>(), 0i32, 0isize); 6];
+    let mut targets = [(std::ptr::null_mut::<[[i16; 64]; 13]>(), 0i32, 0isize); 4];
     let mut len = 0;
     let mut positive_count = 0;
 
@@ -2620,16 +2621,14 @@ fn update_continuation_histories_in_check(
     // count. In check the loop stops after lag 2, so a raw count can never
     // exceed 2 and the multipliers tuned for indices 3-6 are unreachable there
     // -- an in-check node with both lags positive got index 2 where an
-    // out-of-check node with all six positive got index 6, for the same
+    // out-of-check node with all four positive got the top index, for the same
     // "everything agrees" state. Scaling by `len` puts both on the same
     // footing. `len` is 0 only when no lag had a move, and index 0 is the
     // no-agreement multiplier, which is the right answer for that case.
     let multiplier = multipliers[if len == 0 { 0 } else { positive_count * 6 / len }];
 
     for &(conthist, weight, offset) in &targets[..len] {
-        // Overall scale is SPSA-tunable since the right magnitude for this
-        // 6-lag scheme relative to the original 4-lag baseline is an
-        // empirical question, not one to guess at.
+        // Overall scale stays SPSA-tunable.
         let scaled = bonus * weight * multiplier / p::conthist_div().max(1) + 73 * (offset < 2) as i32;
         td.continuation_history.update(conthist, piece, sq, scaled);
     }

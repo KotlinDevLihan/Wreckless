@@ -359,7 +359,7 @@ impl MovePicker {
             entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
                 + 1024 * pawn_hist.get(pawn_key, moved, to) / 1024
                 + low_ply_term
-                // All six continuation lags; see CONTHIST_WEIGHTS.
+                // All four continuation lags; see CONTHIST_WEIGHTS.
                 + CONTHIST_WEIGHTS[0] * td.continuation_history.get(conthist[0], moved, to) / 1024
                 + CONTHIST_WEIGHTS[1] * td.continuation_history.get(conthist[1], moved, to) / 1024
                 + CONTHIST_WEIGHTS[2] * td.continuation_history.get(conthist[2], moved, to) / 1024

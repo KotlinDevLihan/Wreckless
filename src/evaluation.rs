@@ -37,9 +37,16 @@ pub fn correct_eval(td: &ThreadData, raw_eval: i32, correction_value: i32) -> i3
     // exactly. Setting `eval_fifty_div` to 214 reproduces Stockfish's.
     //
     // The `.min()` tracks the offset so the sign-flip guard above holds for any
-    // tuned value, and the divisor is `.max(1)` because SPSA writes it.
+    // tuned value; the divisor is `.max(1)` because SPSA writes it.
+    // Compared in i32. `horizon as u8` wrapped: `eval_fifty_offset` is declared
+    // in spsa.config with an upper bound of 260, and at 260 the cast gives 4 --
+    // damping would stop at a clock of 4 and the multiplier would sit at
+    // 260/200 = 1.3, inflating every static eval by 30% and rescaling every
+    // search margin that reads it. That is precisely the scale drift the clamp
+    // above exists to prevent, reintroduced by the clamp itself.
     let horizon = p::eval_fifty_offset();
-    eval = eval * (horizon - td.board.fiftymove_clock().min(horizon as u8) as i32) / p::eval_fifty_div().max(1);
+    let clock = (td.board.fiftymove_clock() as i32).min(horizon);
+    eval = eval * (horizon - clock) / p::eval_fifty_div().max(1);
 
     eval += correction_value;
 

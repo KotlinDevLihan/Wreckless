@@ -1387,7 +1387,7 @@ fn search<NODE: NodeType>(
 
         let is_quiet = mv.is_quiet();
 
-        // Resolved once and reused by all six continuation lags below.
+        // Resolved once and reused by both continuation lags below.
         let moved = td.board.piece_on(mv.from());
         let to = mv.to();
 
@@ -1420,7 +1420,9 @@ fn search<NODE: NodeType>(
             // contributes its information and every downstream coefficient
             // keeps the scale it was tuned for. Same discipline
             // `corr_weight_div` documents for the correction blend.
-            // All six continuation lags, held at upstream's scale.
+            // Both continuation lags, held at upstream's scale. This sum is
+            // upstream's two (lags 1 and 2); the four-lag set lives in
+            // movepick's `CONTHIST_WEIGHTS` and is a different consumer.
             //
             // Two problems were stacked here. First, lags 3 and 5 were being
             // *written* by update_continuation_histories_in_check but read by
@@ -2129,10 +2131,23 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut move_count = 0;
     // The hash move, first. The TT is probed above and written below, but the
     // stored move was never read, so qsearch -- most of the tree -- ordered
-    // every node without the one move most likely to be best. `MovePicker`
-    // verifies legality before returning it, which matters here because qsearch
-    // generates only a subset of moves and the entry may hold a quiet.
-    let mut move_picker = MovePicker::new(tt_move, None);
+    // every node without the one move most likely to be best.
+    //
+    // A quiet entry must be dropped, and legality is not the property that
+    // decides it. `Stage::HashMove` emits the TT move before `skip_quiets` is
+    // ever consulted, and nothing downstream catches a quiet: delta pruning is
+    // gated on `!mv.is_quiet()`, SEE pruning uses a threshold any quiet passes,
+    // and at `move_count == 1` the late-move break cannot fire. So a quiet TT
+    // move was searched, and since a quiet does not reduce material there is
+    // nothing driving the recursion toward a quiet position -- qsearch could
+    // wander until MAX_PLY. Upstream sidesteps this by passing `Move::NULL`
+    // here and giving up the ordering; the gate below is Stockfish's, keeping
+    // the ordering win in the cases where it is sound.
+    //
+    // In check is the exception: every evasion is generated, quiet ones
+    // included, so a quiet entry is a legitimate member of the move pool.
+    let qs_tt_move = if in_check || !tt_move.is_quiet() { tt_move } else { Move::NULL };
+    let mut move_picker = MovePicker::new(qs_tt_move, None);
 
     // Quiets are only generated to serve as check evasions, and only while no
     // evasion found so far has proven non-losing. best_score does move once

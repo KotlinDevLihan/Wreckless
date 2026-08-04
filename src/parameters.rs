@@ -608,8 +608,13 @@ define! {
     // It was cut to 3018 on the argument that at 7052 the term was "2.34x the
     // next-largest ordering signal and dominated root move choice", anchoring
     // it instead to continuation-history lag 1. Then to 2765, correcting that
-    // anchor's arithmetic (it used 1614, upstream's four-lag weight, where this
-    // file's `CONTHIST_WEIGHTS[0]` is 1479).
+    // anchor's arithmetic. Both cuts were later reverted; the shipped value is
+    // 7052 and the paragraph below explains why.
+    //
+    // The arithmetic distinction that second correction turned on no longer
+    // exists either: it separated upstream's 1614 from this fork's 1479, and
+    // `CONTHIST_WEIGHTS[0]` is now 1614 again, since dropping the two dead lags
+    // put the four survivors back on upstream's exact weights.
     //
     // Both steps were reasoning, not measurement, and both moved away from the
     // only value with a positive result attached. Dominating root move ordering
@@ -621,7 +626,8 @@ define! {
     // Split point between `Stage::Quiet` and `Stage::BadQuiet`, compared
     // against the whole quiet score.
     //
-    // Deliberately NOT rescaled when `lowply_weight` was halved (7052 -> 3018),
+    // Deliberately NOT rescaled during the `lowply_weight` 7052 -> 3018 episode
+    // (since reverted; see above),
     // even though the module doc in movepick.rs warns that this threshold is
     // calibrated against the quiet score's total magnitude -- the same argument
     // that pins CONTHIST_WEIGHTS with a const assertion. The reason the two

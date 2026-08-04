@@ -684,6 +684,16 @@ define! {
     // (~321-382), so the two scales are effectively 1:1 and no rescale is
     // warranted. Restored to the untouched upstream fixed-point constants.
     // base/min/max are unaffected by this and are kept as measured.
+    // Evaluation blend; see `correct_eval`. The first eval-side parameters this
+    // engine has ever exposed to tuning. The divisor is intentionally absent --
+    // it sets the units every search margin is tuned in.
+    i32 eval_material_base: 21032;
+    i32 eval_optimism_base: 1548;
+    // Fiftymove damping. Defaults reproduce the shipped `(200 - clock) / 200`;
+    // Stockfish's equivalent is offset 200 with divisor 214.
+    i32 eval_fifty_offset: 200;
+    i32 eval_fifty_div: 200;
+
     // Master switch for Lazy SMP depth differentiation (see the iterative
     // deepening loop). 0 restores the previous behaviour, where every helper
     // thread searched every depth. Not a magnitude -- purely on/off, so that a

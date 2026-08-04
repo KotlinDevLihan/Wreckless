@@ -1182,5 +1182,37 @@
     "max": 1.0,
     "ck": 1.0,
     "rk": 0.002
+  },
+  {
+    "name": "eval_material_base",
+    "default": 21032.0,
+    "min": 10516.0,
+    "max": 31548.0,
+    "ck": 1051.6,
+    "rk": 0.002
+  },
+  {
+    "name": "eval_optimism_base",
+    "default": 1548.0,
+    "min": 774.0,
+    "max": 2322.0,
+    "ck": 77.4,
+    "rk": 0.002
+  },
+  {
+    "name": "eval_fifty_offset",
+    "default": 200.0,
+    "min": 150.0,
+    "max": 260.0,
+    "ck": 5.5,
+    "rk": 0.002
+  },
+  {
+    "name": "eval_fifty_div",
+    "default": 200.0,
+    "min": 150.0,
+    "max": 260.0,
+    "ck": 5.5,
+    "rk": 0.002
   }
 ]

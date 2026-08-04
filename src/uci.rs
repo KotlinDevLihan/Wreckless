@@ -159,6 +159,39 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
                     break;
                 }
                 _ => {
+                    // A pondering search never terminates on its own: both
+                    // `soft_limit` and `check_time` return false outright while
+                    // `ponder` is set, so it runs to MAX_PLY. It ends only when
+                    // something clears the flag.
+                    //
+                    // The spec says the GUI sends `stop` before moving on, and
+                    // when *we* are the one being waited for it does. But when
+                    // the OPPONENT flags or crashes, the game is simply over
+                    // from the harness's point of view -- it was not waiting on
+                    // our move, so it has no reason to send `stop`, and it goes
+                    // straight to setting up the next game.
+                    //
+                    // Those commands then hit the `RUNNING` test below and were
+                    // dropped, `go()` stayed blocked in its ponder-wait loop,
+                    // and every later command was dropped for the same reason.
+                    // Because `isready` is answered from this thread, the GUI
+                    // saw a live, responsive engine that never replied to
+                    // `position`/`go` -- so it timed out and reported a
+                    // disconnect rather than a hang.
+                    //
+                    // Any command that means the game moved on therefore ends a
+                    // ponder search first. This is narrowly scoped to pondering:
+                    // a real search has a result someone is waiting for, and the
+                    // silent-ignore rule below still applies to it.
+                    let command = message.split_whitespace().next().unwrap_or_default();
+
+                    if matches!(command, "ucinewgame" | "position" | "go")
+                        && shared.ponder.load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                        shared.status.set(Status::STOPPED);
+                    }
+
                     // According to the UCI specs, commands that are unexpected
                     // in the current state should be ignored silently.
                     // (https://backscattering.de/chess/uci/#unexpected)

@@ -1,8 +1,23 @@
-use crate::{thread::ThreadData, types::Score};
+use crate::{parameters as p, thread::ThreadData, types::Score};
 
 pub fn correct_eval(td: &ThreadData, raw_eval: i32, correction_value: i32) -> i32 {
-    let mut eval = (raw_eval * (21032 + td.board.material())
-        + td.optimism[td.board.side_to_move()] * (1548 + td.board.material()))
+    // Stockfish's `evaluate()` structure: blend the raw network output with
+    // `optimism`, both scaled by material so the same centipawn means less in a
+    // bare endgame than in a full middlegame.
+    //
+    // These were hardcoded, and `spsa.config` had no eval-side entry at all --
+    // so the function every single evaluation passes through was the one part
+    // of the engine tuning could not reach, while 148 search constants
+    // downstream of it were tuned repeatedly.
+    //
+    // NOTE the divisor is deliberately NOT exposed. It sets the engine's
+    // overall evaluation scale, and every margin in the search -- RFP, futility,
+    // razoring, singular, SEE, the history normalisation -- is tuned against
+    // that scale. Letting SPSA move it would silently rescale all of them at
+    // once: the exact scale-drift failure this codebase has paid for repeatedly.
+    // The numerators change the blend; the divisor would change the units.
+    let mut eval = (raw_eval * (p::eval_material_base() + td.board.material())
+        + td.optimism[td.board.side_to_move()] * (p::eval_optimism_base() + td.board.material()))
         / 27015;
 
     // Damp toward zero as the fiftymove clock runs up. The clock is a `u8`
@@ -15,7 +30,16 @@ pub fn correct_eval(td: &ThreadData, raw_eval: i32, correction_value: i32) -> i3
     // Unreachable from legal play -- the fiftymove rule ends the game at 100 --
     // so this only fires on a hand-written or corrupt FEN, and is inert for
     // normal games.
-    eval = eval * (200 - td.board.fiftymove_clock().min(200) as i32) / 200;
+    // Stockfish uses `(200 - rule50) / 214` here, which damps to ~0.93 even at a
+    // clock of zero; this damps to exactly 1.0. Both are defensible and the
+    // difference has never been tested, so the offset and the divisor are now
+    // separate parameters whose defaults reproduce the shipped behaviour
+    // exactly. Setting `eval_fifty_div` to 214 reproduces Stockfish's.
+    //
+    // The `.min()` tracks the offset so the sign-flip guard above holds for any
+    // tuned value, and the divisor is `.max(1)` because SPSA writes it.
+    let horizon = p::eval_fifty_offset();
+    eval = eval * (horizon - td.board.fiftymove_clock().min(horizon as u8) as i32) / p::eval_fifty_div().max(1);
 
     eval += correction_value;
 

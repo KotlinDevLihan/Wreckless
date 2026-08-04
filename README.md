@@ -456,6 +456,22 @@ Grouped by what is actually known about each change:
 - **The SPSA setter turned a typo into a forfeit.** `value.parse().unwrap()` panicked on a malformed
   value and `panic!` on an unrecognised name. A tuning run is a long-lived match; neither may take
   the process down, and UCI requires unknown options be ignored.
+- **Pondering deadlocked when the *opponent* lost on time.** A ponder search never terminates on its
+  own — `soft_limit` and `check_time` both return false outright while `ponder` is set, so it runs to
+  `MAX_PLY` and ends only when something clears the flag. The reader thread dropped any command
+  arriving while `status == RUNNING`, per the spec's "ignore unexpected commands" rule.
+
+  Those two are fine separately and fatal together. When *we* are the one being waited for, the GUI
+  sends `stop` before moving on. When the **opponent** flags or disconnects, the game is simply over
+  from the harness's point of view — it was never waiting on our move, so it has no reason to send
+  `stop`, and goes straight to `ucinewgame`/`position`/`go` for the next game. Every one of those was
+  dropped, `go()` stayed blocked in its ponder-wait loop, and so was everything after them.
+
+  It surfaced as a *disconnect* rather than a hang because `isready` is answered directly from the
+  reader thread: the GUI saw a live, responsive engine that then never replied to `position` or `go`,
+  waited for a `bestmove` that could not come, and timed out. Commands meaning the game moved on now
+  end a ponder search first. Scoped to pondering only — a real search has a result someone is waiting
+  for, and the silent-ignore rule still applies to it.
 - **A panicking worker thread hung the engine.** The completion signal was skipped, so
   `ReceiverHandle::join()` blocked forever with no output. It now fires via `catch_unwind` before the
   panic is re-raised, turning a silent freeze into a visible crash.

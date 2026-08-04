@@ -472,6 +472,19 @@ Grouped by what is actually known about each change:
   waited for a `bestmove` that could not come, and timed out. Commands meaning the game moved on now
   end a ponder search first. Scoped to pondering only — a real search has a result someone is waiting
   for, and the silent-ignore rule still applies to it.
+
+  **Ending the search is only half of it.** `go()` would then fall through and print the `bestmove`
+  for the position it had been pondering. UCI requires a `bestmove` after `stop`, and *only* after
+  `stop` — a GUI that sent `position`/`go` instead is not waiting for one, and reads the next line
+  the engine prints as the answer to the `go` it just sent. That answer is a move for the abandoned
+  ponder position: illegal in the new one roughly half the time, and silently wrong the rest.
+
+  Worse, it desynchronises the stream by exactly one `bestmove` for the remainder of the game — every
+  later reply answers the previous `go`, so the engine is permanently one move behind and the GUI
+  eventually waits on a reply that was already consumed. **That is the same root cause behind both
+  reported symptoms, the illegal-move/disconnect and the loss on time.** A `ponder_abandoned` flag is
+  now set before the search is released (so `go()` cannot slip past between the two stores) and
+  checked before anything is printed.
 - **A panicking worker thread hung the engine.** The completion signal was skipped, so
   `ReceiverHandle::join()` blocked forever with no output. It now fires via `catch_unwind` before the
   panic is re-raised, turning a silent freeze into a visible crash.

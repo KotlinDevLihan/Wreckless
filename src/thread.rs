@@ -171,6 +171,11 @@ pub struct SharedContext {
     pub syzygy_probe_depth: AtomicI32,
     pub syzygy_probe_limit: AtomicUsize,
     pub ponder: AtomicBool,
+    /// Set when a ponder search is torn down because the game moved on rather
+    /// than because the GUI asked for the move. `go()` must then return
+    /// silently: the `bestmove` would answer a `go ponder` the GUI has already
+    /// abandoned, and would be read as the reply to the `go` it just sent.
+    pub ponder_abandoned: AtomicBool,
     pub ponderhit_time: Mutex<Option<Instant>>,
     pub show_wdl: AtomicBool,
     pub soft_stop_votes: AtomicUsize,
@@ -193,6 +198,7 @@ impl Default for SharedContext {
             root_in_tb: AtomicBool::new(false),
             syzygy_probe_depth: AtomicI32::new(1),
             syzygy_probe_limit: AtomicUsize::new(7),
+            ponder_abandoned: AtomicBool::new(false),
             ponder: AtomicBool::new(false),
             ponderhit_time: Mutex::new(None),
             show_wdl: AtomicBool::new(false),

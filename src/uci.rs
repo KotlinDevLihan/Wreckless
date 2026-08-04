@@ -188,6 +188,10 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
                     if matches!(command, "ucinewgame" | "position" | "go")
                         && shared.ponder.load(std::sync::atomic::Ordering::Acquire)
                     {
+                        // Mark it abandoned BEFORE releasing the search, so
+                        // `go()` cannot reach its `bestmove` between the two
+                        // stores and emit the very reply this prevents.
+                        shared.ponder_abandoned.store(true, std::sync::atomic::Ordering::Release);
                         shared.ponder.store(false, std::sync::atomic::Ordering::Release);
                         shared.status.set(Status::STOPPED);
                     }
@@ -283,6 +287,7 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
     let time_manager = TimeManager::new(limits, board.fullmove_number(), settings.move_overhead);
 
     *shared.ponderhit_time.lock().unwrap() = None;
+    shared.ponder_abandoned.store(false, std::sync::atomic::Ordering::Release);
     shared.ponder.store(ponder, std::sync::atomic::Ordering::Release);
 
     threads.execute_searches_filtered(time_manager, settings.report, settings.multi_pv, board, shared, &search_moves);
@@ -291,6 +296,18 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
     // waiting for `ponderhit` or `stop` before announcing the best move.
     while shared.ponder.load(std::sync::atomic::Ordering::Acquire) {
         std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    // A ponder search torn down because the game moved on has no reply to give.
+    // UCI requires a `bestmove` after `stop`, and only after `stop` -- the GUI
+    // that sent `position`/`go` instead is not waiting for one, and is about to
+    // read the next line we print as the answer to its `go`. That answer would
+    // be a move for the *pondered* position: illegal in the new one about half
+    // the time, and silently wrong the rest. Emitting it desynchronises the
+    // stream by exactly one `bestmove` for the remainder of the game, which is
+    // what an arbiter reports as an illegal move or a disconnect.
+    if shared.ponder_abandoned.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        return;
     }
 
     // Every thread is indexed at `root_moves[0]` below, so the emptiness check

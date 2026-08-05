@@ -103,7 +103,24 @@ define! {
     // The count is free: `all_threats` is already computed by update_threats
     // and `colors(stm)` is a field read, so this is one AND and one popcount.
     // Capped because past ~6 attacked pieces the signal stops discriminating.
-    i32 rfp_threat_density: 14;
+    // DEFAULT 0 -- RETIRED PENDING MEASUREMENT.
+    //
+    // Shipped at 14 and cost real strength, for a reason that has nothing to do
+    // with whether threat density is a useful signal: it was added as a FLAT
+    // term to a base that scales with depth. The RFP margin is 11 units at
+    // depth 1, 60 at depth 2, 727 at depth 8. A term contributing up to 84
+    // therefore inflates the depth-1 margin by up to 764% and the depth-8
+    // margin by 6% -- so RFP effectively stopped firing near the leaves, which
+    // is where most nodes are.
+    //
+    // This is the same flat-term-on-a-scaled-base failure already documented in
+    // this file for other constants. If it is revisited, the term has to scale
+    // with the base it modifies, and that scaling has to be measured rather
+    // than assumed -- an earlier attempt in this codebase to apply "constant
+    // fraction of base" as a principle made things worse because the data said
+    // the opposite. The signal itself is still worth testing; this shape of it
+    // is not.
+    i32 rfp_threat_density: 0;
     i32 threat_density_cap: 6;
     i32 rfp_base: 19;
     // Widen the RFP margin when the static eval and the TT's search score
@@ -202,7 +219,11 @@ define! {
     // assumption that a quiet move cannot recover a large deficit -- an
     // assumption that is weakest exactly when our pieces are hanging, because
     // the "quiet" move may be the one that saves the piece.
-    i32 fp_threat_density: 20;
+    // DEFAULT 0 -- RETIRED PENDING MEASUREMENT; see `rfp_threat_density`.
+    // Worse here than there: at depth 1 the `fp_depth * depth` term is -48 and
+    // this contributed up to +120, so it did not merely inflate the margin, it
+    // dominated and flipped the sign of the expression.
+    i32 fp_threat_density: 0;
     i32 fp_base: 127;
 
     // Bad Noisy Futility Pruning

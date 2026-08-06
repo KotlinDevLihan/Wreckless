@@ -41,7 +41,7 @@ use crate::{
 };
 
 /// Per-lag weights for the continuation-history component of the quiet score,
-/// for the lags in [`CONTHIST_LAGS`], in order.
+/// for lags 1 through 6 in order.
 ///
 /// **Their total is load-bearing.** `good_quiet_threshold` splits quiets into
 /// [`Stage::Quiet`] and [`Stage::BadQuiet`] by comparing against this score, so
@@ -51,30 +51,20 @@ use crate::{
 /// -- there it quietly rescaled seven separately tuned pruning coefficients at
 /// once.
 ///
-/// **Lags 3 and 5 were removed, and the evidence is unusually clean.** The fork
-/// had added them to upstream's four, giving `[1479, 977, 277, 995, 126, 963]`
-/// for lags 1..6. The two added lags held 403 of 4817 -- 8.4% -- and were by far
-/// the smallest. Redistributing that 403 across the four survivors *in
-/// proportion to their existing weights* gives `[1614, 1066, 1086, 1051]`, which
-/// is upstream's tuned set **to the unit**.
-///
-/// So tuning had not found any use for lags 3 and 5; it had only siphoned 8.4%
-/// off four weights whose relative proportions it left exactly where upstream
-/// put them. The update-side table, tuned separately in `parameters.rs`, agreed
-/// independently: lags 1/2/4/6 sat at 700 each while lags 3 and 5 sat at 195 and
-/// 89.
-///
-/// They were not free. Each lag is a strided load into a table of
-/// `[[[[PieceToHistory<i16>; 64]; 13]; 2]; 2]`, per quiet move scored, plus an
-/// update write per cutoff. Dropping two of six removes a third of the
-/// continuation-history traffic in the hottest scoring path in the engine.
-const CONTHIST_LAGS: [isize; 4] = [1, 2, 4, 6];
-const CONTHIST_WEIGHTS: [i32; 4] = [1614, 1066, 1086, 1051];
+/// Upstream uses four lags (1614 + 1066 + 1086 + 1051); this six-lag set must
+/// come to the same total, and the assertion below makes that a build error
+/// rather than a comment nobody rechecks.
+const CONTHIST_WEIGHTS: [i32; 6] = [1479, 977, 277, 995, 126, 963];
 
 const CONTHIST_WEIGHT_TOTAL: i32 = 1614 + 1066 + 1086 + 1051;
 
 const _: () = assert!(
-    CONTHIST_WEIGHTS[0] + CONTHIST_WEIGHTS[1] + CONTHIST_WEIGHTS[2] + CONTHIST_WEIGHTS[3]
+    CONTHIST_WEIGHTS[0]
+        + CONTHIST_WEIGHTS[1]
+        + CONTHIST_WEIGHTS[2]
+        + CONTHIST_WEIGHTS[3]
+        + CONTHIST_WEIGHTS[4]
+        + CONTHIST_WEIGHTS[5]
         == CONTHIST_WEIGHT_TOTAL,
     "continuation-history quiet weights must preserve upstream's total, or good_quiet_threshold is rescaled"
 );
@@ -322,14 +312,14 @@ impl MovePicker {
         let pawn_key = td.board.pawn_key();
         let pawn_hist = &td.corrhist().pawn_history;
 
-        // The continuation-history subtable pointers depend only on `ply`,
+        // The six continuation-history subtable pointers depend only on `ply`,
         // never on the move being scored, but these used to go through a
         // per-lag helper that re-read `stack[ply - n].conthist` on every call:
-        // one strided load per lag per move, where one per lag per list will do.
+        // six strided loads into a large array per move, where six for the
         // whole list will do. The raw-pointer read stops the optimiser from
         // hoisting them itself.
-        let conthist: [*mut PieceToHistory<i16>; CONTHIST_LAGS.len()] =
-            std::array::from_fn(|i| td.stack[ply - CONTHIST_LAGS[i]].conthist);
+        let conthist: [*mut PieceToHistory<i16>; 6] =
+            std::array::from_fn(|i| td.stack[ply - 1 - i as isize].conthist);
 
         // The low-ply term's bound test and its `1024 * (1 + 2 * ply)` divisor are
         // both loop-invariant; only the table lookup varies per move. Same
@@ -344,7 +334,7 @@ impl MovePicker {
             // `piece_on(sq).piece_type()` and `moved_piece(mv)` is
             // `piece_on(mv.from())`. Spelled out separately, this square was
             // being re-read nine times per quiet move -- once here, once for
-            // pawn history, and once inside each `conthist` call,
+            // pawn history, and once inside each of the six `conthist` calls,
             // whose raw-pointer read blocks the optimiser from hoisting it.
             let from = mv.from();
             let to = mv.to();
@@ -359,11 +349,13 @@ impl MovePicker {
             entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
                 + 1024 * pawn_hist.get(pawn_key, moved, to) / 1024
                 + low_ply_term
-                // All four continuation lags; see CONTHIST_WEIGHTS.
+                // All six continuation lags; see CONTHIST_WEIGHTS.
                 + CONTHIST_WEIGHTS[0] * td.continuation_history.get(conthist[0], moved, to) / 1024
                 + CONTHIST_WEIGHTS[1] * td.continuation_history.get(conthist[1], moved, to) / 1024
                 + CONTHIST_WEIGHTS[2] * td.continuation_history.get(conthist[2], moved, to) / 1024
                 + CONTHIST_WEIGHTS[3] * td.continuation_history.get(conthist[3], moved, to) / 1024
+                + CONTHIST_WEIGHTS[4] * td.continuation_history.get(conthist[4], moved, to) / 1024
+                + CONTHIST_WEIGHTS[5] * td.continuation_history.get(conthist[5], moved, to) / 1024
                 // Positional shaping: reward stepping a threatened piece to
                 // safety, giving check, or attacking something; penalise moving
                 // into a threat or breaking up the pawns shielding our king.

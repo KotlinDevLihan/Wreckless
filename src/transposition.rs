@@ -7,20 +7,12 @@ pub const DEFAULT_TT_SIZE: usize = 16;
 const MEGABYTE: usize = 1024 * 1024;
 const CLUSTER_SIZE: usize = std::mem::size_of::<Cluster>();
 
-// Six 8-byte entries plus two 8-byte key words is exactly 64 bytes: one cache
-// line, one DRAM burst. The previous 32-byte cluster meant every probe pulled a
-// 64-byte line and read half of it -- the sibling cluster sat in L1, already
-// paid for, and was never looked at. Widening to a full line doubles the
-// associativity for the same total entry count and the same bytes fetched per
-// probe; the three extra candidates are L1 hits.
-const ENTRIES_PER_CLUSTER: usize = 6;
-const KEY_WORDS: usize = ENTRIES_PER_CLUSTER.div_ceil(4);
-const KEYS_PER_WORD: usize = 4;
+const ENTRIES_PER_CLUSTER: usize = 3;
 
 const AGE_CYCLE: u8 = 1 << 5;
 const AGE_MASK: u8 = AGE_CYCLE - 1;
 
-const _: () = assert!(std::mem::size_of::<Cluster>() == 64);
+const _: () = assert!(std::mem::size_of::<Cluster>() == 32);
 const _: () = assert!(std::mem::size_of::<InternalEntry>() == 8);
 
 #[derive(Copy, Clone)]
@@ -111,55 +103,31 @@ impl InternalEntry {
     }
 }
 
-#[repr(align(64))]
+#[repr(align(32))]
 struct Cluster {
     // Atomic entries to prevent data tearing during concurrent write/probe
     entries: [AtomicU64; ENTRIES_PER_CLUSTER],
-    // Four 16-bit verification keys per word. Slots 6 and 7 of the second word
-    // are unused and stay zero; `lookup_key` rejects them by index.
-    keys: [AtomicU64; KEY_WORDS],
+    // Packs all 3 entries' 16-bit verification keys into one word.
+    keys: AtomicU64,
 }
 
 impl Cluster {
     fn key(&self, index: usize) -> u16 {
-        let shift = (index % KEYS_PER_WORD) * 16;
-        verification_key(self.keys[index / KEYS_PER_WORD].load(Ordering::Acquire) >> shift)
+        verification_key(self.keys.load(Ordering::Acquire) >> (index * 16))
     }
 
     fn set_key(&self, index: usize, key: u16) {
-        let shift = (index % KEYS_PER_WORD) * 16;
-        let mask = 0xFFFFu64 << shift;
-        let bits = (key as u64) << shift;
-        let _ = self.keys[index / KEYS_PER_WORD]
-            .fetch_update(Ordering::Release, Ordering::Acquire, |old| Some((old & !mask) | bits));
+        let mask = 0xFFFFu64 << (index * 16);
+        let bits = (key as u64) << (index * 16);
+        let _ = self.keys.fetch_update(Ordering::Release, Ordering::Acquire, |old| Some((old & !mask) | bits));
     }
 
-    /// Returns the matching slot, or `ENTRIES_PER_CLUSTER` when there is none.
-    ///
-    /// SWAR: XOR the packed keys against the needle replicated into all four
-    /// lanes, then `x.wrapping_sub(ones) & !x & (ones << 15)` sets the high bit
-    /// of every lane that went to zero, i.e. every lane that matched.
     fn lookup_key(&self, key: u16) -> usize {
         let bits = 0x0001_0001_0001_0001;
         let needle = key as u64 * bits;
-
-        for word in 0..KEY_WORDS {
-            let zeros = self.keys[word].load(Ordering::Acquire) ^ needle;
-            let matches = zeros.wrapping_sub(bits) & !zeros & (bits << 15);
-            if matches != 0 {
-                // Lowest set lane wins. A `key` of 0 also matches the unused
-                // tail slots of the last word, but those land at an index of
-                // ENTRIES_PER_CLUSTER or above and are rejected here; a genuine
-                // match in the same word always sits at a lower lane, so it is
-                // the one `trailing_zeros` finds first.
-                let slot = word * KEYS_PER_WORD + (matches.trailing_zeros() / 16) as usize;
-                if slot < ENTRIES_PER_CLUSTER {
-                    return slot;
-                }
-            }
-        }
-
-        ENTRIES_PER_CLUSTER
+        let zeros = self.keys.load(Ordering::Acquire) ^ needle;
+        let matches = zeros.wrapping_sub(bits) & !zeros & (bits << 15);
+        (matches.trailing_zeros() / 16) as usize
     }
 
     fn read_entry(&self, index: usize) -> InternalEntry {
@@ -211,26 +179,15 @@ impl TranspositionTable {
         let age = self.age();
         let clusters = unsafe { std::slice::from_raw_parts(self.ptr(), self.len()) };
 
-        // Divide by what was actually sampled, not by a fixed 1000 clusters'
-        // worth. `take(1000)` yields fewer when the table is smaller than that,
-        // and the old divisor assumed the full sample -- so a small table always
-        // under-reported occupancy, and would now under-report by twice as much,
-        // since widening the cluster halved the cluster count for a given size.
-        let sampled = clusters.len().min(1000);
-        if sampled == 0 {
-            return 0;
-        }
-
         let mut count = 0;
-        for cluster in clusters.iter().take(sampled) {
+        for cluster in clusters.iter().take(1000) {
             for i in 0..ENTRIES_PER_CLUSTER {
                 let entry = cluster.read_entry(i);
                 count += (entry.flags.bound() != Bound::None && entry.flags.age() == age) as usize;
             }
         }
 
-        // Per mille, as UCI `hashfull` requires.
-        count * 1000 / (sampled * ENTRIES_PER_CLUSTER)
+        count / ENTRIES_PER_CLUSTER
     }
 
     pub fn increment_age(&self) {

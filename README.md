@@ -138,14 +138,28 @@ cargo install cargo-pgo
 make pgo
 ```
 
-Or run the three steps manually:
+Two things about how `make pgo` collects its profile are deliberate.
+
+**It drives the instrumented binary directly rather than through `cargo pgo run`.** That subcommand clears the profile directory on every invocation, so successive runs through it discard each other instead of accumulating. Setting `LLVM_PROFILE_FILE` with `%m_%p` gives one file per binary per process, which merges.
+
+**It profiles three depths, not one.** A profile taken only at the default depth leaves the shallow pruning paths — LMP, futility, razoring — and the deep singular/extension paths thinly covered, and between them those are most of what a real game executes. The last run uses a larger hash so TT replacement is exercised against a fuller table.
 
 ```bash
-cargo pgo instrument build --release --bin wreckless   # 1. instrumented binary
-cargo pgo run -- bench                                  # 2. profile against the bench suite
-cargo pgo optimize build --release --bin wreckless      # 3. rebuild with the profile
+cargo pgo instrument
+LLVM_PROFILE_FILE="target/pgo-profiles/w_%m_%p.profraw" ./target/<triple>/release/wreckless bench 128 1 8
+LLVM_PROFILE_FILE="target/pgo-profiles/w_%m_%p.profraw" ./target/<triple>/release/wreckless bench 128 1 12
+LLVM_PROFILE_FILE="target/pgo-profiles/w_%m_%p.profraw" ./target/<triple>/release/wreckless bench 256 1 14
+cargo pgo optimize
 # binary lands under target/<your-target-triple>/release/wreckless
 ```
+
+### BOLT
+
+`make bolt` runs PGO and then [BOLT](https://github.com/llvm/llvm-project/tree/main/bolt) on top of
+it. The two are separate passes and compose: PGO informs code generation, BOLT re-lays out the
+already-linked binary's basic blocks and functions from a second profile. Needs `llvm-bolt` and
+`perf2bolt` on `PATH`; `make checkdeps` reports whether they are there. Unmeasured on this engine —
+if you run it, compare against a plain `make pgo` build on the same machine.
 
 > **When benchmarking, measure the optimized binary.** `cargo pgo run -- bench` executes the
 > *instrumented* build, which carries profiling counters on every branch. Its NPS is not comparable
@@ -485,6 +499,20 @@ Grouped by what is actually known about each change:
   reported symptoms, the illegal-move/disconnect and the loss on time.** A `ponder_abandoned` flag is
   now set before the search is released (so `go()` cannot slip past between the two stores) and
   checked before anything is printed.
+- **A stop arriving during search setup was erased.** `go()` stores the ponder flags and only then
+  does `execute_searches_filtered` arm the search with `status = RUNNING`. A `stop` landing in that
+  window set `STOPPED` on a search that had not started, and the `RUNNING` store then overwrote it —
+  so the engine searched its full allocation and discarded the result, having been told to stop
+  before it began. A `stop_pending` flag now carries the request across that store: `go()` clears it
+  on entry (a stop received while idle referred to no search), every stop path sets it, and
+  `begin_search` re-applies it immediately after arming. The window existed in 1.0.0 for `stop`; the
+  ponder work widened it to `position`/`go`.
+- **The build script's dependency graph was incomplete.** Emitting any `cargo:rerun-if-changed`
+  replaces Cargo's default "re-run when any file in the package changes" heuristic with exactly the
+  listed paths — and the listed paths were the network and the git refs. `build/maps.rs`,
+  `build/magics.rs` and `build/attacks.rs`, which *generate* the sliding-attack tables, were outside
+  it: editing them left the previously generated `lookup.rs` in place and the build silently kept
+  using stale tables. All three are now listed, along with `build.rs` itself.
 - **A panicking worker thread hung the engine.** The completion signal was skipped, so
   `ReceiverHandle::join()` blocked forever with no output. It now fires via `catch_unwind` before the
   panic is re-raised, turning a silent freeze into a visible crash.
@@ -576,7 +604,25 @@ would be useful information.
 
 **Pruning and extensions:**
 
-- **Threat density as a contextual pruning signal.** The search had exactly one position-type signal
+- **Threat density as a contextual pruning signal — proportional, after an additive version cost
+  ~60 Elo.** The first attempt added `coefficient * density` to the RFP and futility margins. Those
+  margins scale with depth (RFP is 11 units at depth 1 and 727 at depth 8), so a flat term worth up
+  to 84 was **+764% at depth 1 and +6% at depth 8**: RFP and futility stopped firing near the leaves,
+  where most nodes are, and the tree exploded. No choice of constant fixes that, because the shape is
+  wrong rather than the size.
+
+  It now scales the margin instead of adding to it — `base * (1024 + coefficient * density) / 1024` —
+  so the term is the same percentage at every depth by construction and the failure cannot recur
+  however the coefficient is tuned. Clamped at both ends: 1536 above, because a proportional term is
+  still unbounded in size; and 1024 below, because a negative coefficient (which `set_parameter`
+  accepts, since it enforces no range) would invert the signal and prune *more* in exactly the
+  tactical positions where the static eval is least trustworthy. Widened to `i64` for the multiply,
+  and skipped entirely when the base is negative — futility's depth term is −48 at depth 1, and
+  scaling a negative base amplifies its sign rather than its magnitude.
+
+  At density zero the arithmetic is the identity, so a position with nothing hanging evaluates
+  bit-identically to 1.0.0.
+- **The original signal it replaced.** The search had exactly one position-type signal
   feeding a pruning margin, and it was a boolean:
   `rfp_no_threats * (all_threats & our_pieces).is_empty()`. A position with one loose knight and one
   with the queen, both rooks and a bishop hanging are both merely "not empty", and were treated
@@ -638,6 +684,11 @@ would be useful information.
   TB wins, exact scores rather than bounds, single-PV, and **thread 0 only** — there is no
   best-thread vote, so a helper stopping everyone could leave the reporting thread emitting a
   non-mating move.
+- **The clock-banking exits are skipped while pondering.** Both the mate stop and the single-move
+  exit gate on `use_time_management()`, which is true during a ponder search. They exist to bank
+  clock, and pondering spends none — so they were ending the ponder early and leaving the thread idle
+  until `ponderhit`, discarding TT and accumulator work for a position likely to be reached. A pure
+  loss, and one that only appears with `Ponder` enabled.
 - **Single legal move stops early.** Runs to depth 8 — enough for a ponder move and a sane score —
   then banks the clock. It does shorten the ponder line, which is why it is listed here rather than
   as a fix.

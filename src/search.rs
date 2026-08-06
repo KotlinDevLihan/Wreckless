@@ -2574,15 +2574,19 @@ fn update_continuation_histories_in_check(
     // move are already positive, the stronger the update. Lags 1/2/4/6 are
     // Weighted equally, matching the already-tuned baseline, which treated
     // these four lags at full and equal strength. SPSA-tunable.
-    // Lags 3 and 5 removed; see `CONTHIST_LAGS` in movepick.rs. Both tables were
-    // tuned independently and both drove those two lags to a fraction of the
-    // others -- 195 and 89 here against 700, and 277 and 126 there against
-    // ~1000-1600. Redistributing the scoring table's dead weight proportionally
-    // reproduced upstream's four-lag set exactly, which is what settled it.
-    let conthist_bonuses: [(isize, i32); 4] = [
+    // Six lags. Dropping 3 and 5 was tried and reverted: both tables do weight
+    // them far below the others (195 and 89 here against 700; 277 and 126 in
+    // movepick against ~1000-1600), and redistributing movepick's dead weight
+    // proportionally reproduces upstream's four-lag set to the unit -- which is
+    // suggestive but is not a measurement. The removal shipped untested inside a
+    // batch that cost ~60 Elo, so it went back. Retest it on its own if at all:
+    // it changes move ordering at every node.
+    let conthist_bonuses: [(isize, i32); 6] = [
         (1, p::conthist_lag1()),
         (2, p::conthist_lag2()),
+        (3, p::conthist_lag3()),
         (4, p::conthist_lag4()),
+        (5, p::conthist_lag5()),
         (6, p::conthist_lag6()),
     ];
     let multipliers: [i32; 7] = [
@@ -2611,7 +2615,7 @@ fn update_continuation_histories_in_check(
     // which this function -- called on every cutoff -- should not pay for. So
     // the first pass caches each eligible entry's subtable pointer and the
     // second reuses them, leaving exactly one stack traversal as before.
-    let mut targets = [(std::ptr::null_mut::<[[i16; 64]; 13]>(), 0i32, 0isize); 4];
+    let mut targets = [(std::ptr::null_mut::<[[i16; 64]; 13]>(), 0i32, 0isize); 6];
     let mut len = 0;
     let mut positive_count = 0;
 

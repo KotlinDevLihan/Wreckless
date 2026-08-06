@@ -197,7 +197,7 @@ define! {
     // See the ProbCut block in search.rs. Divided by 8192, the gravity bound
     // on `probcut_history`, so this is the full swing of the threshold between
     // "verification always agrees" and "verification never agrees".
-    i32 probcut_hist: 40;
+    i32 probcut_hist: 0;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;
     i32 probcut_score_div: 319;
@@ -429,7 +429,7 @@ define! {
     // 8 is deliberately loose: a backstop against runaway lines, not a tuning
     // knob. Ordinary singular behaviour is unchanged because the base +1 does
     // not consume budget -- only the tiers above it do.
-    i32 max_double_extensions: 8;
+    i32 max_double_extensions: 9999;
     // Reduce less when the static eval and the TT's search score disagree --
     // the same `complexity` signal as `rfp_complexity`, applied to reductions
     // rather than to a pruning margin. A disputed position is where a reduced
@@ -592,6 +592,7 @@ define! {
     // forever as unverified literals.
     i32 conthist_lag1: 700;
     i32 conthist_lag2: 700;
+    i32 conthist_lag3: 195;
     i32 conthist_lag4: 700;
     // 700. A halving to 350 was tried, on the argument that the write should
     // mirror `search()`'s 1/2 read weight. That argument does not survive
@@ -602,6 +603,7 @@ define! {
     // independent scalings, not a correspondence. Reverted to the measured
     // value; the comment in search.rs claiming the two mirror each other is the
     // thing that was wrong, not this number.
+    i32 conthist_lag5: 89;
     i32 conthist_lag6: 700;
     // Positive-consistency multipliers, indexed by how many of the (up to 6)
     // continuation entries for this move are already positive -- counted
@@ -723,16 +725,16 @@ define! {
     // deepening loop). 0 restores the previous behaviour, where every helper
     // thread searched every depth. Not a magnitude -- purely on/off, so that a
     // single SPRT can settle whether the schedule helps this engine.
-    i32 lazy_smp_skip: 1;
+    i32 lazy_smp_skip: 0;
 
     // Stop the search once a forced mate this short is proven and has been
     // confirmed for `tm_mate_confirm` plies of extra depth. Set to 0 to retire.
-    i32 tm_mate_moves: 5;
+    i32 tm_mate_moves: 0;
     i32 tm_mate_confirm: 2;
     // Extend when the root fails low; see the iterative deepening loop.
     // Applied as 1 + tm_fail_low/1000 * min(fail_lows, cap), so 250 means the
     // first fail-low buys 25% more time. Lower bound 0 retires it.
-    i32 tm_fail_low: 250;
+    i32 tm_fail_low: 0;
     i32 tm_fail_low_cap: 2;
     i32 tm_trend_base: 7426;
     i32 tm_trend_diff: 480;

@@ -1145,7 +1145,7 @@
     },
     {
       "name": "probcut_hist",
-      "default": 40.0,
+      "default": 0.0,
       "min": 0.0,
       "max": 150.0,
       "ck": 7.5,
@@ -1169,7 +1169,7 @@
     },
     {
       "name": "tm_fail_low",
-      "default": 250.0,
+      "default": 0.0,
       "min": 0.0,
       "max": 700.0,
       "ck": 35.0,
@@ -1185,7 +1185,7 @@
     },
     {
       "name": "tm_mate_moves",
-      "default": 5.0,
+      "default": 0.0,
       "min": 0.0,
       "max": 10.0,
       "ck": 1.0,
@@ -1201,7 +1201,7 @@
     },
     {
       "name": "lazy_smp_skip",
-      "default": 1.0,
+      "default": 0.0,
       "min": 0.0,
       "max": 1.0,
       "ck": 1.0,
@@ -1237,6 +1237,22 @@
       "min": 150.0,
       "max": 260.0,
       "ck": 5.5,
+      "rk": 0.002
+    },
+    {
+      "name": "conthist_lag3",
+      "default": 195.0,
+      "min": 97.0,
+      "max": 292.0,
+      "ck": 9.8,
+      "rk": 0.002
+    },
+    {
+      "name": "conthist_lag5",
+      "default": 89.0,
+      "min": 44.0,
+      "max": 133.0,
+      "ck": 4.5,
       "rk": 0.002
     }
   ]

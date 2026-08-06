@@ -103,8 +103,7 @@ define! {
     // The count is free: `all_threats` is already computed by update_threats
     // and `colors(stm)` is a field read, so this is one AND and one popcount.
     // Capped because past ~6 attacked pieces the signal stops discriminating.
-    // DEFAULT 0 -- RETIRED PENDING MEASUREMENT.
-    //
+        //
     // Shipped at 14 and cost real strength, for a reason that has nothing to do
     // with whether threat density is a useful signal: it was added as a FLAT
     // term to a base that scales with depth. The RFP margin is 11 units at
@@ -120,7 +119,7 @@ define! {
     // fraction of base" as a principle made things worse because the data said
     // the opposite. The signal itself is still worth testing; this shape of it
     // is not.
-    i32 rfp_threat_density: 0;
+    i32 rfp_threat_density: 14;
     i32 threat_density_cap: 6;
     i32 rfp_base: 19;
     // Widen the RFP margin when the static eval and the TT's search score
@@ -197,7 +196,7 @@ define! {
     // See the ProbCut block in search.rs. Divided by 8192, the gravity bound
     // on `probcut_history`, so this is the full swing of the threshold between
     // "verification always agrees" and "verification never agrees".
-    i32 probcut_hist: 0;
+    i32 probcut_hist: 40;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;
     i32 probcut_score_div: 319;
@@ -223,7 +222,7 @@ define! {
     // Worse here than there: at depth 1 the `fp_depth * depth` term is -48 and
     // this contributed up to +120, so it did not merely inflate the margin, it
     // dominated and flipped the sign of the expression.
-    i32 fp_threat_density: 0;
+    i32 fp_threat_density: 20;
     i32 fp_base: 127;
 
     // Bad Noisy Futility Pruning
@@ -429,7 +428,7 @@ define! {
     // 8 is deliberately loose: a backstop against runaway lines, not a tuning
     // knob. Ordinary singular behaviour is unchanged because the base +1 does
     // not consume budget -- only the tiers above it do.
-    i32 max_double_extensions: 9999;
+    i32 max_double_extensions: 8;
     // Reduce less when the static eval and the TT's search score disagree --
     // the same `complexity` signal as `rfp_complexity`, applied to reductions
     // rather than to a pruning margin. A disputed position is where a reduced
@@ -729,13 +728,15 @@ define! {
 
     // Stop the search once a forced mate this short is proven and has been
     // confirmed for `tm_mate_confirm` plies of extra depth. Set to 0 to retire.
-    i32 tm_mate_moves: 0;
+    i32 tm_mate_moves: 5;
     i32 tm_mate_confirm: 2;
     // Extend when the root fails low; see the iterative deepening loop.
     // Applied as 1 + tm_fail_low/1000 * min(fail_lows, cap), so 250 means the
     // first fail-low buys 25% more time. Lower bound 0 retires it.
-    i32 tm_fail_low: 0;
+    i32 tm_fail_low: 125;
     i32 tm_fail_low_cap: 2;
+    // Depth at which a forced single reply stops the search. 0 disables.
+    i32 tm_single_move_depth: 8;
     i32 tm_trend_base: 7426;
     i32 tm_trend_diff: 480;
     i32 tm_trend_recent: 230;

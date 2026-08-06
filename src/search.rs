@@ -498,7 +498,12 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
         // small floor so a ponder move and a sane score still exist, then stop
         // and bank the clock -- forced recaptures and single-reply checks are
         // common enough in real games for this to be worth real time.
-        if td.id == 0 && td.time_manager.use_time_management() && td.root_moves.len() == 1 && depth >= 8 {
+        if td.id == 0
+            && p::tm_single_move_depth() > 0
+            && td.time_manager.use_time_management()
+            && td.root_moves.len() == 1
+            && depth >= p::tm_single_move_depth()
+        {
             td.shared.status.set(Status::STOPPED);
             break;
         }
@@ -902,14 +907,17 @@ fn search<NODE: NodeType>(
         && (!tt_move.is_quiet() || td.quiet_history.get(td.board.all_threats(), stm, tt_move) >= -2048)
         && estimated_score
             >= beta
-                + (p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
+                + threat_scaled(
+                    p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
                     + p::rfp_complexity() * complexity / 1024
                     - p::rfp_no_threats() * (threat_density == 0) as i32
-                    + p::rfp_threat_density() * threat_density
                     - p::rfp_worsening() * opponent_worsening as i32
-                    - p::rfp_base())
+                    - p::rfp_base(),
+                    p::rfp_threat_density(),
+                    threat_density,
+                )
                 .max(2)
         && !is_loss(beta)
         && !is_win(estimated_score)
@@ -1068,9 +1076,22 @@ fn search<NODE: NodeType>(
     // agreed. When it keeps disagreeing the draft is miscalibrated for this
     // search, so raise the bar and let ProbCut fire less often; when it keeps
     // agreeing, lower it. Sign: history negative -> subtracting it widens.
-    let mut probcut_beta = beta + p::probcut_base()
-        - p::probcut_improving() * improving as i32
-        - p::probcut_hist() * td.probcut_history / 8192;
+    // Bounded to a quarter of `probcut_base`. Without the clamp the term is
+    // `probcut_hist * history / 8192` with history free to reach +/-8192, so a
+    // tuned-up coefficient could move the threshold further than the base it is
+    // adjusting -- at which point it stops being an adjustment and becomes the
+    // decision. A quarter keeps it a correction.
+    // `.max(0)` on the bound, not just tidiness: `clamp` panics when min > max,
+    // and `set_parameter` accepts any value with no range check -- the
+    // `spsa.config` bounds only constrain a tuner that respects them. A typed
+    // `setoption name probcut_base value -100` would give `clamp(25, -25)` and
+    // take the process down mid-match. Same defect class as the four `.max(1)`
+    // divisor guards elsewhere in this file.
+    let probcut_bound = (p::probcut_base() / 4).max(0);
+    let probcut_shift = (p::probcut_hist() * td.probcut_history / 8192).clamp(-probcut_bound, probcut_bound);
+
+    let mut probcut_beta =
+        beta + p::probcut_base() - p::probcut_improving() * improving as i32 - probcut_shift;
 
     // The `!in_check` guard is not cosmetic. At an in-check node there is no
     // static evaluation, so `eval` is the Score::NONE sentinel (32002):
@@ -1492,12 +1513,15 @@ fn search<NODE: NodeType>(
             }
 
             // Futility Pruning (FP)
+            // The threat term scales the depth component rather than being added
+            // to the total: `fp_depth * depth` is what carries the depth
+            // dependence, and the flat parts (`eval`, history, corr) must not be
+            // multiplied by a position feature.
             let futility_value = eval
-                + p::fp_depth() * depth
+                + threat_scaled(p::fp_depth() * depth, p::fp_threat_density(), threat_density)
                 + p::fp_history() * history / history_divisor
                 + p::fp_beta_bonus() * (eval >= beta) as i32
                 + p::fp_corr() * correction_value.abs() / 1024
-                + p::fp_threat_density() * threat_density
                 - p::fp_base();
 
             if !in_check && !is_direct_check && is_quiet && depth < 14 && futility_value <= alpha {
@@ -2682,6 +2706,54 @@ fn soft_stop_vote(td: &mut ThreadData, thread_count: usize, voted: &mut bool, mu
         *voted = false;
         td.shared.soft_stop_votes.fetch_sub(1, Ordering::AcqRel);
     }
+}
+
+/// Scales a pruning margin by threat density, as a proportion of the margin.
+///
+/// This exists because the additive version of the same idea cost roughly 60
+/// Elo. `threat_density` contributed a flat `coefficient * density`, and the
+/// margins it modified scale with depth: the RFP margin is 11 units at depth 1
+/// and 727 at depth 8, so a flat +42 was **+382% at depth 1 and +6% at depth 8**.
+/// RFP and futility stopped firing near the leaves, which is where most nodes
+/// are, and the tree exploded.
+///
+/// No choice of constant fixes that, because the shape is wrong rather than the
+/// size. Expressed as a proportion the term is the same percentage at every
+/// depth by construction, and the failure mode cannot recur however the
+/// coefficient is tuned -- which is the only kind of guard worth calling one.
+///
+/// The `.max(0)` on the base matters: a negative base (futility's depth term is
+/// -48 at depth 1) would have its sign amplified rather than its magnitude, so
+/// scaling is skipped there instead.
+fn threat_scaled(base: i32, coefficient: i32, density: i32) -> i32 {
+    if base <= 0 || coefficient == 0 {
+        return base;
+    }
+
+    // Clamped at both ends, and each end is load-bearing.
+    //
+    // Upper (1536, +50%): a proportional term is safe in *shape* but still
+    // unbounded in *size* if the coefficient and the density cap are both tuned
+    // upward, and an RFP margin at twice its tuned value prunes almost nothing.
+    //
+    // Lower (1024, no change): the whole point of the signal is to prune *less*
+    // when material is hanging. A negative coefficient -- which `set_parameter`
+    // accepts, since it enforces no range -- would invert that and prune *more*
+    // in exactly the tactical positions where the static eval is least
+    // trustworthy. The floor makes the term one-directional by construction.
+    //
+    // `saturating_mul` because the same unchecked setter makes
+    // `coefficient * density` an overflow away from wrapping negative, which
+    // would defeat the floor by arriving underneath it.
+    let scale = 1024i32.saturating_add(coefficient.saturating_mul(density)).clamp(1024, 1536);
+
+    // Widened for the multiply. With `rfp_depth_quad` at the top of its range
+    // and depth near MAX_PLY the base reaches ~808k, and multiplying by the
+    // 1536 cap leaves only 1.7x of i32 headroom -- and `set_parameter` does not
+    // enforce the range, so that headroom is not guaranteed at all. The 64-bit
+    // multiply costs nothing here and removes the question; the result is back
+    // in range by construction, since dividing by 1024 undoes the widening.
+    ((base as i64 * scale as i64) / 1024) as i32
 }
 
 fn update_probcut_history(td: &mut ThreadData, bonus: i32) {

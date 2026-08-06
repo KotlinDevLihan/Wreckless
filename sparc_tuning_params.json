@@ -1081,7 +1081,7 @@
   },
   {
     "name": "rfp_threat_density",
-    "default": 0.0,
+    "default": 14.0,
     "min": 0.0,
     "max": 60.0,
     "ck": 3.0,
@@ -1097,7 +1097,7 @@
   },
   {
     "name": "fp_threat_density",
-    "default": 0.0,
+    "default": 20.0,
     "min": 0.0,
     "max": 80.0,
     "ck": 4.0,
@@ -1105,7 +1105,7 @@
   },
   {
     "name": "probcut_hist",
-    "default": 0.0,
+    "default": 40.0,
     "min": 0.0,
     "max": 150.0,
     "ck": 7.5,
@@ -1129,7 +1129,7 @@
   },
   {
     "name": "tm_fail_low",
-    "default": 0.0,
+    "default": 125.0,
     "min": 0.0,
     "max": 700.0,
     "ck": 35.0,
@@ -1145,7 +1145,7 @@
   },
   {
     "name": "tm_mate_moves",
-    "default": 0.0,
+    "default": 5.0,
     "min": 0.0,
     "max": 10.0,
     "ck": 1.0,
@@ -1213,6 +1213,14 @@
     "min": 44.0,
     "max": 133.0,
     "ck": 4.5,
+    "rk": 0.002
+  },
+  {
+    "name": "tm_single_move_depth",
+    "default": 8.0,
+    "min": 0.0,
+    "max": 20.0,
+    "ck": 1.0,
     "rk": 0.002
   }
 ]

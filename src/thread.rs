@@ -135,6 +135,25 @@ impl Status {
     }
 }
 
+impl SharedContext {
+    /// Clears any stop request left over from before this search.
+    ///
+    /// A `stop` received while idle refers to no search, so it must not carry
+    /// into the next one.
+    pub fn arm_search(&self) {
+        self.stop_pending.store(false, Ordering::Release);
+    }
+
+    /// Marks the search running, honouring a stop that arrived during setup.
+    pub fn begin_search(&self) {
+        self.status.set(Status::RUNNING);
+
+        if self.stop_pending.swap(false, Ordering::AcqRel) {
+            self.status.set(Status::STOPPED);
+        }
+    }
+}
+
 impl Clone for Status {
     fn clone(&self) -> Self {
         Self { inner: AtomicUsize::new(self.inner.load(Ordering::Relaxed)) }
@@ -170,6 +189,16 @@ pub struct SharedContext {
     pub root_in_tb: AtomicBool,
     pub syzygy_probe_depth: AtomicI32,
     pub syzygy_probe_limit: AtomicUsize,
+    /// Set by every path that stops a search, and consumed by
+    /// [`SharedContext::begin_search`].
+    ///
+    /// `go()` stores the ponder flags and only then does
+    /// `execute_searches_filtered` arm the search with `status = RUNNING`. A
+    /// `stop` arriving in that window sets STOPPED on a search that has not
+    /// started, and the RUNNING store then erases it -- so the engine searches
+    /// its full allocation and throws the result away, having been told to stop
+    /// before it began. This flag carries the request across that store.
+    pub stop_pending: AtomicBool,
     pub ponder: AtomicBool,
     /// Whether the search currently running was started by `go ponder`, which
     /// stays true across `ponderhit` -- unlike [`Self::ponder`], which the hit
@@ -206,6 +235,7 @@ impl Default for SharedContext {
             syzygy_probe_limit: AtomicUsize::new(7),
             ponder_abandoned: AtomicBool::new(false),
             ponder_search: AtomicBool::new(false),
+            stop_pending: AtomicBool::new(false),
             ponder: AtomicBool::new(false),
             ponderhit_time: Mutex::new(None),
             show_wdl: AtomicBool::new(false),

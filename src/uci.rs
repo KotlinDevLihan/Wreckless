@@ -76,6 +76,7 @@ pub fn message_loop(mut buffer: VecDeque<String>) {
 
             ["stop"] => {
                 shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                shared.stop_pending.store(true, std::sync::atomic::Ordering::Release);
                 shared.status.set(Status::STOPPED);
             }
             ["ponderhit"] => (),
@@ -137,6 +138,7 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
                 // ponder-wait loop in go() then spins forever afterward,
                 // leaving a 100%-CPU zombie that never dequeues this quit.
                 shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                shared.stop_pending.store(true, std::sync::atomic::Ordering::Release);
                 shared.status.set(Status::STOPPED);
                 let _ = tx.send("quit".to_string());
                 break;
@@ -146,6 +148,7 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
                 "isready" => println!("readyok"),
                 "stop" => {
                     shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                    shared.stop_pending.store(true, std::sync::atomic::Ordering::Release);
                     shared.status.set(Status::STOPPED);
                 }
                 "ponderhit" => {
@@ -154,6 +157,7 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
                 }
                 "quit" => {
                     shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                    shared.stop_pending.store(true, std::sync::atomic::Ordering::Release);
                     shared.status.set(Status::STOPPED);
                     let _ = tx.send("quit".to_string());
                     break;
@@ -205,6 +209,7 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
                         // stores and emit the very reply this prevents.
                         shared.ponder_abandoned.store(true, std::sync::atomic::Ordering::Release);
                         shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+                        shared.stop_pending.store(true, std::sync::atomic::Ordering::Release);
                         shared.status.set(Status::STOPPED);
                     }
 
@@ -297,6 +302,11 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
 
     let limits = parse_limits(board.side_to_move(), &limit_tokens);
     let time_manager = TimeManager::new(limits, board.fullmove_number(), settings.move_overhead);
+
+    // Discards a `stop` received while idle: it referred to no search and must
+    // not kill this one. Anything arriving from here on is for this search and
+    // survives the RUNNING store -- see `SharedContext::begin_search`.
+    shared.arm_search();
 
     *shared.ponderhit_time.lock().unwrap() = None;
     shared.ponder_abandoned.store(false, std::sync::atomic::Ordering::Release);

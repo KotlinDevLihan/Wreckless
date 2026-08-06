@@ -96,7 +96,8 @@ impl ThreadPool {
         shared.nodes.reset();
         shared.tb_hits.reset();
         shared.soft_stop_votes.store(0, Ordering::Release);
-        shared.status.set(Status::RUNNING);
+        // Not a bare `status.set(RUNNING)`: see `SharedContext::begin_search`.
+        shared.begin_search();
         shared.best_stats.iter().for_each(|x| {
             // Same `-Score::INFINITE` sentinel guard as `centre` in
             // `search::start`. `RootMove::default()` seeds that score, so a

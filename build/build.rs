@@ -35,6 +35,21 @@ fn main() {
         download_network();
     }
 
+    // Emitting ANY `rerun-if-changed` replaces Cargo's default "re-run when any
+    // file in the package changes" heuristic with exactly the listed paths. The
+    // directives below name the network and the git refs, so without these three
+    // the generators that produce `lookup.rs` were outside the dependency graph:
+    // editing `maps.rs` or `magics.rs` left the previously generated attack
+    // tables in place, and the build silently kept using them.
+    //
+    // Listing them individually rather than the directory, because Cargo treats
+    // a directory path as "any file beneath it" only on some versions, and a
+    // stale attack table is not a failure mode worth being clever about.
+    println!("cargo:rerun-if-changed=build/build.rs");
+    println!("cargo:rerun-if-changed=build/attacks.rs");
+    println!("cargo:rerun-if-changed=build/magics.rs");
+    println!("cargo:rerun-if-changed=build/maps.rs");
+
     println!("cargo:rerun-if-env-changed=EVALFILE");
     println!("cargo:rerun-if-env-changed=WRECKLESS_PEXT");
     println!("cargo:rerun-if-changed=.git/HEAD");

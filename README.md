@@ -577,6 +577,25 @@ would be useful information.
 
 **Evaluation correction:**
 
+- **Per-term weights on the correction blend.** Every term used to be summed at full strength, so
+  pawn correction — keyed on the most stable feature of a position — counted exactly as much as one
+  continuation-correction lag. Stockfish and its derivatives weight them; the ratios here are
+  [Artemis](https://github.com/official-stockfish/Stockfish)-derived (a GPL-3.0 Stockfish fork),
+  normalised to pawn 1.00: non-pawn 0.887, material 0.695, continuation 0.627 — landing on
+  `1301 / 1154 / 905 / 815`.
+
+  **The total is load-bearing and the weights are deliberately not tunable.** They sum to exactly
+  `6 × 1024 = 6144`, which is what six unweighted terms came to, and the divisor gains a matching
+  ×1024 — so equal weights reproduce the old arithmetic identically. `correction_value` reaches
+  razoring, RFP, both singular margins, futility, LMR, FDS and qsearch SEE, and through `eval` another
+  six consumers; a tuner free to move these would wander the blend's *magnitude* while appearing to
+  tune its *ratios*. They are consts with a build-time assertion, exactly as `CONTHIST_WEIGHTS` is.
+
+  A useful consequence: **adding or removing a correction term is now scale-safe.** It means
+  redistributing weight against a fixed total rather than recomputing a shared divisor — which is
+  precisely the step that went wrong when the minor and major tables were first added (see
+  [Removed](#removed-and-why)). Reintroducing minor-piece correction is the natural next candidate;
+  it needs a `minor_piece_key`, which this board does not yet maintain.
 - Material correction history, restored: a 6th term in `eval_correction()`'s blend, keyed on
   `material_key()` — piece counts only, no square information, so a cramped middlegame and an open
   endgame with the same material land in the same bucket. `corr_weight_div` is rescaled to `76`

@@ -2536,30 +2536,74 @@ fn update_prior_move_histories(
     }
 }
 
+/// Per-term weights for the correction blend, in 1024ths.
+///
+/// Every term used to be summed at full strength, so pawn correction -- keyed on
+/// the most stable feature of a position -- counted exactly as much as a single
+/// continuation-correction lag. Stockfish and its derivatives weight them. The
+/// ratios here are Artemis's (a GPL-3.0 Stockfish derivative), normalised to
+/// pawn = 1.00: non-pawn 0.887, minor/material 0.695, continuation 0.627.
+///
+/// **The total is load-bearing, and deliberately not SPSA-tunable.**
+/// `correction_value` feeds razoring, RFP, both singular margins, futility, LMR,
+/// FDS and qsearch SEE, and through `eval` it reaches null move, stand-pat,
+/// improving, opponent-worsening, LMP and BNFP. Changing the blend's magnitude
+/// silently rescales all of them -- the defect class this file documents
+/// repeatedly, and the one that has cost this fork Elo more than once. Exposing
+/// these to a tuner would let it wander the scale while appearing to tune the
+/// ratios, so they are consts with a build-time check, exactly as
+/// `CONTHIST_WEIGHTS` is in movepick.rs.
+///
+/// Redistribute freely; do not change the total.
+const CORR_W_PAWN: i32 = 1301;
+const CORR_W_NONPAWN: i32 = 1154;
+const CORR_W_MATERIAL: i32 = 905;
+const CORR_W_CONT: i32 = 815;
+
+/// Six unweighted terms came to `6 * 1024`. Anything else rescales the blend.
+const CORR_W_TOTAL: i32 = 6 * 1024;
+
+const _: () = assert!(
+    CORR_W_PAWN + 2 * CORR_W_NONPAWN + CORR_W_MATERIAL + 2 * CORR_W_CONT == CORR_W_TOTAL,
+    "correction weights must sum to 6144, or every margin reading correction_value is rescaled"
+);
+
 fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
     let stm = td.board.side_to_move();
     let bucket = td.board.fiftymove_clock_bucket();
     let corrhist = td.corrhist();
 
-    (corrhist.pawn.get(stm, td.board.pawn_key(), bucket)
-        + corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
-        + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket)
-        + corrhist.material.get(stm, td.board.material_key(), bucket)
-        // A 6th term added to upstream's 5-term blend; corr_weight_div is
-        // rescaled to match (see its definition in parameters.rs) rather than
-        // left at upstream's value the way it silently was the first time
-        // this table existed in this fork.
-        + td.continuation_corrhist.get(
-            td.stack[ply - 2].contcorrhist,
-            td.stack[ply - 1].piece,
-            td.stack[ply - 1].mv.to(),
-        )
-        + td.continuation_corrhist.get(
-            td.stack[ply - 4].contcorrhist,
-            td.stack[ply - 1].piece,
-            td.stack[ply - 1].mv.to(),
-        ))
-        / p::corr_weight_div().max(1)
+    // Per-term weights, in 1024ths. Previously every term was summed at full
+    // strength, so pawn correction -- keyed on the most stable feature of a
+    // position -- counted exactly as much as a single continuation-correction
+    // lag. Stockfish and its derivatives weight them, and the ratios below are
+    // taken from Artemis (a GPL-3.0 Stockfish derivative), normalised so that
+    // pawn = 1.00: non-pawn 0.887, minor/material 0.695, continuation 0.627.
+    //
+    // THE WEIGHT TOTAL IS LOAD-BEARING. `correction_value` feeds razoring, RFP,
+    // both singular margins, futility, LMR, FDS and qsearch SEE, and through
+    // `eval` it reaches null move, stand-pat, improving, opponent-worsening,
+    // LMP and BNFP. Changing the blend's magnitude silently rescales every one
+    // of them -- the defect class this file documents repeatedly. The weights
+    // therefore sum to 6 * 1024 = 6144, exactly what six unweighted terms came
+    // to, and the divisor gains a matching factor of 1024. Redistribute freely;
+    // do not change the total. The assertion below makes that a build error.
+    (CORR_W_PAWN * corrhist.pawn.get(stm, td.board.pawn_key(), bucket)
+        + CORR_W_NONPAWN
+            * (corrhist.non_pawn[Color::White].get(stm, td.board.non_pawn_key(Color::White), bucket)
+                + corrhist.non_pawn[Color::Black].get(stm, td.board.non_pawn_key(Color::Black), bucket))
+        + CORR_W_MATERIAL * corrhist.material.get(stm, td.board.material_key(), bucket)
+        + CORR_W_CONT
+            * (td.continuation_corrhist.get(
+                td.stack[ply - 2].contcorrhist,
+                td.stack[ply - 1].piece,
+                td.stack[ply - 1].mv.to(),
+            ) + td.continuation_corrhist.get(
+                td.stack[ply - 4].contcorrhist,
+                td.stack[ply - 1].piece,
+                td.stack[ply - 1].mv.to(),
+            )))
+        / (p::corr_weight_div().max(1) * 1024)
 }
 
 fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: isize) {

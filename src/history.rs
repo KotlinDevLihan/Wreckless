@@ -51,6 +51,13 @@ impl<T> HugeBox<T> {
     }
 }
 
+// NOTE: `HugeBox`'s `Drop` releases the mapping but never drops `T`. That is
+// sound for everything stored in one today -- the history tables are arrays of
+// integers, and `PstAccumulator`/`ThreatAccumulator`/`Parameters` are all plain
+// data (`ArrayVec` is bounded `T: Copy`) -- but it is a property of the current
+// contents, not of the type. A `T` with a destructor would have it silently
+// skipped, and `new_array_with` below would additionally leak the already-built
+// prefix if `f` panicked part way. Add a `T` with `Drop` and both need fixing.
 impl<T, const N: usize> HugeBox<[T; N]> {
     /// Builds each element in place inside a fresh large-page allocation.
     ///

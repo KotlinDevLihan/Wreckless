@@ -479,7 +479,13 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
         // vote, so a helper proving the mate and stopping everyone could leave
         // thread 0 emitting whatever it happened to have -- not the mate. Only
         // the reporting thread may end the search on its own result.
+        // `!pondering`: both this and the single-move exit below exist to bank
+        // clock, and pondering spends no clock. Firing them during a ponder
+        // ends the search early and leaves the thread idle until `ponderhit`,
+        // throwing away TT and accumulator work for a position we may well
+        // reach -- a pure loss, and one that only shows up with Ponder on.
         if td.id == 0
+            && !td.shared.ponder.load(Ordering::Acquire)
             && td.time_manager.use_time_management()
             && td.multi_pv == 1
             && td.root_moves[0].score >= Score::MATE_IN_MAX
@@ -499,6 +505,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
         // and bank the clock -- forced recaptures and single-reply checks are
         // common enough in real games for this to be worth real time.
         if td.id == 0
+            && !td.shared.ponder.load(Ordering::Acquire)
             && p::tm_single_move_depth() > 0
             && td.time_manager.use_time_management()
             && td.root_moves.len() == 1

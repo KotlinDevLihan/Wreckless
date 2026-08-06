@@ -1442,8 +1442,8 @@ fn search<NODE: NodeType>(
             // keeps the scale it was tuned for. Same discipline
             // `corr_weight_div` documents for the correction blend.
             // Both continuation lags, held at upstream's scale. This sum is
-            // upstream's two (lags 1 and 2); the four-lag set lives in
-            // movepick's `CONTHIST_WEIGHTS` and is a different consumer.
+            // upstream's two (lags 1 and 2) and is a different consumer from
+            // movepick's `CONTHIST_WEIGHTS`, which reads six.
             //
             // Two problems were stacked here. First, lags 3 and 5 were being
             // *written* by update_continuation_histories_in_check but read by
@@ -2596,15 +2596,17 @@ fn update_continuation_histories_in_check(
     // Per-lag weights and positive-consistency multipliers, as in Stockfish:
     // all six lags are updated, and the more continuation entries for this
     // move are already positive, the stronger the update. Lags 1/2/4/6 are
-    // Weighted equally, matching the already-tuned baseline, which treated
-    // these four lags at full and equal strength. SPSA-tunable.
-    // Six lags. Dropping 3 and 5 was tried and reverted: both tables do weight
-    // them far below the others (195 and 89 here against 700; 277 and 126 in
-    // movepick against ~1000-1600), and redistributing movepick's dead weight
-    // proportionally reproduces upstream's four-lag set to the unit -- which is
-    // suggestive but is not a measurement. The removal shipped untested inside a
-    // batch that cost ~60 Elo, so it went back. Retest it on its own if at all:
-    // it changes move ordering at every node.
+    // weighted equally (matching the already-tuned baseline, which treated those
+    // four lags at full and equal strength); lags 3/5 are fork additions kept at
+    // Stockfish's relative ratio to the primary weight. All SPSA-tunable.
+    //
+    // Dropping 3 and 5 was tried and reverted. Both tables do weight them far
+    // below the rest -- 195 and 89 here against 700, and 277 and 126 in movepick
+    // against ~1000-1600 -- and redistributing movepick's share of that weight
+    // proportionally reproduces upstream's four-lag set to the unit. Suggestive,
+    // but not a measurement, and it shipped untested inside a batch that cost
+    // ~60 Elo. Retest it alone if at all: it changes move ordering at every
+    // node.
     let conthist_bonuses: [(isize, i32); 6] = [
         (1, p::conthist_lag1()),
         (2, p::conthist_lag2()),
@@ -2664,7 +2666,7 @@ fn update_continuation_histories_in_check(
     // count. In check the loop stops after lag 2, so a raw count can never
     // exceed 2 and the multipliers tuned for indices 3-6 are unreachable there
     // -- an in-check node with both lags positive got index 2 where an
-    // out-of-check node with all four positive got the top index, for the same
+    // out-of-check node with all six positive got index 6, for the same
     // "everything agrees" state. Scaling by `len` puts both on the same
     // footing. `len` is 0 only when no lag had a move, and index 0 is the
     // no-agreement multiplier, which is the right answer for that case.

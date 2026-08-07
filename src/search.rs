@@ -900,6 +900,24 @@ fn search<NODE: NodeType>(
         return qsearch::<NonPV>(td, alpha, beta, ply);
     }
 
+    // The improving correction, scaled with depth rather than flat.
+    //
+    // Artemis applies it as `improving * futilityMult / 1024`, where
+    // `futilityMult` is the same per-depth coefficient that builds the margin --
+    // so the correction stays a constant FRACTION of the margin at every depth.
+    // This search applied it as a flat `improvement / 1024`: a large share of an
+    // 11-unit margin at depth 1, a negligible one at depth 24. Same
+    // flat-term-on-a-scaled-base shape that cost 87 Elo in LMR's move-count term
+    // and ~60 Elo in `threat_density`.
+    //
+    // `rfp_improvement_ref` is the depth at which the new form reproduces the old
+    // magnitude exactly, so only the slope across depth changes. 0 restores flat.
+    let rfp_improvement_term = if p::rfp_improvement_ref() > 0 {
+        p::rfp_improvement() * improvement * depth / (1024 * p::rfp_improvement_ref())
+    } else {
+        p::rfp_improvement() * improvement / 1024
+    };
+
     // Reverse Futility Pruning (RFP)
     // Restored the TT-move quiet-history guard and the `rfp_worsening` term,
     // both present in 0.1.2 and both silently dropped since with no comment
@@ -915,12 +933,18 @@ fn search<NODE: NodeType>(
         && estimated_score
             >= beta
                 + threat_scaled(
-                    p::rfp_depth_quad() * depth * depth / 128 - p::rfp_improvement() * improvement / 1024
+                    p::rfp_depth_quad() * depth * depth / 128 - rfp_improvement_term
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
                     + p::rfp_complexity() * complexity / 1024
                     - p::rfp_no_threats() * (threat_density == 0) as i32
                     - p::rfp_worsening() * opponent_worsening as i32
+                    // Artemis shrinks the whole margin on a TT miss
+                    // (`futilityMult -= 20 * !ttHit`, on a 40-80 multiplier), so a
+                    // node with no table evidence prunes more readily. Applied
+                    // proportionally to depth, for the same reason the improving
+                    // term above is. 0 disables.
+                    - p::rfp_tt_miss() * depth * entry.is_none() as i32 / 16
                     - p::rfp_base(),
                     p::rfp_threat_density(),
                     threat_density,
@@ -1513,6 +1537,21 @@ fn search<NODE: NodeType>(
                         + p::lmp_improvement() * improvement / 16
                         + p::lmp_quad() * depth * depth
                         + p::lmp_history() * history / history_divisor)
+                        // Artemis divides its threshold by `(2 - improving)`, so
+                        // the NOT-improving case is halved -- stricter, pruning
+                        // sooner when the position is going the wrong way. The
+                        // improving case is the baseline, not a bonus.
+                        //
+                        // Getting that backwards doubles the improving threshold
+                        // instead, which at depth 8 asks for 174 moves before LMP
+                        // fires -- more than exist -- and silently disables LMP
+                        // for every improving node.
+                        //
+                        // `lmp_improvement` is zeroed alongside this: leaving the
+                        // additive term live too would penalise `improving` twice
+                        // in one threshold.
+                        * (1024 - p::lmp_improving_mult() * !improving as i32)
+                        / 1024
                         / 1024
             {
                 skip_quiets = true;
@@ -1524,8 +1563,31 @@ fn search<NODE: NodeType>(
             // to the total: `fp_depth * depth` is what carries the depth
             // dependence, and the flat parts (`eval`, history, corr) must not be
             // multiplied by a position feature.
+            // Futility on the depth the move will ACTUALLY be searched at, not
+            // the raw depth. Stockfish and Artemis both use `lmrDepth` here, and
+            // the reasoning is the shape of the question: futility asks whether a
+            // quiet move can recover a deficit, and a move about to be reduced a
+            // ply is a weaker candidate than raw depth implies.
+            //
+            // Only the DEPTH component of the reduction is subtracted, not the
+            // history component. Artemis routes history into futility solely
+            // through `lmrDepth` and has no separate history term; this search
+            // already has `fp_history` below, so folding history in here too
+            // would count the same signal twice -- the defect class that cost
+            // this engine 47% extra reduction on a missing TT move.
+            // Kept in 1/1024 units. Reductions are stored in 1024ths of a ply and
+            // are under one ply for every depth futility runs at (`depth < 14`),
+            // so subtracting `r / 1024` as whole plies rounds to zero every time
+            // and the whole term becomes a no-op. Scaling the margin by
+            // `(depth * 1024 - r)` keeps the fraction.
+            let fp_scaled_depth = if p::fp_lmr_depth() > 0 {
+                (depth * 1024 - p::lmr_ilog() * depth.ilog2() as i32).max(1024)
+            } else {
+                depth * 1024
+            };
+
             let futility_value = eval
-                + threat_scaled(p::fp_depth() * depth, p::fp_threat_density(), threat_density)
+                + threat_scaled(p::fp_depth() * fp_scaled_depth / 1024, p::fp_threat_density(), threat_density)
                 + p::fp_history() * history / history_divisor
                 + p::fp_beta_bonus() * (eval >= beta) as i32
                 + p::fp_corr() * correction_value.abs() / 1024

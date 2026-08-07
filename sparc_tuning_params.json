@@ -233,7 +233,7 @@
   },
   {
     "name": "lmp_improvement",
-    "default": 78.0,
+    "default": 0.0,
     "min": 39.0,
     "max": 117.0,
     "ck": 3.9,
@@ -1221,6 +1221,38 @@
     "min": 0.0,
     "max": 20.0,
     "ck": 1.0,
+    "rk": 0.002
+  },
+  {
+    "name": "lmp_improving_mult",
+    "default": 1024.0,
+    "min": 0.0,
+    "max": 2048.0,
+    "ck": 102.4,
+    "rk": 0.002
+  },
+  {
+    "name": "rfp_improvement_ref",
+    "default": 8.0,
+    "min": 0.0,
+    "max": 24.0,
+    "ck": 1.2,
+    "rk": 0.002
+  },
+  {
+    "name": "rfp_tt_miss",
+    "default": 0.0,
+    "min": 0.0,
+    "max": 64.0,
+    "ck": 3.2,
+    "rk": 0.002
+  },
+  {
+    "name": "fp_lmr_depth",
+    "default": 1.0,
+    "min": 0.0,
+    "max": 1.0,
+    "ck": 1,
     "rk": 0.002
   }
 ]

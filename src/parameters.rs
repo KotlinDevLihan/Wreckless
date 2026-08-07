@@ -81,6 +81,11 @@ define! {
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
+    // Depth at which the proportional improving term matches the old flat one.
+    // 0 restores the flat form. See the RFP block in search.rs.
+    i32 rfp_improvement_ref: 8;
+    // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
+    i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
@@ -203,12 +208,22 @@ define! {
     i32 probcut_beta_step: 197;
 
     // Late Move Pruning
+    // Artemis divides its LMP threshold by `(2 - improving)`: the NOT-improving
+    // case is halved. 512 reproduces that (a 50% cut); 0 disables and restores
+    // `lmp_improvement` as the only improving term.
+    i32 lmp_improving_mult: 512;
     i32 lmp_base: 2818;
-    i32 lmp_improvement: 78;
+    // ZEROED: superseded by `lmp_improving_mult`, which applies the same signal
+    // multiplicatively (Artemis's `/(2 - improving)`). Leaving both live would
+    // penalise `improving` twice in one threshold.
+    i32 lmp_improvement: 0;
     i32 lmp_quad: 1351;
     i32 lmp_history: 74;
 
     // Futility Pruning
+    // 1 = futility uses the LMR-adjusted depth (Artemis/Stockfish `lmrDepth`),
+    // 0 = raw depth as before.
+    i32 fp_lmr_depth: 1;
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;

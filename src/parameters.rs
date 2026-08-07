@@ -428,6 +428,16 @@ define! {
     // 8 is deliberately loose: a backstop against runaway lines, not a tuning
     // knob. Ordinary singular behaviour is unchanged because the base +1 does
     // not consume budget -- only the tiers above it do.
+    // NOTE the sense of this one is INVERTED relative to every other gate in
+    // this file. It is a ceiling on accumulated double/triple extensions along a
+    // line, so 0 does NOT disable it -- `de < 0` is never true, which removes
+    // double and triple extensions entirely, the maximum restriction rather than
+    // none. To disable the gate, set it LARGE (9999).
+    //
+    // Worth being careful with: bench measures the gate at 12.73% of nodes
+    // (2,708,280 with it, 3,053,066 without at depth 12), so both extremes move
+    // the tree substantially. The SPSA range floor is 4 for this reason;
+    // `set_parameter` enforces nothing, so a typed 0 would still land.
     i32 max_double_extensions: 8;
     // Reduce less when the static eval and the TT's search score disagree --
     // the same `complexity` signal as `rfp_complexity`, applied to reductions

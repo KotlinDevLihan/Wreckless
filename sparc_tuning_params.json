@@ -234,9 +234,9 @@
   {
     "name": "lmp_improvement",
     "default": 0.0,
-    "min": 39.0,
-    "max": 117.0,
-    "ck": 3.9,
+    "min": 0.0,
+    "max": 0.0,
+    "ck": 0.0,
     "rk": 0.002
   },
   {
@@ -1233,7 +1233,7 @@
   },
   {
     "name": "rfp_improvement_ref",
-    "default": 8.0,
+    "default": 0.0,
     "min": 0.0,
     "max": 24.0,
     "ck": 1.2,

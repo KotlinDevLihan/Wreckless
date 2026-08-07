@@ -81,9 +81,24 @@ define! {
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
-    // Depth at which the proportional improving term matches the old flat one.
-    // 0 restores the flat form. See the RFP block in search.rs.
-    i32 rfp_improvement_ref: 8;
+    // ZEROED -- the proportional form was measured and lost Elo.
+    //
+    // Converting this flat term to a depth-proportional one was the same fix
+    // that was right for `threat_scaled` and for LMR's move-count term, and the
+    // shape argument was sound. The magnitude was not. Anchoring the equivalence
+    // at depth 8 left every shallow node with a far weaker improving correction
+    // -- at depth 1 the term fell from 35 units to 4 -- which widens the RFP
+    // margin and fires it less exactly where most nodes are.
+    //
+    // Measured: shipped alongside three other ports in 07bbebb7, that batch went
+    // 42.2% -> 37.3% against Artemis on shared openings (-35.5 Elo), and
+    // Wreckless's mean search depth fell 17.96 -> 16.56 while the opponent's own
+    // depth fell only 0.44 on the same opening change. Of the four, this is the
+    // only one that makes the tree BIGGER, and only at shallow depth.
+    //
+    // Set to a depth to re-enable; if retried, the anchor belongs near the depth
+    // where the node count actually is (2-4), not at 8.
+    i32 rfp_improvement_ref: 0;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
     i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;

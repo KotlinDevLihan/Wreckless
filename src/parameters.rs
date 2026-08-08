@@ -124,8 +124,11 @@ define! {
     // and `colors(stm)` is a field read, so this is one AND and one popcount.
     // Capped because past ~6 attacked pieces the signal stops discriminating.
         //
-    // Shipped at 14 and cost real strength, for a reason that has nothing to do
-    // with whether threat density is a useful signal: it was added as a FLAT
+    // Shipped at 14, in the PROPORTIONAL form (see `threat_scaled` in search.rs).
+    //
+    // An earlier ADDITIVE version at this same value cost real strength, for a
+    // reason that has nothing to do with whether threat density is a useful
+    // signal: it was added as a FLAT
     // term to a base that scales with depth. The RFP margin is 11 units at
     // depth 1, 60 at depth 2, 727 at depth 8. A term contributing up to 84
     // therefore inflates the depth-1 margin by up to 764% and the depth-8
@@ -216,6 +219,10 @@ define! {
     // See the ProbCut block in search.rs. Divided by 8192, the gravity bound
     // on `probcut_history`, so this is the full swing of the threshold between
     // "verification always agrees" and "verification never agrees".
+    // 1 = ProbCut may only cut when a verification search actually ran.
+    // 0 = the previous behaviour, which cut on an unverified 2-move qsearch
+    // draft at depth <= 4 and cached the result as a real TT bound.
+    i32 probcut_require_verify: 1;
     i32 probcut_hist: 40;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;
@@ -248,10 +255,14 @@ define! {
     // assumption that a quiet move cannot recover a large deficit -- an
     // assumption that is weakest exactly when our pieces are hanging, because
     // the "quiet" move may be the one that saves the piece.
-    // DEFAULT 0 -- RETIRED PENDING MEASUREMENT; see `rfp_threat_density`.
-    // Worse here than there: at depth 1 the `fp_depth * depth` term is -48 and
-    // this contributed up to +120, so it did not merely inflate the margin, it
-    // dominated and flipped the sign of the expression.
+    // Shipped at 20, proportional form; see `rfp_threat_density`.
+    //
+    // The additive version was worse here than there: at depth 1 the
+    // `fp_depth * depth` term was -48 and this contributed up to +120, so it did
+    // not merely inflate the margin, it dominated and flipped the expression's
+    // sign. That specific hazard is gone -- the term is proportional now and
+    // `threat_scaled` returns a non-positive base untouched -- but it is why the
+    // additive form is not coming back.
     i32 fp_threat_density: 20;
     i32 fp_base: 127;
 

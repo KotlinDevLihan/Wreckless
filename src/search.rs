@@ -1205,7 +1205,23 @@ fn search<NODE: NodeType>(
                 );
             }
 
-            if score >= probcut_beta {
+            // `verified` gate: at depth <= 4 (<= 5 when improving) `base_depth`
+            // is 0, so `probcut_depth` is 0 and no verification search runs --
+            // yet this arm still returned a cutoff and wrote `Bound::Lower` at
+            // depth 1. The draft behind it is a qsearch capped at two moves per
+            // node, so those were fabricated bounds, cached as real ones, at the
+            // depths holding most of the tree.
+            //
+            // Removing the old `depth >= 5` gate bought ~1.9 plies, which is
+            // exactly what an unsound cutoff buys: depth that was never searched.
+            // This engine has been burned by that signature before ("same depth,
+            // thinner search"). Requiring verification keeps ProbCut at every
+            // depth but only lets it cut when something actually checked the
+            // draft.
+            //
+            // `probcut_require_verify = 0` restores the previous behaviour, so
+            // the two are directly comparable in one SPRT.
+            if score >= probcut_beta && (verified || p::probcut_require_verify() == 0) {
                 td.shared.tt.write(hash, probcut_depth + 1, raw_eval, score, Bound::Lower, mv, ply, tt_pv, false);
 
                 if is_decisive(score) {

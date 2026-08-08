@@ -215,6 +215,7 @@ impl ThreadPool {
                 handlers.push(scope.spawn_into(
                     move || {
                         t.id = index + 1;
+                        t.multi_pv = multi_pv;
                         t.time_manager = tm;
                         t.board = (*board).clone();
                         t.root_moves = root_moves;

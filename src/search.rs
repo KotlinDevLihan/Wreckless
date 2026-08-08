@@ -1575,7 +1575,14 @@ fn search<NODE: NodeType>(
                         // had no multiply and so no exposure; this is the cost of
                         // adding one, and i64 here is free.
                         as i64
-                        * (1024 - p::lmp_improving_mult() * !improving as i32) as i64
+                        // Floored at 256. At the top of its SPSA range
+                        // `lmp_improving_mult` is 1024, which makes this scale 0
+                        // and the whole threshold 0 -- LMP would then fire at
+                        // move_count 0 and prune EVERY quiet on every
+                        // non-improving node. `set_parameter` enforces no range
+                        // either. A floor of 256 caps the effect at "prune 4x
+                        // sooner", which is aggressive but survivable.
+                        * (1024 - p::lmp_improving_mult() * !improving as i32).max(256) as i64
                         / (1024 * 1024)
             {
                 skip_quiets = true;
@@ -2892,7 +2899,11 @@ fn threat_scaled(base: i32, coefficient: i32, density: i32) -> i32 {
     // enforce the range, so that headroom is not guaranteed at all. The 64-bit
     // multiply costs nothing here and removes the question; the result is back
     // in range by construction, since dividing by 1024 undoes the widening.
-    ((base as i64 * scale as i64) / 1024) as i32
+    // Clamped on the way back down. The i64 multiply removes overflow DURING the
+    // product, but the result is up to 1.5x `base`, so a base near i32::MAX
+    // would still truncate on the cast. Only reachable through an unchecked
+    // `setoption`, and free to rule out.
+    ((base as i64 * scale as i64) / 1024).clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
 fn update_probcut_history(td: &mut ThreadData, bonus: i32) {

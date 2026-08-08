@@ -1548,7 +1548,7 @@ fn search<NODE: NodeType>(
                 && !is_direct_check
                 && is_quiet
                 && !is_win(beta)
-                && move_count as i32
+                && move_count as i64
                     >= (p::lmp_base()
                         + p::lmp_improvement() * improvement / 16
                         + p::lmp_quad() * depth * depth
@@ -1566,9 +1566,17 @@ fn search<NODE: NodeType>(
                         // `lmp_improvement` is zeroed alongside this: leaving the
                         // additive term live too would penalise `improving` twice
                         // in one threshold.
-                        * (1024 - p::lmp_improving_mult() * !improving as i32)
-                        / 1024
-                        / 1024
+                        // Widened for the multiply. `lmp_quad * depth * depth`
+                        // reaches ~2.1M at depth 40, and multiplying that by up
+                        // to 1024 overflows i32 -- which in release WRAPS, and a
+                        // wrapped threshold can come out negative, making
+                        // `move_count >= threshold` true on the first move and
+                        // pruning every quiet at the node. The pre-existing form
+                        // had no multiply and so no exposure; this is the cost of
+                        // adding one, and i64 here is free.
+                        as i64
+                        * (1024 - p::lmp_improving_mult() * !improving as i32) as i64
+                        / (1024 * 1024)
             {
                 skip_quiets = true;
                 continue;

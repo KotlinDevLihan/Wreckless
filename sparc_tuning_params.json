@@ -233,10 +233,10 @@
   },
   {
     "name": "lmp_improvement",
-    "default": 0.0,
-    "min": 0.0,
-    "max": 0.0,
-    "ck": 0.0,
+    "default": 78.0,
+    "min": 39.0,
+    "max": 117.0,
+    "ck": 3.9,
     "rk": 0.002
   },
   {
@@ -1225,10 +1225,10 @@
   },
   {
     "name": "lmp_improving_mult",
-    "default": 1024.0,
+    "default": 0.0,
     "min": 0.0,
-    "max": 2048.0,
-    "ck": 102.4,
+    "max": 1024.0,
+    "ck": 51.2,
     "rk": 0.002
   },
   {
@@ -1249,7 +1249,7 @@
   },
   {
     "name": "fp_lmr_depth",
-    "default": 1.0,
+    "default": 0.0,
     "min": 0.0,
     "max": 1.0,
     "ck": 1,

@@ -230,22 +230,41 @@ define! {
     i32 probcut_beta_step: 197;
 
     // Late Move Pruning
-    // Artemis divides its LMP threshold by `(2 - improving)`: the NOT-improving
-    // case is halved. 512 reproduces that (a 50% cut); 0 disables and restores
-    // `lmp_improvement` as the only improving term.
-    i32 lmp_improving_mult: 512;
+    // ZEROED -- measured and reverted alongside `fp_lmr_depth`; see there.
+    //
+    // Artemis divides its LMP threshold by `(2 - improving)`, halving it when
+    // not improving. Porting that ratio ignored the baselines being different:
+    // Wreckless's threshold at depth 8 is ~87 moves against Artemis's 33-67, so
+    // the same halving is a far larger relative change here than there. That is
+    // the same anchoring mistake as `rfp_improvement_ref` -- porting a ratio
+    // without checking the quantity it is a ratio OF.
+    //
+    // 512 reproduces Artemis's halving; 0 disables and restores
+    // `lmp_improvement` as the sole improving term.
+    i32 lmp_improving_mult: 0;
     i32 lmp_base: 2818;
-    // ZEROED: superseded by `lmp_improving_mult`, which applies the same signal
-    // multiplicatively (Artemis's `/(2 - improving)`). Leaving both live would
-    // penalise `improving` twice in one threshold.
-    i32 lmp_improvement: 0;
+    // Restored to its tuned value: `lmp_improving_mult` is now 0, so this is
+    // again the only improving term in the LMP threshold. If that is ever
+    // re-enabled, this must go back to 0 -- both live would penalise `improving`
+    // twice in one threshold.
+    i32 lmp_improvement: 78;
     i32 lmp_quad: 1351;
     i32 lmp_history: 74;
 
     // Futility Pruning
-    // 1 = futility uses the LMR-adjusted depth (Artemis/Stockfish `lmrDepth`),
-    // 0 = raw depth as before.
-    i32 fp_lmr_depth: 1;
+    // ZEROED -- measured and reverted. 1 = futility uses the LMR-adjusted depth
+    // (Artemis/Stockfish `lmrDepth`), 0 = raw depth.
+    //
+    // Shipped together with `lmp_improving_mult` in 3631a08a. That build fully
+    // recovered the depth lost to `rfp_improvement_ref` (-1.32 -> -0.30 ply,
+    // matching the pre-batch build) yet stayed at -108.7 Elo against -54.5
+    // before the batch (z = -1.93, p = 0.053, corroborated by 07bbebb7 landing
+    // at -109.5 over 59 pairs with the same two terms live).
+    //
+    // Depth and Elo therefore had DIFFERENT causes: `rfp_improvement_ref` cost
+    // the depth, and one of these two cost the strength. Both prune more, which
+    // is why neither shows up as lost depth.
+    i32 fp_lmr_depth: 0;
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;

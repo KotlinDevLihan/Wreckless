@@ -66,7 +66,17 @@ pub fn probe(board: &Board) -> Option<GameOutcome> {
 }
 
 pub fn rank_rootmoves(td: &mut ThreadData) {
-    let mut rootmoves_in_c: mem::MaybeUninit<TbRootMoves> = mem::MaybeUninit::uninit();
+    // `zeroed`, not `uninit`. Only `moves[0..root_moves.len()]` are written
+    // below, so with `uninit` the tail of the 193-element array stays
+    // uninitialised -- and the `&*tb_ptr` reference taken after the C call is
+    // then a shared reference to a partially-uninitialised `TbRootMoves`, which
+    // is UB by Rust's model regardless of the fields all being integers and no
+    // uninit element ever being read.
+    //
+    // Zeroing is a valid bit pattern for every field here, and the cost is one
+    // ~188 KB memset per search -- `rank_rootmoves` runs once, before the search
+    // threads are spawned, so it is not on any hot path.
+    let mut rootmoves_in_c: mem::MaybeUninit<TbRootMoves> = mem::MaybeUninit::zeroed();
     let ep_square = tb_en_passant_square(&td.board);
 
     unsafe {

@@ -482,10 +482,23 @@ fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<Sh
             }
         }
         #[cfg(feature = "syzygy")]
-        ["name", "SyzygyPath", "value", v] => match crate::tb::initialize(v) {
-            Some(size) => println!("info string Loaded Syzygy tablebases with {size} pieces"),
-            None => eprintln!("Failed to load Syzygy tablebases"),
-        },
+        // `rest @ ..`, not a single token. UCI option values may contain spaces
+        // and tablebase paths routinely do -- `value C:\Program Files\syzygy`
+        // is three tokens, so the single-token pattern did not match at all and
+        // the command fell through to the silent unknown-option arm. Tablebases
+        // then stayed disabled with no diagnostic, which on Windows is the
+        // common case rather than an edge one.
+        //
+        // The failure branch also prints to stdout as an `info string` now: it
+        // was on stderr, which a GUI reading the engine's stdout never shows, so
+        // a mistyped path looked identical to a working one.
+        ["name", "SyzygyPath", "value", rest @ ..] if !rest.is_empty() => {
+            let path = rest.join(" ");
+            match crate::tb::initialize(&path) {
+                Some(size) => println!("info string Loaded Syzygy tablebases with {size} pieces"),
+                None => println!("info string Failed to load Syzygy tablebases from '{path}'"),
+            }
+        }
         #[cfg(feature = "syzygy")]
         ["name", "SyzygyProbeDepth", "value", v] => {
             if let Some(depth) = parse_spin("SyzygyProbeDepth", v, 1, 100) {

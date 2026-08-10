@@ -3046,21 +3046,26 @@ fn is_shuffling(td: &ThreadData, tt_move: Move, ply: isize) -> bool {
 
 fn make_move(td: &mut ThreadData, ply: isize, mv: Move) {
     td.shared.tt.prefetch(td.board.key_after(mv));
+
+    // Hoisted. `moved_piece(mv)` is `piece_on(mv.from())` -- a mailbox read --
+    // and it was performed three times, `in_check()` twice, all on a board that
+    // does not change until `make_move` below. This runs at every node.
+    //
+    // Whether the compiler eliminated them was not obvious either way:
+    // `subtable_ptr` takes `&mut self`, so there is a mutable borrow between the
+    // reads, and CSE across it depends on LLVM disambiguating two fields of the
+    // same `&mut ThreadData`. Hoisting removes the question rather than relying
+    // on it, and the values are identical by construction.
+    let moved = td.board.moved_piece(mv);
+    let in_check = td.board.in_check();
+    let noisy = mv.is_noisy();
+    let to = mv.to();
+
     td.stack[ply + 1].follow_pv = td.stack[ply].follow_pv && td.previous_pv.get(ply as usize) == Some(&mv);
     td.stack[ply].mv = mv;
-    td.stack[ply].piece = td.board.moved_piece(mv);
-    td.stack[ply].conthist = td.continuation_history.subtable_ptr(
-        td.board.in_check(),
-        mv.is_noisy(),
-        td.board.moved_piece(mv),
-        mv.to(),
-    );
-    td.stack[ply].contcorrhist = td.continuation_corrhist.subtable_ptr(
-        td.board.in_check(),
-        mv.is_noisy(),
-        td.board.moved_piece(mv),
-        mv.to(),
-    );
+    td.stack[ply].piece = moved;
+    td.stack[ply].conthist = td.continuation_history.subtable_ptr(in_check, noisy, moved, to);
+    td.stack[ply].contcorrhist = td.continuation_corrhist.subtable_ptr(in_check, noisy, moved, to);
 
     td.shared.nodes.increment(td.id);
 

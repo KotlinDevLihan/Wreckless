@@ -389,16 +389,20 @@ impl QuietContext {
         let occupancies = td.board.occupancies();
         let pawn_threats = td.board.piece_threats(PieceType::Pawn);
 
-        let non_pawn_threats = td.board.piece_threats(PieceType::Knight)
-            | td.board.piece_threats(PieceType::Bishop)
-            | td.board.piece_threats(PieceType::Rook)
-            | td.board.piece_threats(PieceType::Queen)
-            | td.board.piece_threats(PieceType::King);
+        // Read once each. Knight, bishop and rook were each fetched twice --
+        // once for `non_pawn_threats`, again for the value tiers below -- and
+        // the tiers are cumulative, so they can be built from the same locals.
+        let knight = td.board.piece_threats(PieceType::Knight);
+        let bishop = td.board.piece_threats(PieceType::Bishop);
+        let rook = td.board.piece_threats(PieceType::Rook);
+        let queen = td.board.piece_threats(PieceType::Queen);
+        let king = td.board.piece_threats(PieceType::King);
+
+        let non_pawn_threats = knight | bishop | rook | queen | king;
 
         let threatened = {
-            let minor_threats =
-                pawn_threats | td.board.piece_threats(PieceType::Knight) | td.board.piece_threats(PieceType::Bishop);
-            let rook_threats = minor_threats | td.board.piece_threats(PieceType::Rook);
+            let minor_threats = pawn_threats | knight | bishop;
+            let rook_threats = minor_threats | rook;
             [Bitboard(0), pawn_threats, pawn_threats, minor_threats, rook_threats, Bitboard(0)]
         };
 

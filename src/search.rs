@@ -1295,6 +1295,25 @@ fn search<NODE: NodeType>(
 
     // Singular Extensions (SE)
     let mut extension = 0;
+
+    // Whether `extension` came from the singular test rather than from LDSE.
+    //
+    // A singular extension is a statement about the TT MOVE specifically, but it
+    // is applied below to `move_count == 1`. Those coincide only while
+    // `Stage::HashMove` actually yields the TT move first, and it yields it only
+    // `if is_legal(tt_move)` -- so on a 16-bit key collision the picker drops the
+    // entry, the first move searched is an unrelated capture, and the extension
+    // lands on that.
+    //
+    // Gating the singular block on `is_legal` would also fix it, but that repeats
+    // a non-trivial legality test (piece lookups, castling paths, attack sets) at
+    // every depth-5-and-up node, and `MovePicker` runs the same test moments
+    // later. Comparing the move at the application site costs one `Move` compare
+    // and gives exactly the same guarantee.
+    //
+    // LDSE's extension is a property of the NODE, not of a particular move, so it
+    // keeps the plain `move_count == 1` treatment.
+    let mut singular_extension = false;
     let mut singular_score = Score::NONE;
 
     // `tt_move` must be present AND legal, because the extension this block
@@ -1313,13 +1332,7 @@ fn search<NODE: NodeType>(
     // compared against `singular_beta` as though it meant something. That
     // combination looks unreachable through the current write sites, but it is
     // one TT-write change away from being live.
-    if !NODE::ROOT
-        && !excluded
-        && potential_singularity
-        && tt_move.is_present()
-        && td.board.is_legal(tt_move)
-        && !is_shuffling(td, tt_move, ply)
-    {
+    if !NODE::ROOT && !excluded && potential_singularity && tt_move.is_present() && !is_shuffling(td, tt_move, ply) {
         debug_assert!(is_valid(tt_score));
 
         let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
@@ -1385,6 +1398,8 @@ fn search<NODE: NodeType>(
             // The limit is deliberately loose. This is a backstop against
             // runaway lines, not a tuning knob: at the default it does not bind
             // in normal play, so ordinary singular behaviour is unchanged.
+            singular_extension = true;
+
             let de = td.stack[ply].double_extensions;
             extension = 1;
             if de < p::max_double_extensions() {
@@ -1401,6 +1416,7 @@ fn search<NODE: NodeType>(
         }
         // Negative Extensions
         else if tt_score >= beta || cut_node {
+            singular_extension = true;
             extension = -3;
         }
     }
@@ -1768,13 +1784,14 @@ fn search<NODE: NodeType>(
             }
         }
 
-        let mut new_depth = depth - 1 + if move_count == 1 { extension } else { 0 };
+        let extension_applies = move_count == 1 && (!singular_extension || mv == tt_move);
+        let mut new_depth = depth - 1 + if extension_applies { extension } else { 0 };
 
         // Carry the extension budget down. Only the amount *beyond* the base
         // single extension counts -- +1 is ordinary singularity and should not
         // consume budget; the double and triple tiers are what can compound.
         td.stack[ply + 1].double_extensions =
-            td.stack[ply].double_extensions + if move_count == 1 { (extension - 1).max(0) } else { 0 };
+            td.stack[ply].double_extensions + if extension_applies { (extension - 1).max(0) } else { 0 };
 
         // Recapture extension: a capture landing on the square the
         // opponent's last move *captured* on, that doesn't lose material

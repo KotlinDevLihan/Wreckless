@@ -150,6 +150,15 @@ impl Board {
         self.state.captured
     }
 
+    /// Plies since the last null move.
+    ///
+    /// Used to tell whether a `ply - 2` / `ply - 4` lookback lands on our own
+    /// moves: a null move passes the turn without a move being played, so it
+    /// flips the parity of that walk.
+    pub const fn plies_from_null(&self) -> usize {
+        self.state.plies_from_null
+    }
+
     pub const fn en_passant(&self) -> Square {
         self.state.en_passant
     }

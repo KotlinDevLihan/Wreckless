@@ -2929,6 +2929,19 @@ fn is_shuffling(td: &ThreadData, tt_move: Move, ply: isize) -> bool {
         return false;
     }
 
+    // `plies_from_null < 6`, as Stockfish and Artemis both have it. The test
+    // below walks back two and four plies expecting to land on OUR own moves,
+    // and a null move passes the turn without a move being played -- so with one
+    // inside the window, `stack[ply - 2]` can be the opponent's move and the
+    // from/to chain is then comparing squares from two different sides.
+    //
+    // The existing `is_present()` checks catch a null move landing exactly on
+    // ply-2 or ply-4 (those slots hold `Move::NULL`), but not one at ply-1 or
+    // ply-3, which shifts the parity without leaving a null in either slot.
+    if td.board.plies_from_null() < 6 {
+        return false;
+    }
+
     let prev2 = td.stack[ply - 2].mv;
     let prev4 = td.stack[ply - 4].mv;
 

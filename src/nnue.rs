@@ -192,6 +192,17 @@ impl Network {
     pub fn push(&mut self, mv: Move, board: &Board) {
         debug_assert!(mv.is_present());
 
+        // The bound is held entirely by `search`/`qsearch` returning at
+        // `ply >= MAX_PLY - 1` before making a move, which keeps `index` inside
+        // the `MAX_PLY`-sized stacks. That invariant lives in another file and
+        // is not stated anywhere near here -- and since both stacks are now
+        // `HugeBox` allocations indexed through `DerefMut`, overrunning it would
+        // be an out-of-bounds WRITE into a raw mapping rather than a panic.
+        debug_assert!(
+            self.index + 1 < MAX_PLY,
+            "accumulator stack overflow: search must return at ply >= MAX_PLY - 1"
+        );
+
         self.index += 1;
 
         self.pst_stack[self.index].accurate = [false; 2];

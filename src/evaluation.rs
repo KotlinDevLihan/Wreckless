@@ -44,9 +44,22 @@ pub fn correct_eval(td: &ThreadData, raw_eval: i32, correction_value: i32) -> i3
     // 260/200 = 1.3, inflating every static eval by 30% and rescaling every
     // search margin that reads it. That is precisely the scale drift the clamp
     // above exists to prevent, reintroduced by the clamp itself.
+    // The divisor is floored at the offset so this term can only ever DAMP.
+    //
+    // At a clock of zero the multiplier is `offset / divisor`, and the two are
+    // independently tunable over [150, 260] -- so a tuner could reach 260/150 =
+    // 1.73x and silently amplify every static eval in the engine by 73%. That
+    // rescales every margin downstream of `eval`, which is the exact drift the
+    // divisor was deliberately left out of `correct_eval`'s blend to prevent;
+    // splitting this term into two free parameters reintroduced it by the back
+    // door.
+    //
+    // Stockfish's shape is offset 200 / divisor 214, i.e. divisor >= offset. The
+    // floor keeps the whole tunable range on that side of 1.0.
     let horizon = p::eval_fifty_offset();
+    let divisor = p::eval_fifty_div().max(horizon).max(1);
     let clock = (td.board.fiftymove_clock() as i32).min(horizon);
-    eval = eval * (horizon - clock) / p::eval_fifty_div().max(1);
+    eval = eval * (horizon - clock) / divisor;
 
     eval += correction_value;
 

@@ -2769,7 +2769,13 @@ fn eval_correction(td: &ThreadData, ply: isize) -> i32 {
                 td.stack[ply - 1].piece,
                 td.stack[ply - 1].mv.to(),
             )))
-        / (p::corr_weight_div().max(1) * 1024)
+        // `CORR_W_TOTAL / 6`, not a bare 1024. `corr_weight_div` was derived as
+        // `64 * 6 / 5` for six UNWEIGHTED terms, so the divisor has to carry
+        // whatever per-term scale the weights above use. Writing that scale as a
+        // literal left two constants that must agree with nothing connecting
+        // them: change `CORR_W_TOTAL` and this silently goes stale, rescaling
+        // every margin that reads `correction_value`.
+        / (p::corr_weight_div().max(1) * (CORR_W_TOTAL / 6))
 }
 
 fn update_correction_histories(td: &mut ThreadData, depth: i32, diff: i32, ply: isize) {

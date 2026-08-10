@@ -1,5 +1,5 @@
 use super::{Board, BoardObserver};
-use crate::types::{Move, MoveKind, Piece, PieceType, Square};
+use crate::types::{Move, Piece, PieceType, Square};
 
 impl Board {
     fn increment_stack(&mut self) {
@@ -48,7 +48,18 @@ impl Board {
         self.state.captured = captured;
         self.state.plies_from_null += 1;
 
-        if mv.kind() == MoveKind::Capture || piece.piece_type() == PieceType::Pawn {
+        // Tested on the captured PIECE, matching `board.rs`, rather than on an
+        // exact `kind() == Capture`. Four other kinds also capture --
+        // `EnPassant` and the three `PromotionCapture*` -- and the equality
+        // catches none of them. They are covered today only because every one is
+        // a pawn move and so falls to the second clause, which makes the rule
+        // correct by coincidence rather than by construction, on the single most
+        // silently-corrupting field on the board.
+        //
+        // `captured` is already computed above and already excludes the Chess960
+        // king-takes-own-rook castling encoding, so this is strictly safer at no
+        // cost.
+        if captured != Piece::None || piece.piece_type() == PieceType::Pawn {
             self.state.fiftymove_clock = 0;
         } else {
             self.state.fiftymove_clock = self.state.fiftymove_clock.saturating_add(1);

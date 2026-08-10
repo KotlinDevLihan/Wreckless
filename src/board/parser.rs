@@ -118,8 +118,32 @@ impl Board {
                 search_step = Square::LEFT;
             }
 
+            // Both guards below cover malformed castling fields, which arrive
+            // from an untrusted FEN and previously produced UB in release.
+            //
+            // `search_step == 0` when a Shredder letter names the king's own
+            // file. `ray_pass(king, king)` is empty, `lsb()` on an empty board is
+            // `trailing_zeros(0) == 64 == Square::None`, and `castling_rights`
+            // is indexed through `IndexMut`, which is `get_unchecked_mut` with
+            // only a `debug_assert` -- an out-of-bounds WRITE, not a panic.
+            //
+            // The step can also leave the board: a king on a1 with a queenside
+            // right steps to -1, and `Square::shift` transmutes `(-1) as u8 ==
+            // 255` into an invalid discriminant, again guarded only in debug.
+            let probe = king_from as i8 + search_step;
+
+            if search_step == 0 || !(0..Square::NUM as i8).contains(&probe) {
+                continue;
+            }
+
             let rook_from =
-                (ray_pass(king_from, king_from.shift(search_step)) & self.colored_pieces(color, PieceType::Rook)).lsb();
+                (ray_pass(king_from, Square::new(probe as u8)) & self.colored_pieces(color, PieceType::Rook)).lsb();
+
+            // No rook on that ray: the right is unbackable, so drop it rather
+            // than index a board-sized array with `Square::None`.
+            if rook_from == Square::None {
+                continue;
+            }
 
             let king_side = (rook_from > king_from) as usize;
 

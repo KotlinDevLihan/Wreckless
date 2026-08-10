@@ -1147,7 +1147,26 @@ fn search<NODE: NodeType>(
     // 1-4 account for the overwhelming majority of tree nodes, and the +62
     // build had no gate. The gate was added on soundness grounds without
     // measuring the node cost; the PGN depth metric shows it cost ~1.9 plies.
-    if cut_node
+    // `!excluded`, as razoring (`!excluded`), null move (`!excluded`) and the
+    // TT-only ProbCut below (`!excluded`) all have. Without it, ProbCut runs
+    // inside a singular verification search and can return a cutoff derived
+    // from the very position whose TT move is being excluded -- which defeats
+    // the exclusion, and (through the write below) caches a `Bound::Lower` for
+    // this hash produced by a search that deliberately suppressed the best move.
+    // `base_depth > 0`, i.e. depth >= 5 (>= 6 when improving), restored as an
+    // entry condition rather than left to the loop.
+    //
+    // `base_depth = (depth - 4 - improving).max(0)` is 0 below that, so
+    // `probcut_depth` is 0, so no verification search runs, so `verified` is
+    // false -- and with verification now required the cutoff CANNOT fire. The
+    // loop still ran the move picker and a full qsearch per noisy move to reach
+    // a branch that was unreachable, at the depths holding most of the tree.
+    //
+    // Skipping it cannot change any returned score; it only stops paying for a
+    // decision that was already impossible.
+    if (depth - 4 - improving as i32) > 0
+        && cut_node
+        && !excluded
         && !in_check
         && !is_win(beta)
         && if is_valid(tt_score) { tt_score >= probcut_beta && !is_decisive(tt_score) } else { eval >= beta }
@@ -1278,7 +1297,29 @@ fn search<NODE: NodeType>(
     let mut extension = 0;
     let mut singular_score = Score::NONE;
 
-    if !NODE::ROOT && !excluded && potential_singularity && !is_shuffling(td, tt_move, ply) {
+    // `tt_move` must be present AND legal, because the extension this block
+    // computes is applied to `move_count == 1` rather than to the move itself.
+    //
+    // That equivalence only holds while `Stage::HashMove` actually yields the TT
+    // move first, and it yields it only `if is_legal(tt_move)`. On a 16-bit key
+    // collision the entry carries a move from another position: the picker drops
+    // it, the first move searched is an unrelated capture, and the extension
+    // derived from the TT entry lands on that instead.
+    //
+    // `is_present` covers the other end: `potential_singularity` requires a valid
+    // non-decisive score and a non-Upper bound, none of which imply a stored
+    // move. With a null `tt_move`, `excluded[ply] = Move::NULL` excludes nothing,
+    // so the "singular" search is a plain reduced re-search and its score is
+    // compared against `singular_beta` as though it meant something. That
+    // combination looks unreachable through the current write sites, but it is
+    // one TT-write change away from being live.
+    if !NODE::ROOT
+        && !excluded
+        && potential_singularity
+        && tt_move.is_present()
+        && td.board.is_legal(tt_move)
+        && !is_shuffling(td, tt_move, ply)
+    {
         debug_assert!(is_valid(tt_score));
 
         let singular_margin = if tt_bound == Bound::Exact { (depth as u32).div_ceil(4) as i32 } else { depth }
@@ -1829,7 +1870,20 @@ fn search<NODE: NodeType>(
             if is_quiet {
                 reduction += p::lmr_quiet_base();
                 reduction -= p::lmr_quiet_hist() * history / 1024;
-                reduction += p::lmr_quiet_alpha() * ((alpha - estimated_score).clamp(-65, 91)) / 128;
+                // `is_valid` guard, as `complexity` has. In check `eval` is the
+                // `Score::NONE` sentinel (32002) and `estimated_score` falls
+                // through to it, so `alpha - estimated_score` is about -32000
+                // and pins to the -65 clamp at every in-check node. The clamp
+                // stops it being catastrophic, but the term then contributes a
+                // CONSTANT reduction offset that measures nothing -- it is meant
+                // to express how far below alpha the node sits.
+                //
+                // Same sentinel-leak class as the `complexity` defect documented
+                // earlier in this file, which produced ~15 plies of negative
+                // reduction before it was guarded. This one was missed.
+                if is_valid(estimated_score) {
+                    reduction += p::lmr_quiet_alpha() * ((alpha - estimated_score).clamp(-65, 91)) / 128;
+                }
             } else {
                 reduction += p::lmr_noisy_base();
                 reduction -= p::lmr_noisy_hist() * history / 1024;
@@ -2066,7 +2120,13 @@ fn search<NODE: NodeType>(
                 alpha = score;
                 alpha_raises += 1;
 
-                if !(NODE::ROOT && td.pv_index > 0) && mv != tt_move {
+                // `!excluded` here as well as on the final write below. During
+                // a singular verification search this fired on every alpha
+                // raise, storing a `Bound::Lower` at full depth for the node
+                // being tested -- from a search with the best move removed. The
+                // `mv != tt_move` guard does not help: the TT move is precisely
+                // what the excluded search never tries.
+                if !excluded && !(NODE::ROOT && td.pv_index > 0) && mv != tt_move {
                     td.shared.tt.write(hash, depth, raw_eval, score, Bound::Lower, mv, ply, true, false);
                 }
             }
@@ -2082,8 +2142,21 @@ fn search<NODE: NodeType>(
     }
 
     if move_count == 0 {
+        // `alpha`, as Stockfish and Artemis both return here
+        // (`bestValue = excludedMove ? alpha : ...`).
+        //
+        // This returned `-TB_WIN_IN_MAX + 1` -- a near-loss -- which reaches the
+        // singular block as `singular_score` and then trivially satisfies BOTH
+        // `singular_score < singular_beta - double_margin` and
+        // `< singular_beta - triple_margin`. So "the TT move is the only legal
+        // move" granted a TRIPLE extension every time, which is a node explosion
+        // in exactly the forced lines where extending buys least.
+        //
+        // `move_count == 0` under exclusion means the TT move was the only move,
+        // not that the position is lost: returning `alpha` says "nothing here
+        // beat alpha", which is what the singular test is actually asking.
         if excluded {
-            return -Score::TB_WIN_IN_MAX + 1;
+            return alpha;
         }
 
         return if in_check { mated_in(ply) } else { draw(td) };

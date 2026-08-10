@@ -426,7 +426,11 @@ fn position(board: &mut Board, settings: &Settings, mut tokens: &[&str]) {
             ["fen", rest @ ..] => {
                 match Board::from_fen(&rest.join(" ")) {
                     Ok(b) => *board = b,
-                    Err(e) => eprintln!("Invalid FEN: {e:?}"),
+                    // On stdout, for the same reason as `make_uci_move` above:
+                    // a rejected FEN leaves the PREVIOUS position in place and
+                    // the engine then searches it, so this needs to be visible
+                    // where the GUI is actually reading.
+                    Err(e) => println!("info string Invalid FEN ({e:?}) -- keeping previous position"),
                 }
                 board.set_frc(settings.frc);
                 tokens = rest;
@@ -444,8 +448,16 @@ fn position(board: &mut Board, settings: &Settings, mut tokens: &[&str]) {
 
 fn make_uci_move(board: &mut Board, uci_move: &str) {
     let moves = board.generate_all_moves();
-    if let Some(mv) = moves.iter().map(|entry| entry.mv).find(|mv| mv.to_uci(board) == uci_move) {
-        board.make_move(mv, &mut NullBoardObserver);
+
+    match moves.iter().map(|entry| entry.mv).find(|mv| mv.to_uci(board) == uci_move) {
+        Some(mv) => board.make_move(mv, &mut NullBoardObserver),
+        // Reported, not swallowed. A move the engine cannot match is either a
+        // GUI/engine disagreement about notation (Chess960 castling is the usual
+        // culprit) or a movegen bug -- and either way the board silently stops
+        // matching the GUI's for the rest of the game, with every later move in
+        // the list applied to the wrong position. `info string` rather than
+        // stderr, because a GUI reading stdout never sees stderr.
+        None => println!("info string Ignored unrecognised move '{uci_move}' -- position may be out of sync"),
     }
 }
 

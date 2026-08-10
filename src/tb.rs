@@ -66,6 +66,14 @@ pub fn probe(board: &Board) -> Option<GameOutcome> {
 }
 
 pub fn rank_rootmoves(td: &mut ThreadData) {
+    // Stalemate with <= 7 pieces reaches here: the caller's guard is
+    // `castling == 0 && pieces <= tb::size() && !is_draw(0)`, and `is_draw`
+    // covers material, fifty-move and repetition -- not stalemate. With no root
+    // moves the WDL fallback below indexes `root_moves[0]` and panics.
+    if td.root_moves.is_empty() {
+        return;
+    }
+
     // `zeroed`, not `uninit`. Only `moves[0..root_moves.len()]` are written
     // below, so with `uninit` the tail of the 193-element array stays
     // uninitialised -- and the `&*tb_ptr` reference taken after the C call is

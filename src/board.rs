@@ -549,8 +549,23 @@ impl Board {
                 let blockers = between(king, square) & self.colors(color);
                 match blockers.popcount() {
                     0 => {
-                        debug_assert_eq!(color, stm);
-                        self.state.checkers.set(square);
+                        // Guarded on `color == stm`, not merely asserted.
+                        // `checkers` is ASSIGNED in the `color == stm` branch
+                        // above but ACCUMULATED here in both passes, and the
+                        // loop order is fixed `[White, Black]`. With White to
+                        // move, a slider checking the BLACK king therefore
+                        // leaks into `checkers`; with Black to move the later
+                        // assignment happens to wipe it. That asymmetry is
+                        // unreachable from legal play -- the side not to move
+                        // cannot be in check -- but `from_fen` does not reject
+                        // such a position, so it is reachable from input.
+                        //
+                        // A `debug_assert` documents the invariant; it does not
+                        // hold it in release, where the consequence is a
+                        // corrupted `in_check()` for one colour only.
+                        if color == stm {
+                            self.state.checkers.set(square);
+                        }
                     }
                     1 => {
                         self.state.pinners[!color].set(square);

@@ -142,7 +142,7 @@ define! {
     // fraction of base" as a principle made things worse because the data said
     // the opposite. The signal itself is still worth testing; this shape of it
     // is not.
-    i32 rfp_threat_density: 14;
+    i32 rfp_threat_density: 0;
     i32 threat_density_cap: 6;
     i32 rfp_base: 19;
     // Widen the RFP margin when the static eval and the TT's search score
@@ -282,7 +282,7 @@ define! {
     // sign. That specific hazard is gone -- the term is proportional now and
     // `threat_scaled` returns a non-positive base untouched -- but it is why the
     // additive form is not coming back.
-    i32 fp_threat_density: 20;
+    i32 fp_threat_density: 0;
     i32 fp_base: 127;
 
     // Bad Noisy Futility Pruning

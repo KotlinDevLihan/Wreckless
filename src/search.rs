@@ -2721,6 +2721,19 @@ fn update_prior_move_histories(
 
 /// Per-term weights for the correction blend, in 1024ths.
 ///
+/// ALL 1024 -- i.e. unweighted, reproducing the pre-1.1.0 blend exactly.
+///
+/// The Artemis-derived ratios (pawn 1301, non-pawn 1154, material 905,
+/// continuation 815) shipped untested inside the batch measured at -17.7 Elo
+/// against 1.0.0-ed3afcdd (304 pairs, p = 0.011). `correction_value` reaches
+/// razoring, RFP, both singular margins, futility, LMR, FDS and qsearch SEE, and
+/// through `eval` another six consumers -- the widest blast radius of anything
+/// in that batch, and the only one that changes a value every single node reads.
+///
+/// The ratios come from an engine whose margins are tuned to them. Reckless's
+/// are not, and every Artemis port attempted this session has measured negative.
+/// The weighting MACHINERY is kept, so re-testing is a four-constant edit.
+///
 /// Every term used to be summed at full strength, so pawn correction -- keyed on
 /// the most stable feature of a position -- counted exactly as much as a single
 /// continuation-correction lag. Stockfish and its derivatives weight them. The
@@ -2738,10 +2751,10 @@ fn update_prior_move_histories(
 /// `CONTHIST_WEIGHTS` is in movepick.rs.
 ///
 /// Redistribute freely; do not change the total.
-const CORR_W_PAWN: i32 = 1301;
-const CORR_W_NONPAWN: i32 = 1154;
-const CORR_W_MATERIAL: i32 = 905;
-const CORR_W_CONT: i32 = 815;
+const CORR_W_PAWN: i32 = 1024;
+const CORR_W_NONPAWN: i32 = 1024;
+const CORR_W_MATERIAL: i32 = 1024;
+const CORR_W_CONT: i32 = 1024;
 
 /// Six unweighted terms came to `6 * 1024`. Anything else rescales the blend.
 const CORR_W_TOTAL: i32 = 6 * 1024;

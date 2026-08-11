@@ -1081,7 +1081,7 @@
   },
   {
     "name": "rfp_threat_density",
-    "default": 14.0,
+    "default": 0.0,
     "min": 0.0,
     "max": 60.0,
     "ck": 3.0,
@@ -1097,7 +1097,7 @@
   },
   {
     "name": "fp_threat_density",
-    "default": 20.0,
+    "default": 0.0,
     "min": 0.0,
     "max": 80.0,
     "ck": 4.0,

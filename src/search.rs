@@ -1164,7 +1164,7 @@ fn search<NODE: NodeType>(
     //
     // Skipping it cannot change any returned score; it only stops paying for a
     // decision that was already impossible.
-    if (depth - 4 - improving as i32) > 0
+    if (p::probcut_require_verify() == 0 || (depth - 4 - improving as i32) > 0)
         && cut_node
         && !excluded
         && !in_check

@@ -219,10 +219,29 @@ define! {
     // See the ProbCut block in search.rs. Divided by 8192, the gravity bound
     // on `probcut_history`, so this is the full swing of the threshold between
     // "verification always agrees" and "verification never agrees".
-    // 1 = ProbCut may only cut when a verification search actually ran.
-    // 0 = the previous behaviour, which cut on an unverified 2-move qsearch
-    // draft at depth <= 4 and cached the result as a real TT bound.
-    i32 probcut_require_verify: 1;
+    // DEFAULT 0 -- the soundness fix was measured and it lost.
+    //
+    // 1 = ProbCut may only cut when a verification search actually ran. At
+    // depth <= 4 `base_depth` is 0, so no verification runs and the cutoff
+    // cannot fire; the draft behind it is a qsearch capped at two moves, so
+    // those cutoffs are genuinely unverified and get cached as real bounds.
+    //
+    // Setting it to 1 restores the effect of the old `depth >= 5` gate, and the
+    // comment on that gate in search.rs records exactly what happened last time:
+    // "added on soundness grounds without measuring the node cost ... cost ~1.9
+    // plies". Shipped at 1 inside the batch that measured -18 Elo against
+    // 1.0.0-ed3afcdd over 491 pairs (p = 0.011), and reverting the two widest
+    // OTHER suspects -- the correction weights and threat_density -- moved that
+    // by 0.12% (p = 0.94), which leaves this as the change that fits.
+    //
+    // So the engine is faster with an unsound cutoff than correct without one.
+    // That is an uncomfortable result rather than a wrong one: depths 1-4 hold
+    // the overwhelming majority of nodes, and ProbCut there is evidently paying
+    // for itself despite the draft being thin.
+    //
+    // Kept as a switch rather than deleted: it is the honest way to re-test the
+    // tradeoff if the eval or the qsearch width ever changes.
+    i32 probcut_require_verify: 0;
     i32 probcut_hist: 40;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;

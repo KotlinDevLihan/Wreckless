@@ -79,6 +79,10 @@ pub fn message_loop(mut buffer: VecDeque<String>) {
                 shared.stop_pending.store(true, std::sync::atomic::Ordering::Release);
                 shared.status.set(Status::STOPPED);
             }
+            // Unreachable, and deliberately so. The listener thread consumes
+            // `ponderhit` itself (it must, to stamp `ponderhit_time` while the
+            // search is still running) and never forwards it, so this arm exists
+            // only to stop the token falling through to `Unknown command`.
             ["ponderhit"] => (),
             ["quit"] => {
                 drop(threads);
@@ -216,6 +220,13 @@ fn spawn_listener(shared: Arc<SharedContext>) -> std::sync::mpsc::Receiver<Strin
                     // According to the UCI specs, commands that are unexpected
                     // in the current state should be ignored silently.
                     // (https://backscattering.de/chess/uci/#unexpected)
+                    //
+                    // "Silently" is the spec's word and it is kept, but note the
+                    // consequence: a `setoption` sent during a search is dropped
+                    // with no diagnostic, so a GUI that reconfigures Hash or
+                    // Threads mid-search sees no error and no effect. Reporting
+                    // it here would mean printing from the listener thread while
+                    // the search is emitting `info` lines, so it is left alone.
                     if shared.status.get() != Status::RUNNING {
                         let _ = tx.send(message);
                     }
@@ -461,6 +472,21 @@ fn make_uci_move(board: &mut Board, uci_move: &str) {
     }
 }
 
+/// Parses a UCI `check` value, accepting the spellings GUIs actually send.
+///
+/// Returns `None` and reports on an unrecognised value rather than defaulting to
+/// `false`, so a typo cannot look like a successful configuration change.
+fn parse_check(name: &str, value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => {
+            println!("info string Invalid value '{value}' for {name}, expected true or false");
+            None
+        }
+    }
+}
+
 fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<SharedContext>, tokens: &[&str]) {
     match tokens {
         ["name", "Minimal", "value", v] => match *v {
@@ -525,14 +551,29 @@ fn set_option(threads: &mut ThreadPool, settings: &mut Settings, shared: &Arc<Sh
                 println!("info string set SyzygyProbeLimit to {limit}");
             }
         }
-        ["name", "UCI_Chess960", "value", v] => {
-            settings.frc = v.parse().unwrap_or_default();
-            println!("info string set UCI_Chess960 to {v}");
-        }
-        ["name", "UCI_ShowWDL", "value", v] => {
-            shared.show_wdl.store(v.parse().unwrap_or_default(), std::sync::atomic::Ordering::Release);
-            println!("info string set UCI_ShowWDL to {v}");
-        }
+        // Parsed, not `unwrap_or_default()`. That silently mapped any
+        // unparseable value to `false` while printing "set ... to <garbage>", so
+        // a GUI sending `value True` or `value 1` -- both seen in the wild --
+        // was told the option had been set and got the opposite. `MultiPV`
+        // below already got this treatment; these two were missed.
+        //
+        // Chess960 in particular is not a cosmetic setting: with it wrongly
+        // false the engine emits castling in standard notation and the GUI
+        // rejects the move.
+        ["name", "UCI_Chess960", "value", v] => match parse_check("UCI_Chess960", v) {
+            Some(value) => {
+                settings.frc = value;
+                println!("info string set UCI_Chess960 to {value}");
+            }
+            None => (),
+        },
+        ["name", "UCI_ShowWDL", "value", v] => match parse_check("UCI_ShowWDL", v) {
+            Some(value) => {
+                shared.show_wdl.store(value, std::sync::atomic::Ordering::Release);
+                println!("info string set UCI_ShowWDL to {value}");
+            }
+            None => (),
+        },
         ["name", "Ponder", "value", _] => {
             // The GUI only announces that it may send `go ponder`; nothing to configure.
         }

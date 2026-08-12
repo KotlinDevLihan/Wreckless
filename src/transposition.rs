@@ -408,9 +408,20 @@ unsafe fn allocate(threads: usize, size_mb: usize) -> (*mut Cluster, usize) {
     let size = size_mb * MEGABYTE;
     let len = size / CLUSTER_SIZE;
 
+    // `Hash` accepts up to 262144 MB (256 GB), so a request the system cannot
+    // satisfy is reachable from an ordinary `setoption` -- and it is usually the
+    // GUI, not the user, that picks the number. Every branch here must report
+    // failure rather than propagate a bad pointer into `parallel_clear`, which
+    // writes across the whole allocation immediately.
+    //
+    // The Windows branch already asserted; the other two did not, so there an
+    // over-large `Hash` crashed with no diagnostic. Note `mmap` reports failure
+    // as MAP_FAILED (-1), not null, so a null check would not have caught it:
+    // `madvise` was called on -1 and then `parallel_clear` wrote to it.
     #[cfg(target_os = "linux")]
     let ptr = {
         let ptr = mmap(std::ptr::null_mut(), size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        assert!(ptr != libc::MAP_FAILED, "Failed to allocate {size_mb} MB of table memory");
         madvise(ptr, size, MADV_HUGEPAGE);
         ptr.cast()
     };
@@ -421,7 +432,9 @@ unsafe fn allocate(threads: usize, size_mb: usize) -> (*mut Cluster, usize) {
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let ptr = {
         let layout = std::alloc::Layout::from_size_align(size, std::mem::align_of::<Cluster>()).unwrap();
-        std::alloc::alloc_zeroed(layout).cast()
+        let ptr = std::alloc::alloc_zeroed(layout);
+        assert!(!ptr.is_null(), "Failed to allocate {size_mb} MB of table memory");
+        ptr.cast()
     };
 
     unsafe { parallel_clear(threads, ptr, len) };
@@ -499,7 +512,7 @@ pub(crate) mod windows {
         }
 
         let ptr = unsafe { VirtualAlloc(std::ptr::null_mut(), size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE) };
-        assert!(!ptr.is_null(), "Failed to allocate table memory");
+        assert!(!ptr.is_null(), "Failed to allocate {} MB of table memory", size / (1024 * 1024));
         ptr
     }
 

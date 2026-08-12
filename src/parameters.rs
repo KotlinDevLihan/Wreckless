@@ -312,6 +312,72 @@ define! {
     i32 hist_quiet_malus_cap: 1099;
     i32 hist_cont_bonus_slope: 97;
     i32 hist_cont_bonus_cap: 1098;
+
+    // ---- Remaining single-number levers ----
+    //
+    // `lmr_win_beta` is a FULL PLY of reduction (1024/1024) applied whenever beta
+    // is a win score, and it was hardcoded next to a dozen tuned reduction terms.
+    // Of everything left unexposed it has the largest per-node swing.
+    //
+    // `see_split_div`/`see_split_base` set the dynamic good/bad noisy boundary --
+    // the line that decides which captures reach the verified path at all, and so
+    // which ones `good_noisy_cap` above can rescue.
+    //
+    // `rfp_tt_hist_gate` is the history floor below which a quiet TT move no
+    // longer licenses an RFP cutoff; `asp_widen_num` is the aspiration widening
+    // rate (`delta += n * delta / 128`), which sets how fast a failing window
+    // gives up and how many re-searches each iteration costs.
+    i32 lmr_win_beta: 1024;
+    i32 see_split_div: 47;
+    i32 see_split_base: 116;
+    i32 rfp_tt_hist_gate: -2048;
+    i32 asp_widen_num: 26;
+    i32 bnfp_recapture: 96;
+    i32 qs_noisy_bonus: 100;
+    i32 hist_noisy_bonus_slope: 96;
+    i32 hist_noisy_bonus_cap: 885;
+
+    // ---- History decay, prior-move shaping, LMR re-search, hindsight ----
+    //
+    // `quiet_malus_decay` is the rate at which malus falls off across the up-to-32
+    // quiets punished at a fail-high (`denom = 1024 + n * i`, squared). It decides
+    // whether the malus is concentrated on the first few refuted moves or spread
+    // thin across all of them -- a shape question no other constant controls.
+    //
+    // `lmr_research_up`/`_down` adjust the re-search depth by comparing the
+    // reduced score against `best_score`; they sit inside the LMR re-search that
+    // runs at a large fraction of all interior nodes.
+    //
+    // `hindsight_*` gate the two retroactive corrections at the top of the node,
+    // which act on the PARENT's reduction decision after the fact.
+    i32 quiet_malus_decay: 45;
+    i32 prior_malus_slope: 93;
+    i32 prior_malus_cap: 935;
+    i32 research_bonus_slope: 233;
+    i32 research_bonus_cap: 1550;
+    i32 lmr_research_up: 57;
+    i32 lmr_research_down: 9;
+    i32 hindsight_reduction: 2249;
+    i32 hindsight_eval_delta: 57;
+
+    // ---- Prior-move credit (update_prior_move_histories) ----
+    //
+    // When a node fails low, the move that led INTO it gets credited or blamed.
+    // `prior_f_*` are the three conditions that scale that credit -- the prior
+    // move was the parent's TT move, the fail-low was decisive, the opponent's
+    // eval worsened -- and they multiply a bonus applied one and two plies back.
+    //
+    // This is the only mechanism that propagates a result backwards past the
+    // immediate parent, so its scale interacts with every conthist lag weight.
+    i32 prior_f_tt_move: 110;
+    i32 prior_f_fail_low: 144;
+    i32 prior_f_worsening: 306;
+    i32 prior_bonus_slope: 180;
+    i32 prior_bonus_cap: 2414;
+    i32 prior_lag2_slope: 152;
+    i32 prior_lag2_cap: 1379;
+    i32 prior_noisy_slope: 50;
+    i32 prior_noisy_cap: 654;
     i32 probcut_hist: 40;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;

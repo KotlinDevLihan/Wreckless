@@ -238,7 +238,7 @@ impl MovePicker {
             // importantly, it expanded GoodNoisy at every node with a quiet TT
             // move, which is the highest-volume case. The short-circuit is what
             // the PGN depth metric was measuring when it saw +1.9 plies.
-            let threshold = self.threshold.unwrap_or(-entry.score / 47 + 116);
+            let threshold = self.threshold.unwrap_or(-entry.score / p::see_split_div() + p::see_split_base());
 
             if (self.threshold.is_none() && self.tt_move.is_quiet() && self.noisy_count > p::good_noisy_cap() as usize)
                 || !td.board.see(entry.mv, threshold)

@@ -264,7 +264,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
                         // "keeps re-searches narrow" rationale it carried.
                         alpha = (score - delta).max(-Score::INFINITE);
                         beta = (alpha + delta).min(beta);
-                        delta += 26 * delta / 128;
+                        delta += p::asp_widen_num() * delta / 128;
                         root_fail_lows += 1;
                     }
                     s if s >= beta => {
@@ -809,11 +809,11 @@ fn search<NODE: NodeType>(
         let eval_delta = eval + td.stack[ply - 1].eval;
         let reduction = td.stack[ply - 1].reduction;
 
-        if reduction >= 2249 && eval_delta < 0 {
+        if reduction >= p::hindsight_reduction() && eval_delta < 0 {
             depth += 1;
         }
 
-        if !tt_pv && depth >= 2 && reduction > 0 && eval_delta > 57 {
+        if !tt_pv && depth >= 2 && reduction > 0 && eval_delta > p::hindsight_eval_delta() {
             depth -= 1;
         }
     }
@@ -982,7 +982,7 @@ fn search<NODE: NodeType>(
     if !tt_pv
         && !in_check
         && !excluded
-        && (!tt_move.is_quiet() || td.quiet_history.get(td.board.all_threats(), stm, tt_move) >= -2048)
+        && (!tt_move.is_quiet() || td.quiet_history.get(td.board.all_threats(), stm, tt_move) >= p::rfp_tt_hist_gate())
         && estimated_score
             >= beta
                 + threat_scaled(
@@ -1747,7 +1747,7 @@ fn search<NODE: NodeType>(
                 + p::bnfp_depth() * depth
                 + p::bnfp_history() * history / 1024
                 + p::bnfp_base()
-                + 96 * (!NODE::ROOT && td.stack[ply - 1].mv.is_present() && mv.to() == td.stack[ply - 1].mv.to())
+                + p::bnfp_recapture() * (!NODE::ROOT && td.stack[ply - 1].mv.is_present() && mv.to() == td.stack[ply - 1].mv.to())
                     as i32;
 
             if !in_check
@@ -1935,7 +1935,7 @@ fn search<NODE: NodeType>(
 
             reduction += p::lmr_tt_alpha() * (is_valid(tt_score) && tt_score <= alpha) as i32;
             reduction += p::lmr_tt_depth() * (is_valid(tt_score) && tt_depth < depth) as i32;
-            reduction += 1024 * is_win(beta) as i32;
+            reduction += p::lmr_win_beta() * is_win(beta) as i32;
 
             if is_quiet {
                 reduction += p::lmr_quiet_base();
@@ -2065,8 +2065,8 @@ fn search<NODE: NodeType>(
 
             if score > alpha {
                 if !NODE::ROOT {
-                    new_depth += (score > best_score + 57) as i32;
-                    new_depth -= (score < best_score + 9) as i32;
+                    new_depth += (score > best_score + p::lmr_research_up()) as i32;
+                    new_depth -= (score < best_score + p::lmr_research_down()) as i32;
                 }
 
                 if new_depth > reduced_depth {
@@ -2552,7 +2552,7 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     }
 
     if best_score >= beta && best_move.is_noisy() {
-        let bonus = 100;
+        let bonus = p::qs_noisy_bonus();
 
         td.noisy_history.update(
             td.board.all_threats(),
@@ -2644,7 +2644,7 @@ fn update_best_move_histories<NODE: NodeType>(
 ) {
     let HistoryUpdate { ply, depth, best_move, stm, cut_node, in_check, move_count, .. } = ctx;
 
-    let noisy_bonus = (96 * depth).min(885) - 43 - 87 * cut_node as i32;
+    let noisy_bonus = (p::hist_noisy_bonus_slope() * depth).min(p::hist_noisy_bonus_cap()) - 43 - 87 * cut_node as i32;
     let noisy_malus = (p::hist_noisy_malus_slope() * depth).min(p::hist_noisy_malus_cap()) - 58 - 16 * noisy_moves.len() as i32;
 
     // At non-PV nodes, scale the bonus up by how many other moves were
@@ -2686,7 +2686,7 @@ fn update_best_move_histories<NODE: NodeType>(
         }
 
         for (i, &mv) in quiet_moves.iter().enumerate() {
-            let denom = 1024 + 45 * i as i32;
+            let denom = 1024 + p::quiet_malus_decay() * i as i32;
             let scale = 1024_i32 * 1024 / (denom * denom / 1024);
             td.quiet_history.update(td.board.all_threats(), stm, mv, -quiet_malus * scale / 1024);
 
@@ -2725,12 +2725,12 @@ fn update_best_move_histories<NODE: NodeType>(
     }
 
     if !NODE::ROOT && td.stack[ply - 1].mv.is_quiet() && td.stack[ply - 1].move_count < 2 {
-        let malus = (93 * depth - 52).min(935);
+        let malus = (p::prior_malus_slope() * depth - 52).min(p::prior_malus_cap());
         update_continuation_histories(td, ply - 1, td.stack[ply - 1].piece, td.stack[ply - 1].mv.to(), -malus);
     }
 
     if ctx.current_search_count > 1 && best_move.is_quiet() && ctx.best_score >= ctx.beta {
-        let bonus = (233 * depth - 86).min(1550);
+        let bonus = (p::research_bonus_slope() * depth - 86).min(p::research_bonus_cap());
         update_continuation_histories_in_check(td, ply, td.stack[ply].piece, best_move.to(), bonus, in_check);
     }
 }
@@ -2745,22 +2745,22 @@ fn update_prior_move_histories(
     if prior_move.is_quiet() {
         let factor = 88
             + (17 * td.stack[ply - 1].move_count as i32).min(229)
-            + 110 * (prior_move == td.stack[ply - 1].tt_move) as i32
-            + 144 * (!in_check && best_score <= eval - 97) as i32
-            + 306 * (is_valid(td.stack[ply - 1].eval) && best_score <= -td.stack[ply - 1].eval - 136) as i32;
+            + p::prior_f_tt_move() * (prior_move == td.stack[ply - 1].tt_move) as i32
+            + p::prior_f_fail_low() * (!in_check && best_score <= eval - 97) as i32
+            + p::prior_f_worsening() * (is_valid(td.stack[ply - 1].eval) && best_score <= -td.stack[ply - 1].eval - 136) as i32;
 
-        let scaled_bonus = factor * (180 * depth - 37).min(2414) / 128;
+        let scaled_bonus = factor * (p::prior_bonus_slope() * depth - 37).min(p::prior_bonus_cap()) / 128;
 
         td.quiet_history.update(td.board.prior_threats(), !stm, prior_move, scaled_bonus);
 
         let entry = &td.stack[ply - 2];
         if entry.mv.is_present() {
-            let bonus = (152 * depth - 47).min(1379);
+            let bonus = (p::prior_lag2_slope() * depth - 47).min(p::prior_lag2_cap());
             td.continuation_history.update(entry.conthist, td.stack[ply - 1].piece, prior_move.to(), bonus);
         }
     } else if prior_move.is_noisy() {
         let captured_type = td.board.captured_piece().piece_type();
-        let bonus = (50 * depth).min(654);
+        let bonus = (p::prior_noisy_slope() * depth).min(p::prior_noisy_cap());
 
         // Keyed by the piece that MOVED, not the piece now standing on the
         // destination. `prior_move` has already been played, so `piece_on(to)`

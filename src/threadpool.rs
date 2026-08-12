@@ -84,6 +84,18 @@ impl ThreadPool {
         &mut self, time_manager: TimeManager, report: Report, multi_pv: usize, board: &Board,
         shared: &Arc<SharedContext>,
     ) {
+        // `go` arms the search itself, before parsing limits, so that a `stop`
+        // arriving mid-setup still counts for the search it was meant for. The
+        // other entry points -- bench, speedtest, wasm -- came straight here and
+        // never armed at all, so `begin_search` consumed whatever `stop_pending`
+        // an idle `stop` had left behind and the first position aborted
+        // instantly with no diagnostic.
+        //
+        // Armed here rather than inside `execute_searches_filtered`, because
+        // `go` calls that directly: arming there would clear a `stop` that
+        // legitimately belonged to this search, reintroducing the race the
+        // arm/begin split exists to prevent.
+        shared.arm_search();
         self.execute_searches_filtered(time_manager, report, multi_pv, board, shared, &[]);
     }
 

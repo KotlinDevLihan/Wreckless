@@ -240,7 +240,7 @@ impl MovePicker {
             // the PGN depth metric was measuring when it saw +1.9 plies.
             let threshold = self.threshold.unwrap_or(-entry.score / 47 + 116);
 
-            if (self.threshold.is_none() && self.tt_move.is_quiet() && self.noisy_count > 2)
+            if (self.threshold.is_none() && self.tt_move.is_quiet() && self.noisy_count > p::good_noisy_cap() as usize)
                 || !td.board.see(entry.mv, threshold)
             {
                 self.bad_noisy.push(entry.mv);
@@ -296,9 +296,9 @@ impl MovePicker {
             let moved = td.board.piece_on(mv.from());
             let pt = moved.piece_type();
 
-            entry.score = 14232 * captured.value() / 1024
+            entry.score = p::mp_noisy_mvv() * captured.value() / 1024
                 + td.noisy_history.get(threats, moved, mv.to(), captured)
-                + 4558 * (mv.is_promotion() && mv.promo_piece_type() == PieceType::Queen) as i32
+                + p::mp_noisy_queen_promo() * (mv.is_promotion() && mv.promo_piece_type() == PieceType::Queen) as i32
                 // Evading check with the least valuable piece first dominates
                 // every learned term, hence the deliberately huge constant.
                 + (200000 - 20000 * pt as i32) * in_check as i32;
@@ -341,13 +341,19 @@ impl MovePicker {
             let moved = td.board.piece_on(from);
             let pt = moved.piece_type();
 
+            // Resolved once. `ctx.threatened[pt]` was indexed twice below -- once
+            // against `from` for the escape bonus, once against `to` for the
+            // move-into-threat penalty -- and this runs for every quiet move at
+            // every node that generates quiets.
+            let threatened_pt = ctx.threatened[pt];
+
             let low_ply_term = match low_ply {
                 Some((weight, divisor)) => weight * td.low_ply_history.get(ply as usize, mv) / divisor,
                 None => 0,
             };
 
-            entry.score = 1763 * td.quiet_history.get(threats, side, mv) / 1024
-                + 1024 * pawn_hist.get(pawn_key, moved, to) / 1024
+            entry.score = p::mp_quiet_hist_w() * td.quiet_history.get(threats, side, mv) / 1024
+                + p::mp_pawn_hist_w() * pawn_hist.get(pawn_key, moved, to) / 1024
                 + low_ply_term
                 // All six continuation lags; see CONTHIST_WEIGHTS.
                 + CONTHIST_WEIGHTS[0] * td.continuation_history.get(conthist[0], moved, to) / 1024
@@ -359,11 +365,11 @@ impl MovePicker {
                 // Positional shaping: reward stepping a threatened piece to
                 // safety, giving check, or attacking something; penalise moving
                 // into a threat or breaking up the pawns shielding our king.
-                + ctx.escape[pt] * ctx.threatened[pt].contains(from) as i32
-                + 10723 * td.board.checking_squares(pt).contains(to) as i32
-                - 8875 * ctx.threatened[pt].contains(to) as i32
-                + 3446 * ctx.offense[pt].contains(to) as i32
-                - 4494 * ctx.wall_pawns.contains(from) as i32;
+                + ctx.escape[pt] * threatened_pt.contains(from) as i32
+                + p::mp_gives_check() * td.board.checking_squares(pt).contains(to) as i32
+                - p::mp_moves_into_threat() * threatened_pt.contains(to) as i32
+                + p::mp_attacks() * ctx.offense[pt].contains(to) as i32
+                - p::mp_breaks_wall() * ctx.wall_pawns.contains(from) as i32;
         }
     }
 

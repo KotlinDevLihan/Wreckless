@@ -242,6 +242,57 @@ define! {
     // Kept as a switch rather than deleted: it is the honest way to re-test the
     // tradeoff if the eval or the qsearch width ever changes.
     i32 probcut_require_verify: 0;
+
+    // Most non-checking moves qsearch will look at before breaking out.
+    //
+    // Defaults to the shipped 3 (i.e. at most two non-checking moves), so this
+    // is inert until deliberately raised. It is the most aggressive single
+    // number in the engine: it is what makes the ProbCut draft "a qsearch capped
+    // at two moves", and it bought ~1.9 plies -- but plies bought by declining
+    // to search are the exact signature this file warns about elsewhere. Exposed
+    // so the tradeoff can be measured instead of assumed.
+    i32 qs_move_cap: 3;
+
+    // Good captures emitted before the SEE retest is short-circuited.
+    //
+    // Defaults to the shipped 2. Above this count, with a quiet TT move, every
+    // remaining capture skips SEE and is filed as `bad_noisy` -- where BNFP's
+    // `skip_bad_noisy` can abandon it on a margin tuned for LOSING captures. A
+    // winning capture (QxQ) can therefore go unsearched. Raising this keeps more
+    // captures on the verified path.
+    i32 good_noisy_cap: 2;
+
+    // Continuation-history malus slope and ceiling.
+    //
+    // Shipped as `(414 * depth).min(949)`, which saturates at depth 2.3 -- so it
+    // is a flat 949 across the whole useful depth range. Every sibling saturates
+    // far later: cont_bonus at 11.3, quiet_bonus at 9.5, noisy_malus at 7.2,
+    // quiet_malus at 6.4. A slope 4x steeper than its own bonus paired with the
+    // lowest ceiling in the set looks like a transposed digit, but "looks wrong"
+    // is a hypothesis, so the defaults reproduce current behaviour exactly.
+    i32 cont_malus_slope: 414;
+    i32 cont_malus_cap: 949;
+
+    // ---- Move-ordering weights (movepick.rs) ----
+    //
+    // The engine tuned ~150 pruning constants and zero ordering constants, yet
+    // ordering decides which of them ever get to fire: every margin here is
+    // compared against `good_quiet_threshold`, and a mis-weighted term moves
+    // moves across that line at every node. Defaults reproduce the shipped
+    // values exactly, so exposing them changes nothing until SPSA runs.
+    //
+    // NOT exposed, deliberately: the check-evasion term (`200000 - 20000 * pt`).
+    // It is not a weight competing with the learned terms -- it is a hard
+    // ordering that must dominate them, and letting a tuner shrink it toward the
+    // ~60k the other terms reach would let history reorder check evasions.
+    i32 mp_noisy_mvv: 14232;
+    i32 mp_noisy_queen_promo: 4558;
+    i32 mp_quiet_hist_w: 1763;
+    i32 mp_pawn_hist_w: 1024;
+    i32 mp_gives_check: 10723;
+    i32 mp_moves_into_threat: 8875;
+    i32 mp_attacks: 3446;
+    i32 mp_breaks_wall: 4494;
     i32 probcut_hist: 40;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;

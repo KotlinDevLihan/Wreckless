@@ -66,21 +66,6 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     // costs nothing beyond depth 1 of the first iteration.
     td.previous_pv.clear();
 
-    // The root's extension budget, made explicit.
-    //
-    // Each node seeds its child from its own slot, so the whole chain is
-    // anchored on `stack[0]`. That slot happens to be correct today only by
-    // omission: the sole writer is `stack[ply + 1]`, which cannot reach index 0
-    // because `search` is never entered at `ply == -1`, so it keeps the 0 from
-    // `Stack::new()` forever. The stack itself is built once per thread and is
-    // never reset between searches.
-    //
-    // That is a lot of load-bearing coincidence for a value that silently
-    // governs whether double and triple extensions fire at all. Zeroing it here
-    // costs one store per `go` and makes the anchor a stated invariant rather
-    // than a property of which indices the code currently happens to touch.
-    td.stack[0].double_extensions = 0;
-
     td.pv_table.clear(0);
     td.nnue.full_refresh(&td.board);
 
@@ -501,7 +486,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
         // reach -- a pure loss, and one that only shows up with Ponder on.
         if td.id == 0
             && !td.shared.ponder.load(Ordering::Acquire)
-            && td.time_manager.use_time_management()
+            && td.time_manager.can_bank_time()
             && td.multi_pv == 1
             && td.root_moves[0].score >= Score::MATE_IN_MAX
             && !td.root_moves[0].upperbound
@@ -522,7 +507,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
         if td.id == 0
             && !td.shared.ponder.load(Ordering::Acquire)
             && p::tm_single_move_depth() > 0
-            && td.time_manager.use_time_management()
+            && td.time_manager.can_bank_time()
             && td.root_moves.len() == 1
             && depth >= p::tm_single_move_depth()
         {
@@ -669,22 +654,30 @@ fn search<NODE: NodeType>(
                 _ => true,
             }
         {
-            if tt_move.is_quiet() && tt_score >= beta && td.stack[ply - 1].move_count < 4 {
-                let quiet_bonus = (190 * depth - 81).min(1691);
-                let cont_bonus = (96 * depth - 73).min(1206);
-
-                td.quiet_history.update(td.board.all_threats(), stm, tt_move, quiet_bonus);
-                update_continuation_histories_in_check(
-                    td,
-                    ply,
-                    td.board.moved_piece(tt_move),
-                    tt_move.to(),
-                    cont_bonus,
-                    in_check,
-                );
-            }
-
+            // Both the bonus and the return live under the fifty-move guard.
+            //
+            // The bonus rewards `tt_move` for producing a cutoff, so it is only
+            // earned if the cutoff actually happens. Above a clock of 90 the
+            // return is declined -- the cached score is no longer trustworthy
+            // that close to the draw -- and crediting the move anyway paid for a
+            // cutoff that did not occur, on a node that then went on to search
+            // normally and apply its own history updates on top.
             if td.board.fiftymove_clock() < 90 {
+                if tt_move.is_quiet() && tt_score >= beta && td.stack[ply - 1].move_count < 4 {
+                    let quiet_bonus = (190 * depth - 81).min(1691);
+                    let cont_bonus = (96 * depth - 73).min(1206);
+
+                    td.quiet_history.update(td.board.all_threats(), stm, tt_move, quiet_bonus);
+                    update_continuation_histories_in_check(
+                        td,
+                        ply,
+                        td.board.moved_piece(tt_move),
+                        tt_move.to(),
+                        cont_bonus,
+                        in_check,
+                    );
+                }
+
                 return tt_score;
             }
         }
@@ -2443,7 +2436,7 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             // tree and in practice all checks are ordered first (score_noisy
             // gives them a 200000 bonus), so by move_count 3 no check remains.
             // The +62 build had `break` and searched 1.9 plies deeper.
-            if move_count >= 3 && !is_direct_check {
+            if move_count >= p::qs_move_cap() as u16 && !is_direct_check {
                 break;
             }
 
@@ -2661,7 +2654,7 @@ fn update_best_move_histories<NODE: NodeType>(
     let quiet_malus = (171 * depth).min(1099) - 46 - 31 * quiet_moves.len() as i32;
 
     let cont_bonus = (97 * depth).min(1098) - 74 - 48 * cut_node as i32;
-    let cont_malus = (414 * depth).min(949) - 49 - 17 * quiet_moves.len() as i32;
+    let cont_malus = (p::cont_malus_slope() * depth).min(p::cont_malus_cap()) - 49 - 17 * quiet_moves.len() as i32;
 
     if best_move.is_noisy() {
         td.noisy_history.update(
@@ -2769,9 +2762,20 @@ fn update_prior_move_histories(
         let captured_type = td.board.captured_piece().piece_type();
         let bonus = (50 * depth).min(654);
 
+        // Keyed by the piece that MOVED, not the piece now standing on the
+        // destination. `prior_move` has already been played, so `piece_on(to)`
+        // is the promoted piece after a promotion -- while every reader keys by
+        // `piece_on(mv.from())` / `moved_piece(mv)`, i.e. the pawn
+        // (movepick.rs:296, search.rs:1654). Promotion bonuses were therefore
+        // written to a slot nothing ever reads, and the slot the readers use was
+        // never written.
+        //
+        // `stack[ply - 1].piece` is captured in `make_move` before the board is
+        // updated, so it is the pre-move piece -- the same source the
+        // continuation-history update directly above already uses.
         td.noisy_history.update(
             td.board.prior_threats(),
-            td.board.piece_on(prior_move.to()),
+            td.stack[ply - 1].piece,
             prior_move.to(),
             captured_type,
             bonus,

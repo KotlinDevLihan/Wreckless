@@ -19,12 +19,14 @@ PGO_DIR := target/pgo-profiles
 
 ifeq ($(ENV),UNIX)
 	PGO_MOVE := mv "target/$(TARGET)/release/$(EXE)" "$(NAME)"
+	BOLT_MOVE := mv "target/$(TARGET)/release/$(EXE)-bolt" "$(NAME)"
 	PGO_BIN  := ./target/$(TARGET)/release/$(EXE)
 	PGO_RUN   = LLVM_PROFILE_FILE="$(PGO_DIR)/wreckless_%m_%p.profraw" $(PGO_BIN)
 else
 	PGO_MOVE := move /Y "target\$(TARGET)\release\$(EXE).exe" "$(NAME)"
+	BOLT_MOVE := move /Y "target\$(TARGET)\release\$(EXE)-bolt.exe" "$(NAME)"
 	PGO_BIN  := target\$(TARGET)\release\$(EXE).exe
-	PGO_RUN   = set "LLVM_PROFILE_FILE=$(PGO_DIR)\wreckless_%%m_%%p.profraw" && $(PGO_BIN)
+	PGO_RUN   = set "LLVM_PROFILE_FILE=$(PGO_DIR)\wreckless_%m_%p.profraw" && $(PGO_BIN)
 endif
 
 .PHONY: all no-syzygy pgo bolt wasm x64-check checkdeps clean help
@@ -63,7 +65,7 @@ bolt: ## Build with PGO, then BOLT (post-link block/function layout)
 	cargo pgo optimize
 	cargo pgo bolt build --with-pgo
 	cargo pgo bolt optimize --with-pgo
-	$(PGO_MOVE)
+	$(BOLT_MOVE)
 
 wasm: ## Build the WebAssembly target
 	RUSTFLAGS= rustup run nightly \

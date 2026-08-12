@@ -192,4 +192,19 @@ impl TimeManager {
     pub fn use_time_management(&self) -> bool {
         matches!(self.limits, Limits::Fischer(..) | Limits::Cyclic(..) | Limits::Time(_))
     }
+
+    /// Whether time saved now can be spent on a later move.
+    ///
+    /// Deliberately excludes `Limits::Time` (`go movetime`). Under a movetime
+    /// there is no clock to bank into: the allowance belongs to this move and
+    /// nothing carries forward, so stopping early does not buy anything -- it
+    /// just returns a shallower answer than the GUI asked for. That matters for
+    /// analysis and for test harnesses that drive fixed-movetime searches.
+    ///
+    /// `use_time_management` is still the right test for whether a soft limit
+    /// applies at all; this one is only for the "stop early and pocket the
+    /// difference" decisions.
+    pub fn can_bank_time(&self) -> bool {
+        matches!(self.limits, Limits::Fischer(..) | Limits::Cyclic(..))
+    }
 }

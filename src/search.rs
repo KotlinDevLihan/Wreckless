@@ -664,8 +664,8 @@ fn search<NODE: NodeType>(
             // normally and apply its own history updates on top.
             if td.board.fiftymove_clock() < 90 {
                 if tt_move.is_quiet() && tt_score >= beta && td.stack[ply - 1].move_count < 4 {
-                    let quiet_bonus = (190 * depth - 81).min(1691);
-                    let cont_bonus = (96 * depth - 73).min(1206);
+                    let quiet_bonus = (p::ttcut_quiet_slope() * depth - 81).min(p::ttcut_quiet_cap());
+                    let cont_bonus = (p::ttcut_cont_slope() * depth - 73).min(p::ttcut_cont_cap());
 
                     td.quiet_history.update(td.board.all_threats(), stm, tt_move, quiet_bonus);
                     update_continuation_histories_in_check(
@@ -1147,7 +1147,15 @@ fn search<NODE: NodeType>(
     // expected cut nodes that have no TT move to anchor move ordering. Nodes
     // on the previous iteration's PV are exempt (as in Stockfish).
     let iir_applied =
-        !NODE::ROOT && !td.stack[ply].follow_pv && (NODE::PV || cut_node) && depth >= 6 && tt_move.is_null();
+        !NODE::ROOT
+            && !td.stack[ply].follow_pv
+            && (NODE::PV || cut_node)
+            && depth >= p::iir_depth()
+            // A TT move backed by a search far shallower than this one tells us
+            // little more than no move at all. `slack == 0` disables the second
+            // arm entirely, reproducing the original `tt_move.is_null()` test.
+            && (tt_move.is_null()
+                || (p::iir_tt_depth_slack() > 0 && tt_depth + p::iir_tt_depth_slack() < depth));
 
     if iir_applied {
         depth -= 1;
@@ -1914,7 +1922,7 @@ fn search<NODE: NodeType>(
             // moves more, in proportion to how much you were reducing anyway.
             reduction += p::lmr_movecount_ilog() * depth.ilog2() as i32 * (move_count as u32).ilog2() as i32 / 16;
 
-            reduction -= (p::lmr_improvement() * improvement / 128).clamp(-241, 1155);
+            reduction -= (p::lmr_improvement() * improvement / 128).clamp(p::lmr_improvement_lo(), p::lmr_improvement_hi());
             reduction -= p::lmr_corr() * correction_value.abs() / 1024;
 
             reduction += p::lmr_exact() * (bound == Bound::Exact) as i32;
@@ -2644,17 +2652,17 @@ fn update_best_move_histories<NODE: NodeType>(
 ) {
     let HistoryUpdate { ply, depth, best_move, stm, cut_node, in_check, move_count, .. } = ctx;
 
-    let noisy_bonus = (p::hist_noisy_bonus_slope() * depth).min(p::hist_noisy_bonus_cap()) - 43 - 87 * cut_node as i32;
-    let noisy_malus = (p::hist_noisy_malus_slope() * depth).min(p::hist_noisy_malus_cap()) - 58 - 16 * noisy_moves.len() as i32;
+    let noisy_bonus = (p::hist_noisy_bonus_slope() * depth).min(p::hist_noisy_bonus_cap()) - 43 - p::hist_noisy_bonus_cut() * cut_node as i32;
+    let noisy_malus = (p::hist_noisy_malus_slope() * depth).min(p::hist_noisy_malus_cap()) - 58 - p::hist_noisy_malus_decay() * noisy_moves.len() as i32;
 
     // At non-PV nodes, scale the bonus up by how many other moves were
     // searched before this one proved best (as in Stockfish).
-    let quiet_bonus = (p::hist_quiet_bonus_slope() * depth).min(p::hist_quiet_bonus_cap()) - 72 - 42 * cut_node as i32
+    let quiet_bonus = (p::hist_quiet_bonus_slope() * depth).min(p::hist_quiet_bonus_cap()) - 72 - p::hist_quiet_bonus_cut() * cut_node as i32
         + (18 * (move_count as i32 - 1)).min(180) * !NODE::PV as i32;
-    let quiet_malus = (p::hist_quiet_malus_slope() * depth).min(p::hist_quiet_malus_cap()) - 46 - 31 * quiet_moves.len() as i32;
+    let quiet_malus = (p::hist_quiet_malus_slope() * depth).min(p::hist_quiet_malus_cap()) - 46 - p::hist_quiet_malus_decay() * quiet_moves.len() as i32;
 
-    let cont_bonus = (p::hist_cont_bonus_slope() * depth).min(p::hist_cont_bonus_cap()) - 74 - 48 * cut_node as i32;
-    let cont_malus = (p::cont_malus_slope() * depth).min(p::cont_malus_cap()) - 49 - 17 * quiet_moves.len() as i32;
+    let cont_bonus = (p::hist_cont_bonus_slope() * depth).min(p::hist_cont_bonus_cap()) - 74 - p::hist_cont_bonus_cut() * cut_node as i32;
+    let cont_malus = (p::cont_malus_slope() * depth).min(p::cont_malus_cap()) - 49 - p::hist_cont_malus_decay() * quiet_moves.len() as i32;
 
     if best_move.is_noisy() {
         td.noisy_history.update(

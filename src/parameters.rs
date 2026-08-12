@@ -406,6 +406,46 @@ define! {
     i32 escape_bishop: 8170;
     i32 escape_rook: 14051;
     i32 escape_queen: 20357;
+
+    // ---- LMR improvement clamp, IIR trigger ----
+    //
+    // `lmr_improvement_*` were the only clamp on `improvement` anywhere in the
+    // engine -- RFP, NMP and LMP all consume it raw. Whoever wrote this knew the
+    // range was dangerous enough to bound HERE, which makes the bound itself the
+    // interesting number: it encodes how far the signal is trusted.
+    //
+    // `iir_tt_depth_slack` extends IIR to the case Stockfish also covers: a TT
+    // entry whose depth is far below the current depth is nearly as uninformative
+    // as no entry at all, and it is a much more common case than a missing move.
+    // DEFAULT 0 = disabled, i.e. today's behaviour exactly (fires only on a null
+    // TT move). Set it to e.g. 4 to also reduce when `tt_depth + 4 < depth`.
+    i32 lmr_improvement_lo: -241;
+    i32 lmr_improvement_hi: 1155;
+    i32 iir_depth: 6;
+    i32 iir_tt_depth_slack: 0;
+
+    // ---- TT-cutoff credit, and the per-sibling decay rates ----
+    //
+    // `ttcut_*` reward the TT move when it produces a cutoff without any search
+    // at this node. That is the cheapest fail-high in the engine and the most
+    // frequent, so its credit sets the baseline every searched fail-high is
+    // measured against -- and it was entirely hardcoded.
+    //
+    // `*_decay` subtract per already-tried sibling, so they control how the
+    // penalty spreads across the refuted moves at a fail-high: a large value
+    // concentrates blame on the first few, a small one spreads it evenly. The
+    // `*_cut` terms discount the bonus at cut nodes, where the fail-high was
+    // expected and therefore carries less information.
+    i32 ttcut_quiet_slope: 190;
+    i32 ttcut_quiet_cap: 1691;
+    i32 ttcut_cont_slope: 96;
+    i32 ttcut_cont_cap: 1206;
+    i32 hist_noisy_bonus_cut: 87;
+    i32 hist_noisy_malus_decay: 16;
+    i32 hist_quiet_bonus_cut: 42;
+    i32 hist_quiet_malus_decay: 31;
+    i32 hist_cont_bonus_cut: 48;
+    i32 hist_cont_malus_decay: 17;
     i32 probcut_hist: 40;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;

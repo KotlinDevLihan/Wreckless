@@ -83,6 +83,21 @@ impl Board {
         self.state.keys.full() ^ ZOBRIST.fiftymove_clock[self.fiftymove_clock_bucket()]
     }
 
+    /// Approximate hash of the position after `mv`, for TT prefetching only.
+    ///
+    /// Deliberately incomplete: promotions leave a pawn on `to`, en passant does
+    /// not remove the captured pawn, castling moves only the king, and the
+    /// en-passant-square term is not updated at all. For those move kinds the
+    /// key is simply wrong.
+    ///
+    /// That is harmless here and must stay that way -- a wrong prefetch address
+    /// only warms a line nobody reads, and `make_move` issues a second, exact
+    /// prefetch afterwards to cover exactly these cases. This is why the two
+    /// prefetches are not redundant: the speculative one has all of `make_move`
+    /// to hide its latency, the exact one covers where it guessed wrong.
+    ///
+    /// NEVER use this where the key must be correct -- repetition detection, TT
+    /// stores or probes. It is prefetch-only by construction.
     pub fn key_after(&self, mv: Move) -> u64 {
         let from = mv.from();
         let to = mv.to();
@@ -491,22 +506,26 @@ impl Board {
         let their_knights = self.colored_pieces(their, PieceType::Knight);
         let their_queens = self.colored_pieces(their, PieceType::Queen);
 
-        self.state.piece_threats[PieceType::Pawn] = pawn_attacks_setwise(their_pawns, their);
-        self.state.piece_threats[PieceType::Knight] = knight_attacks_setwise(their_knights);
-        self.state.piece_threats[PieceType::Bishop] =
-            bishop_attacks_setwise(self.colored_pieces(their, PieceType::Bishop), occupancies);
-        self.state.piece_threats[PieceType::Rook] =
-            rook_attacks_setwise(self.colored_pieces(their, PieceType::Rook), occupancies);
-        self.state.piece_threats[PieceType::Queen] = bishop_attacks_setwise(their_queens, occupancies)
-            | rook_attacks_setwise(their_queens, occupancies);
-        self.state.piece_threats[PieceType::King] = king_attacks(self.king_square(their));
+        // Built in locals and stored once, rather than stored per type and then
+        // read back six times to form the union. The reload is store-to-load
+        // forwarding rather than a cache miss, but it is still six dependent
+        // loads on the critical path of a function that runs on every
+        // `make_move`; ORing registers keeps the union off memory entirely.
+        let pawn = pawn_attacks_setwise(their_pawns, their);
+        let knight = knight_attacks_setwise(their_knights);
+        let bishop = bishop_attacks_setwise(self.colored_pieces(their, PieceType::Bishop), occupancies);
+        let rook = rook_attacks_setwise(self.colored_pieces(their, PieceType::Rook), occupancies);
+        let queen = bishop_attacks_setwise(their_queens, occupancies) | rook_attacks_setwise(their_queens, occupancies);
+        let king = king_attacks(self.king_square(their));
 
-        self.state.all_threats = self.piece_threats(PieceType::Pawn)
-            | self.piece_threats(PieceType::Knight)
-            | self.piece_threats(PieceType::Bishop)
-            | self.piece_threats(PieceType::Rook)
-            | self.piece_threats(PieceType::Queen)
-            | self.piece_threats(PieceType::King);
+        self.state.piece_threats[PieceType::Pawn] = pawn;
+        self.state.piece_threats[PieceType::Knight] = knight;
+        self.state.piece_threats[PieceType::Bishop] = bishop;
+        self.state.piece_threats[PieceType::Rook] = rook;
+        self.state.piece_threats[PieceType::Queen] = queen;
+        self.state.piece_threats[PieceType::King] = king;
+
+        self.state.all_threats = pawn | knight | bishop | rook | queen | king;
 
         let diagonal = self.pieces2(PieceType::Bishop, PieceType::Queen);
         let orthogonal = self.pieces2(PieceType::Rook, PieceType::Queen);

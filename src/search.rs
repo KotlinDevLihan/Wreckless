@@ -874,8 +874,29 @@ fn search<NODE: NodeType>(
     // for the side to move? Counts our own pieces standing on squares the
     // opponent attacks. Both bitboards are already materialised, so this costs
     // one AND and one popcount per node. Consumers: RFP and FP margins.
-    let threat_density = ((td.board.all_threats() & td.board.colors(stm)).popcount() as i32)
-        .min(p::threat_density_cap());
+    let our_threatened = td.board.all_threats() & td.board.colors(stm);
+
+    // Split into the boolean RFP actually uses and the count only the scaled
+    // terms use. Both scaling coefficients ship at 0 -- the additive form of
+    // this term cost ~60 Elo and was reverted -- so with the count computed
+    // eagerly every node paid a POPCNT and a MIN to produce a value that
+    // `threat_scaled` then discarded on its `coefficient == 0` early return.
+    //
+    // Rust evaluates arguments eagerly, so that early return could not save the
+    // work; the guard has to be here. In the default build both parameters are
+    // `const fn`s returning 0, so this folds to `0` and the POPCNT disappears
+    // from the binary entirely. Under the `spsa` feature they are real reads and
+    // the count is computed as before.
+    //
+    // Behaviour is identical either way: `min(cap) == 0` holds exactly when the
+    // set is empty or the cap is 0, which is what `no_threats` tests.
+    let no_threats = our_threatened.is_empty() || p::threat_density_cap() == 0;
+
+    let threat_density = if p::rfp_threat_density() != 0 || p::fp_threat_density() != 0 {
+        (our_threatened.popcount() as i32).min(p::threat_density_cap())
+    } else {
+        0
+    };
 
     let complexity = if is_valid(eval) && is_valid(tt_score) && !is_decisive(tt_score) {
         (eval - tt_score).abs().min(p::complexity_cap())
@@ -937,7 +958,7 @@ fn search<NODE: NodeType>(
                     + p::rfp_depth_lin() * depth
                     + p::rfp_corr() * correction_value.abs() / 1024
                     + p::rfp_complexity() * complexity / 1024
-                    - p::rfp_no_threats() * (threat_density == 0) as i32
+                    - p::rfp_no_threats() * no_threats as i32
                     - p::rfp_worsening() * opponent_worsening as i32
                     // Artemis shrinks the whole margin on a TT miss
                     // (`futilityMult -= 20 * !ttHit`, on a 40-80 multiplier), so a

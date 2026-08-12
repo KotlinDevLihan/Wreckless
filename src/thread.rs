@@ -97,7 +97,16 @@ impl Counter {
     }
 
     pub fn increment(&self, id: usize) {
-        self.shards[id].inner.store(self.shards[id].inner.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
+        // Resolved once. `shards` is a `Box<[_]>`, so each `self.shards[id]` is a
+        // length load, a bounds check and an address computation -- and this runs
+        // once per node, on the hottest path in the engine. The two indexes are
+        // identical by construction, so this only removes the second.
+        //
+        // Deliberately a relaxed load/store pair rather than `fetch_add`: each
+        // thread owns its shard exclusively, so no read-modify-write atomicity is
+        // needed and this compiles to a plain load/add/store with no LOCK prefix.
+        let shard = &self.shards[id];
+        shard.inner.store(shard.inner.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
     }
 
     pub fn reset(&self) {

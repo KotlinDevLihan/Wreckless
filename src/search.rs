@@ -890,7 +890,14 @@ fn search<NODE: NodeType>(
     //
     // Behaviour is identical either way: `min(cap) == 0` holds exactly when the
     // set is empty or the cap is 0, which is what `no_threats` tests.
-    let no_threats = our_threatened.is_empty() || p::threat_density_cap() == 0;
+    // Purely `is_empty`, which is what this meant before 1.0.0. Folding the
+    // `cap == 0` case in here was wrong: that equivalence holds for
+    // `threat_density` (whose `min(cap)` really is 0 when the cap is 0) but not
+    // for `no_threats`, which asks a different question. `spsa.config` allows a
+    // lower bound of 0 on the cap, and at 0 the folded form made `no_threats`
+    // unconditionally true -- so RFP would subtract `rfp_no_threats` (54) from
+    // its margin at every node, threatened or not.
+    let no_threats = our_threatened.is_empty();
 
     let threat_density = if p::rfp_threat_density() != 0 || p::fp_threat_density() != 0 {
         (our_threatened.popcount() as i32).min(p::threat_density_cap())
@@ -903,6 +910,23 @@ fn search<NODE: NodeType>(
     } else {
         0
     };
+
+    // Seed the child's extension budget before any recursion reaches `ply + 1`.
+    //
+    // The per-move increment at the bottom of the move loop was the only writer,
+    // so every recursion that happens BEFORE the loop -- null move and both
+    // ProbCut searches -- handed the child whatever an unrelated sibling had
+    // left in `stack[ply + 1]`. The child then read that at its own singular
+    // check as if it described the current line.
+    //
+    // It went wrong in both directions: a leftover high count silently disabled
+    // double and triple extensions for a whole null-move subtree, and a leftover
+    // 0 let a deep line reset a budget it had already spent. `max_double_extensions`
+    // moves ~12.7% of bench nodes, so neither direction was cosmetic.
+    //
+    // Seeding here means the slot always describes the path actually taken; the
+    // loop's write stays as the per-move increment on top of it.
+    td.stack[ply + 1].double_extensions = td.stack[ply].double_extensions;
 
     // Razoring
     // Restored the `razor_corr` eval-correction term and the `cutoff_count[ply

@@ -319,7 +319,6 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
     // survives the RUNNING store -- see `SharedContext::begin_search`.
     shared.arm_search();
 
-    *shared.ponderhit_time.lock().unwrap() = None;
     shared.ponder_abandoned.store(false, std::sync::atomic::Ordering::Release);
     shared.ponder_search.store(ponder, std::sync::atomic::Ordering::Release);
     shared.ponder.store(ponder, std::sync::atomic::Ordering::Release);
@@ -334,10 +333,17 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
     // The window is small but reachable: the GUI sends `ponderhit` as soon as
     // the opponent plays the move we predicted, which can be immediately.
     //
-    // `ponderhit_time` was cleared to `None` a few lines up, so any `Some` here
-    // must have been stamped inside that window. Reading it after the store
-    // closes the race in both directions: a hit landing before the store is
-    // caught here, and one landing after sees `ponder` already true.
+    // The stamp is cleared at the END of the previous search, not here. Clearing
+    // it at the top of `go()` looked equivalent and was not: the listener can
+    // stamp before the main thread even reaches that line -- it forwards
+    // `go ponder` and then reads `ponderhit` off the very next line, while the
+    // main thread is still dequeuing -- and the clear would then erase a hit
+    // belonging to THIS search, after which the store above re-set `ponder`.
+    //
+    // Clearing on the way out instead means the slot is already `None` when a
+    // search begins, without `go()` having to win a race to make it so. Any
+    // `Some` observed here therefore belongs to this search no matter which side
+    // of the store it landed on.
     if ponder && shared.ponderhit_time.lock().unwrap().is_some() {
         shared.ponder.store(false, std::sync::atomic::Ordering::Release);
     }
@@ -360,6 +366,12 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
     // what an arbiter reports as an illegal move or a disconnect.
     let abandoned = shared.ponder_abandoned.swap(false, std::sync::atomic::Ordering::AcqRel);
     shared.ponder_search.store(false, std::sync::atomic::Ordering::Release);
+
+    // Cleared here rather than at the top of the next `go()`; see the note at the
+    // `ponder` store above. The search is over, so `TimeManager::search_elapsed`
+    // has no further use for it, and leaving it set would make the next search
+    // measure its own elapsed time from this search's `ponderhit`.
+    *shared.ponderhit_time.lock().unwrap() = None;
 
     if abandoned {
         return;

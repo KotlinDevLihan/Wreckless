@@ -66,6 +66,21 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     // costs nothing beyond depth 1 of the first iteration.
     td.previous_pv.clear();
 
+    // The root's extension budget, made explicit.
+    //
+    // Each node seeds its child from its own slot, so the whole chain is
+    // anchored on `stack[0]`. That slot happens to be correct today only by
+    // omission: the sole writer is `stack[ply + 1]`, which cannot reach index 0
+    // because `search` is never entered at `ply == -1`, so it keeps the 0 from
+    // `Stack::new()` forever. The stack itself is built once per thread and is
+    // never reset between searches.
+    //
+    // That is a lot of load-bearing coincidence for a value that silently
+    // governs whether double and triple extensions fire at all. Zeroing it here
+    // costs one store per `go` and makes the anchor a stated invariant rather
+    // than a property of which indices the code currently happens to touch.
+    td.stack[0].double_extensions = 0;
+
     td.pv_table.clear(0);
     td.nnue.full_refresh(&td.board);
 

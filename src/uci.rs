@@ -324,6 +324,24 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
     shared.ponder_search.store(ponder, std::sync::atomic::Ordering::Release);
     shared.ponder.store(ponder, std::sync::atomic::Ordering::Release);
 
+    // A `ponderhit` can land between `arm_search()` and the store above. The
+    // listener thread handles it inline -- it does not wait for RUNNING -- so it
+    // clears a `ponder` flag that is not set yet, and the store above then sets
+    // it, losing the hit. The search would ponder forever on a position the GUI
+    // has already committed to, and only the eventual `stop` would end it, at
+    // which point `bestmove` arrives far too late.
+    //
+    // The window is small but reachable: the GUI sends `ponderhit` as soon as
+    // the opponent plays the move we predicted, which can be immediately.
+    //
+    // `ponderhit_time` was cleared to `None` a few lines up, so any `Some` here
+    // must have been stamped inside that window. Reading it after the store
+    // closes the race in both directions: a hit landing before the store is
+    // caught here, and one landing after sees `ponder` already true.
+    if ponder && shared.ponderhit_time.lock().unwrap().is_some() {
+        shared.ponder.store(false, std::sync::atomic::Ordering::Release);
+    }
+
     threads.execute_searches_filtered(time_manager, settings.report, settings.multi_pv, board, shared, &search_moves);
 
     // If the search ended while still pondering, the UCI protocol requires

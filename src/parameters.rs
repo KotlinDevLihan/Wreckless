@@ -293,6 +293,25 @@ define! {
     i32 mp_moves_into_threat: 8875;
     i32 mp_attacks: 3446;
     i32 mp_breaks_wall: 4494;
+
+    // ---- History bonus/malus shape (search.rs) ----
+    //
+    // Each pair is the slope and ceiling of a `(slope * depth).min(cap)` term.
+    // These decide how fast history learns and how hard it saturates, and every
+    // move-ordering weight above is applied to their output -- so they set the
+    // scale that `good_quiet_threshold` is compared against. All were hardcoded.
+    //
+    // Exposing them also makes the `cont_malus` anomaly measurable rather than
+    // arguable: with these tunable, SPSA can be asked directly whether a
+    // saturation depth of 2.3 is right when its five siblings sit at 6.4-11.3.
+    i32 hist_noisy_malus_slope: 175;
+    i32 hist_noisy_malus_cap: 1252;
+    i32 hist_quiet_bonus_slope: 184;
+    i32 hist_quiet_bonus_cap: 1742;
+    i32 hist_quiet_malus_slope: 171;
+    i32 hist_quiet_malus_cap: 1099;
+    i32 hist_cont_bonus_slope: 97;
+    i32 hist_cont_bonus_cap: 1098;
     i32 probcut_hist: 40;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;

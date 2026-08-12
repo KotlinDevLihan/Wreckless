@@ -2645,15 +2645,15 @@ fn update_best_move_histories<NODE: NodeType>(
     let HistoryUpdate { ply, depth, best_move, stm, cut_node, in_check, move_count, .. } = ctx;
 
     let noisy_bonus = (96 * depth).min(885) - 43 - 87 * cut_node as i32;
-    let noisy_malus = (175 * depth).min(1252) - 58 - 16 * noisy_moves.len() as i32;
+    let noisy_malus = (p::hist_noisy_malus_slope() * depth).min(p::hist_noisy_malus_cap()) - 58 - 16 * noisy_moves.len() as i32;
 
     // At non-PV nodes, scale the bonus up by how many other moves were
     // searched before this one proved best (as in Stockfish).
-    let quiet_bonus = (184 * depth).min(1742) - 72 - 42 * cut_node as i32
+    let quiet_bonus = (p::hist_quiet_bonus_slope() * depth).min(p::hist_quiet_bonus_cap()) - 72 - 42 * cut_node as i32
         + (18 * (move_count as i32 - 1)).min(180) * !NODE::PV as i32;
-    let quiet_malus = (171 * depth).min(1099) - 46 - 31 * quiet_moves.len() as i32;
+    let quiet_malus = (p::hist_quiet_malus_slope() * depth).min(p::hist_quiet_malus_cap()) - 46 - 31 * quiet_moves.len() as i32;
 
-    let cont_bonus = (97 * depth).min(1098) - 74 - 48 * cut_node as i32;
+    let cont_bonus = (p::hist_cont_bonus_slope() * depth).min(p::hist_cont_bonus_cap()) - 74 - 48 * cut_node as i32;
     let cont_malus = (p::cont_malus_slope() * depth).min(p::cont_malus_cap()) - 49 - 17 * quiet_moves.len() as i32;
 
     if best_move.is_noisy() {

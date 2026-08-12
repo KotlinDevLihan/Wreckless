@@ -378,6 +378,34 @@ define! {
     i32 prior_lag2_cap: 1379;
     i32 prior_noisy_slope: 50;
     i32 prior_noisy_cap: 654;
+
+    // ---- Escape bonuses, aspiration seed, FDS quantisation, shuffle guard ----
+    //
+    // `escape_*` reward moving a THREATENED piece of that type to safety. They
+    // are the largest positional terms in quiet ordering (queen 20357 against a
+    // ~60k total) and were the last hardcoded block in `QuietContext`. King is
+    // absent by construction -- a king in check is handled by evasion ordering,
+    // not by this table -- so only five entries exist.
+    //
+    // `asp_delta_*` seed the aspiration window from two stability counters that
+    // ALSO drive the time multiplier: one signal, three consumers, coefficients
+    // set independently. Exposing the seed lets that coupling be measured.
+    //
+    // `fds_reduction_t*` are the two thresholds at which FDS spends a whole ply,
+    // while LMR divides the same 1024-scaled quantity continuously. Same units,
+    // two different quantisations -- worth knowing whether the steps are placed
+    // right.
+    i32 shuffle_null_guard: 6;
+    i32 asp_delta_base: 23;
+    i32 asp_delta_stab_cap: 7;
+    i32 asp_delta_floor: 10;
+    i32 fds_reduction_t1: 2621;
+    i32 fds_reduction_t2: 5579;
+    i32 escape_pawn: 0;
+    i32 escape_knight: 8854;
+    i32 escape_bishop: 8170;
+    i32 escape_rook: 14051;
+    i32 escape_queen: 20357;
     i32 probcut_hist: 40;
     i32 probcut_hist_bonus: 190;
     i32 probcut_hist_malus: 130;

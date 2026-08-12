@@ -266,8 +266,14 @@ impl MovePicker {
         let mut best_index = 0;
         let mut best_score = i32::MIN;
 
+        // `>`, not `>=`. On a tie this kept the LAST equal-scoring move rather
+        // than the first, discarding generation order -- which is a real, if
+        // weak, tiebreak: moves are generated pawns and knights first, and
+        // trying the cheaper piece first is the better default. Ties are not
+        // rare either; with cold history most quiets score identically, so this
+        // inverted the fallback ordering at a large fraction of nodes.
         for (index, entry) in self.list.iter().enumerate() {
-            if entry.score >= best_score {
+            if entry.score > best_score {
                 best_index = index;
                 best_score = entry.score;
             }
@@ -443,6 +449,6 @@ impl QuietContext {
             Bitboard(0)
         };
 
-        Self { threatened, escape: [0, 8854, 8170, 14051, 20357, 0], offense, wall_pawns }
+        Self { threatened, escape: [p::escape_pawn(), p::escape_knight(), p::escape_bishop(), p::escape_rook(), p::escape_queen(), 0], offense, wall_pawns }
     }
 }

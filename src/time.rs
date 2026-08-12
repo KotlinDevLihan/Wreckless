@@ -4,7 +4,7 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
-use crate::thread::ThreadData;
+use crate::{thread::ThreadData, types::Score};
 
 #[derive(Clone, Debug)]
 pub enum Limits {
@@ -152,7 +152,19 @@ impl TimeManager {
     }
 
     pub fn check_time(&self, td: &ThreadData) -> bool {
-        if td.completed_depth == 0 {
+        // Depth 1 used to be uninterruptible: this returned `false` outright
+        // until an iteration had completed, so the HARD bound -- the one that
+        // exists precisely to stop us forfeiting -- could not fire during the
+        // one iteration that has no TT, no move ordering and the widest root
+        // list. On a pathological position that is exactly where a search can
+        // sit for far longer than its allowance.
+        //
+        // The guard is still needed in spirit: aborting before anything is
+        // scored leaves no legal `bestmove` to emit. But that is a question of
+        // whether a root move has a SCORE, not of whether a whole iteration
+        // finished. Once the root has picked up a move we can always answer, so
+        // from that point the hard bound must be allowed to do its job.
+        if td.completed_depth == 0 && !td.root_moves.iter().any(|rm| rm.score != -Score::INFINITE) {
             return false;
         }
 

@@ -211,7 +211,7 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             // searched with a wider window and at a shallower depth than the
             // one before it. Single-PV search runs this body once and is
             // unaffected.
-            let mut delta = (23 - eval_stability.min(pv_stability).min(7)).max(10);
+            let mut delta = (p::asp_delta_base() - eval_stability.min(pv_stability).min(p::asp_delta_stab_cap())).max(p::asp_delta_floor());
             let mut reduction = 0;
 
             if td.pv_index == td.pv_end {
@@ -2132,7 +2132,7 @@ fn search<NODE: NodeType>(
             // here is +7.5.
             reduction += ((td.nodes() + td.id as u64 * 26) % 128) as i32 - 56;
 
-            let reduced_depth = new_depth - (reduction >= 2621) as i32 - (reduction >= 5579) as i32;
+            let reduced_depth = new_depth - (reduction >= p::fds_reduction_t1()) as i32 - (reduction >= p::fds_reduction_t2()) as i32;
 
             // Published for the child, exactly as the LMR branch does. Without
             // this the FDS half of the tree left `stack[ply].reduction` at the
@@ -3111,7 +3111,7 @@ fn is_shuffling(td: &ThreadData, tt_move: Move, ply: isize) -> bool {
     // The existing `is_present()` checks catch a null move landing exactly on
     // ply-2 or ply-4 (those slots hold `Move::NULL`), but not one at ply-1 or
     // ply-3, which shifts the parity without leaving a null in either slot.
-    if td.board.plies_from_null() < 6 {
+    if (td.board.plies_from_null() as i32) < p::shuffle_null_guard() {
         return false;
     }
 

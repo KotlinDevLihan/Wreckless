@@ -82,6 +82,36 @@ impl<T, const N: usize> HugeBox<[T; N]> {
     }
 }
 
+impl<T> HugeBox<T> {
+    /// Allocates only if the OS actually gave us large pages.
+    ///
+    /// `new_zeroed` falls back to regular pages silently, which is right for the
+    /// history tables -- they have to live somewhere. It is wrong for anything
+    /// that already has a perfectly good home: the NNUE weights are `&'static`
+    /// data in the binary, so copying them into regular pages buys nothing and
+    /// costs a ~700 KB copy, 700 KB of RSS, and an extra pointer chase on every
+    /// evaluation.
+    ///
+    /// Windows only, because it is the only platform here that can CONFIRM the
+    /// result: `MEM_LARGE_PAGES` either succeeds or returns null. Linux's
+    /// `MADV_HUGEPAGE` is advisory -- it reports success while the kernel is
+    /// free to ignore it -- so there is nothing to confirm and this returns
+    /// `None` rather than guess.
+    #[allow(unused_variables)]
+    pub fn try_new_large_pages() -> Option<Self> {
+        #[cfg(target_os = "windows")]
+        {
+            let size = std::mem::size_of::<T>();
+            assert!(size > 0, "HugeBox requires a non-zero-sized type");
+            let ptr = crate::transposition::windows::allocate_large_only(size)?;
+            return Some(HugeBox { ptr: unsafe { std::ptr::NonNull::new_unchecked(ptr.cast::<T>()) } });
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        None
+    }
+}
+
 impl<T> std::ops::Deref for HugeBox<T> {
     type Target = T;
     fn deref(&self) -> &T {

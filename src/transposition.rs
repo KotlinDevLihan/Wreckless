@@ -506,6 +506,13 @@ pub(crate) mod windows {
         ) -> i32;
     }
 
+    /// Large pages or nothing. `None` means the privilege was unavailable or
+    /// the reservation failed, and the caller should decide what to do rather
+    /// than silently accept regular pages.
+    pub fn allocate_large_only(size: usize) -> Option<*mut std::ffi::c_void> {
+        allocate_large_pages(size)
+    }
+
     pub fn allocate(size: usize) -> *mut std::ffi::c_void {
         if let Some(ptr) = allocate_large_pages(size) {
             return ptr;

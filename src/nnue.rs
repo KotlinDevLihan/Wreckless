@@ -422,12 +422,24 @@ impl Parameters {
     ///
     /// Costs 60 MB of RSS and one memcpy at startup, and falls back to normal
     /// pages automatically when the large-page privilege is unavailable.
-    fn allocate_huge() -> Arc<crate::history::HugeBox<Self>> {
-        let mut huge = crate::history::HugeBox::<Self>::new_zeroed();
+    /// Copies the embedded weights into large pages, or `None` if the OS did not
+    /// grant them.
+    ///
+    /// The point of the copy is the TLB: sweeping ~700 KB of L1 weights every
+    /// evaluation touches far more 4 KB pages than the TLB holds. 2 MB pages fix
+    /// that. But the win is entirely in the page size -- if we get regular pages
+    /// the copy is pure cost, because the weights were already sitting in
+    /// read-only pages of the mapped executable, which are just as good.
+    ///
+    /// On Windows large pages need `SeLockMemoryPrivilege`, which is NOT granted
+    /// by default, so the common case is exactly the one where the copy is
+    /// worthless. Hence: confirm, or use the static.
+    fn allocate_huge() -> Option<Arc<crate::history::HugeBox<Self>>> {
+        let mut huge = crate::history::HugeBox::<Self>::try_new_large_pages()?;
         unsafe {
             std::ptr::copy_nonoverlapping(Self::embedded() as *const Self, &raw mut *huge, 1);
         }
-        Arc::new(huge)
+        Some(Arc::new(huge))
     }
 
     fn allocate_owned() -> Arc<Self> {
@@ -458,6 +470,11 @@ enum ParametersStorage {
     Owned(Arc<Parameters>),
     /// Large-page copy; see `Parameters::allocate_huge`.
     Huge(Arc<crate::history::HugeBox<Parameters>>),
+    /// The weights as linked into the binary. Reached whenever large pages are
+    /// unavailable -- which, without `SeLockMemoryPrivilege`, is the norm.
+    /// Strictly better than a regular-page copy: same page size, no copy, and
+    /// the address is a link-time constant instead of a double indirection.
+    Embedded(&'static Parameters),
 }
 
 impl ParametersHandle {
@@ -466,7 +483,10 @@ impl ParametersHandle {
     }
 
     fn huge() -> Self {
-        Self { inner: ParametersStorage::Huge(Parameters::allocate_huge()) }
+        match Parameters::allocate_huge() {
+            Some(parameters) => Self { inner: ParametersStorage::Huge(parameters) },
+            None => Self { inner: ParametersStorage::Embedded(Parameters::embedded()) },
+        }
     }
 }
 
@@ -477,6 +497,7 @@ impl std::ops::Deref for ParametersHandle {
         match &self.inner {
             ParametersStorage::Owned(parameters) => parameters.as_ref(),
             ParametersStorage::Huge(parameters) => &***parameters,
+            ParametersStorage::Embedded(parameters) => parameters,
         }
     }
 }

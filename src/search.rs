@@ -393,6 +393,12 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             break;
         }
 
+        // Indexed by ABSOLUTE depth, which is only a 4-iteration lookback while
+        // every thread walks every depth. With `lazy_smp_skip` enabled a helper
+        // skips depths, so `depth % 4` lands on a slot written 8 or 12 plies ago
+        // and the trend term silently compares against a much staler score than
+        // it believes. Correct today because the skip schedule ships disabled;
+        // it becomes wrong the moment that is turned on.
         let iter_value = iter_values[(depth % 4) as usize];
         iter_values[(depth % 4) as usize] = td.root_moves[0].score;
 
@@ -1402,8 +1408,25 @@ fn search<NODE: NodeType>(
         let singular_depth = (depth - 1) / 2;
 
         td.excluded[ply] = tt_move;
+
+        // Saved and restored around the exclusion search.
+        //
+        // Nulling it is deliberate -- children of the exclusion search should not
+        // credit or blame a "previous move" that we are in the middle of pretending
+        // does not exist. Leaving it null afterwards was not: nothing restored it,
+        // so the null leaked into the rest of this node.
+        //
+        // Two consequences, both silent. The `else if singular_score > tt_score &&
+        // td.stack[ply].mv != Move::NULL` arm below became unsatisfiable, so
+        // `tt_move` was never cleared and control fell through to the negative
+        // extension (`extension = -3`) far more often than intended. And every
+        // later sibling at this ply saw a null previous move, which disables
+        // `update_prior_move_histories`, `is_recapture`, `bnfp_recapture` and the
+        // ply-1 continuation lag for the remainder of the node.
+        let saved_mv = td.stack[ply].mv;
         td.stack[ply].mv = Move::NULL;
         singular_score = search::<NonPV>(td, singular_beta - 1, singular_beta, singular_depth, cut_node, ply);
+        td.stack[ply].mv = saved_mv;
         td.excluded[ply] = Move::NULL;
         td.stack[ply].tt_pv = tt_pv;
 

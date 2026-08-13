@@ -361,6 +361,20 @@ impl Board {
         let stack = &self.state_stack;
         let len = stack.len();
 
+        // `half_moves` comes from `plies_from_null` and the fifty-move clock,
+        // neither of which is bounded by the stack length -- both survive a
+        // `position ... moves ...` that replays more plies than the stack
+        // retains, and the fifty-move clock arrives straight from the FEN. The
+        // loop below walks `index` down two per iteration, so a `half_moves`
+        // larger than the stack underflows `index` and indexes wildly.
+        //
+        // Bounded here rather than inside the loop: the walk needs
+        // `half_moves` entries behind the top, so this is the actual precondition.
+        let half_moves = half_moves.min(len.saturating_sub(1));
+        if half_moves < 3 {
+            return false;
+        }
+
         let mut index = len - 1;
         let mut other = current_key ^ stack[index].keys.full() ^ ZOBRIST.side;
 
@@ -478,10 +492,21 @@ impl Board {
 
     /// Quickly checks if the move *might* give check to the opponent's king.
     ///
-    /// Roughly 90–95% accurate. Does not account for discovered checks, promotions,
+    /// Roughly 90–95% accurate. Does not account for discovered checks,
     /// en passant, or checks delivered via castling.
+    ///
+    /// Promotions ARE handled: keyed by the piece that arrives on the target
+    /// square, not the pawn that left. Keying by the mover meant every promotion
+    /// was tested against the PAWN checking-squares set -- and a pawn on the
+    /// eighth rank checks nothing -- so promotions were uniformly classified as
+    /// "not a direct check". They then took the quiet treatment in LMP, futility
+    /// and BNFP, which is close to the worst case for pruning: a queening move
+    /// giving check is about as forcing as a move gets.
     pub fn is_direct_check(&self, mv: Move) -> bool {
-        self.checking_squares(self.moved_piece(mv).piece_type()).contains(mv.to())
+        let piece_type =
+            if mv.is_promotion() { mv.promo_piece_type() } else { self.moved_piece(mv).piece_type() };
+
+        self.checking_squares(piece_type).contains(mv.to())
     }
 
     pub fn update_threats(&mut self) {

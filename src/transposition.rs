@@ -119,7 +119,25 @@ impl Cluster {
     fn set_key(&self, index: usize, key: u16) {
         let mask = 0xFFFFu64 << (index * 16);
         let bits = (key as u64) << (index * 16);
-        let _ = self.keys.fetch_update(Ordering::Release, Ordering::Acquire, |old| Some((old & !mask) | bits));
+        // Plain load/store, not `fetch_update`. The three verification keys share
+        // one u64, so updating one is a read-modify-write -- but doing it as a CAS
+        // put a `lock cmpxchg` LOOP on the TT write path, which runs at
+        // essentially every node.
+        //
+        // What the CAS bought: if two threads write different entries of the same
+        // cluster simultaneously, one key update can be lost, leaving an entry
+        // whose key belongs to a previous occupant. What that costs: a later probe
+        // matches the stale key and reads the new payload -- an entry from another
+        // position accepted as a hit.
+        //
+        // That race already exists regardless, because key and payload are
+        // separate atomics and a probe can interleave between them, so the CAS was
+        // paying full price at every node to narrow one window of a race it could
+        // not close. Every serious engine accepts this class of TT race; the
+        // downstream guards are what make it safe -- a hit's move is checked with
+        // `is_legal` before it is played, and the score only feeds pruning.
+        let old = self.keys.load(Ordering::Relaxed);
+        self.keys.store((old & !mask) | bits, Ordering::Release);
     }
 
     fn lookup_key(&self, key: u16) -> usize {
@@ -145,8 +163,13 @@ impl Cluster {
     fn write_move(&self, index: usize, entry: InternalEntry) {
         let bits: u64 = unsafe { std::mem::transmute(entry) };
         let mv_bits = bits & 0xFFFF;
-        let _ = self.entries[index]
-            .fetch_update(Ordering::Release, Ordering::Acquire, |old| Some((old & !0xFFFFu64) | mv_bits));
+        // Same reasoning as `set_key`: a CAS loop here bought a narrower window on
+        // a race that stays open either way, on the "refresh the move of an entry
+        // we already hold" path -- which is one of the most frequent TT writes
+        // there is, since the TT move is re-stored every time a known position is
+        // re-reached.
+        let old = self.entries[index].load(Ordering::Relaxed);
+        self.entries[index].store((old & !0xFFFFu64) | mv_bits, Ordering::Release);
     }
 }
 

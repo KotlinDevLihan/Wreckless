@@ -161,11 +161,19 @@ impl PstAccumulator {
             parameters.ft_piece_weights[sub as usize].as_ptr()
         });
 
+        // The per-iteration bounds break is gone; it could never fire. `step_by`
+        // only yields `i < L1_SIZE`, and L1_SIZE (768) is divisible by every
+        // `I16_LANES` this builds for (16 and 32), so `i + I16_LANES <= L1_SIZE`
+        // always holds. The compare sat in the innermost loop of the accumulator
+        // update -- the hottest loop in the engine -- and a conditional `break`
+        // makes the trip count unknown, which blocks full unrolling.
+        //
+        // Asserted once instead, so a future L1_SIZE or lane width that breaks
+        // the invariant fails loudly at compile time rather than reading past the
+        // end of the weights.
+        const _: () = assert!(L1_SIZE % simd::I16_LANES == 0, "L1_SIZE must be a whole number of SIMD lanes");
+
         for i in (0..L1_SIZE).step_by(simd::I16_LANES) {
-            // SAFETY: Ensure we do not access memory out of bounds.
-            if i + simd::I16_LANES > L1_SIZE {
-                break;
-            }
             unsafe {
                 let mut v = *vprev.add(i).cast();
                 for weights in adds {

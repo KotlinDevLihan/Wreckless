@@ -219,29 +219,29 @@ define! {
     // See the ProbCut block in search.rs. Divided by 8192, the gravity bound
     // on `probcut_history`, so this is the full swing of the threshold between
     // "verification always agrees" and "verification never agrees".
-    // DEFAULT 0 -- the soundness fix was measured and it lost.
+    // DEFAULT 1 -- restored. The measurement that set it to 0 was noise.
     //
     // 1 = ProbCut may only cut when a verification search actually ran. At
     // depth <= 4 `base_depth` is 0, so no verification runs and the cutoff
-    // cannot fire; the draft behind it is a qsearch capped at two moves, so
-    // those cutoffs are genuinely unverified and get cached as real bounds.
+    // cannot fire; the draft behind it is a qsearch capped at two moves
+    // (`qs_move_cap`), and those cutoffs were being written to the TT as real
+    // `Bound::Lower` entries at `probcut_depth + 1`.
     //
-    // Setting it to 1 restores the effect of the old `depth >= 5` gate, and the
-    // comment on that gate in search.rs records exactly what happened last time:
-    // "added on soundness grounds without measuring the node cost ... cost ~1.9
-    // plies". Shipped at 1 inside the batch that measured -18 Elo against
-    // 1.0.0-ed3afcdd over 491 pairs (p = 0.011), and reverting the two widest
-    // OTHER suspects -- the correction weights and threat_density -- moved that
-    // by 0.12% (p = 0.94), which leaves this as the change that fits.
+    // History, because it matters: this shipped at 1, was set to 0 partway
+    // through a debugging session on the strength of a 132-pair match, and an
+    // A/A test between two provably identical binaries later scored -15.8 Elo on
+    // that same harness. 132 pairs cannot distinguish 20 Elo from zero, so the
+    // evidence for setting it to 0 was never evidence at all.
     //
-    // So the engine is faster with an unsound cutoff than correct without one.
-    // That is an uncomfortable result rather than a wrong one: depths 1-4 hold
-    // the overwhelming majority of nodes, and ProbCut there is evidently paying
-    // for itself despite the draft being thin.
+    // Everything else points the other way. Removing the old `depth >= 5` gate
+    // "bought" ~1.9 plies, which is precisely what an unsound cutoff buys: depth
+    // that was never searched. This fork has been chasing a "same depth, thinner
+    // search" regression for its whole history, and an independent review
+    // flagged this flag as that signature without knowing it had been changed.
     //
-    // Kept as a switch rather than deleted: it is the honest way to re-test the
-    // tradeoff if the eval or the qsearch width ever changes.
-    i32 probcut_require_verify: 0;
+    // Set back to 0 to reproduce the unverified behaviour; the two are directly
+    // comparable in one SPRT.
+    i32 probcut_require_verify: 1;
 
     // Most non-checking moves qsearch will look at before breaking out.
     //

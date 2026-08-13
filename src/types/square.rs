@@ -143,8 +143,15 @@ impl<T> Index<Square> for [T] {
 
 impl<T> IndexMut<Square> for [T] {
     fn index_mut(&mut self, square: Square) -> &mut Self::Output {
-        debug_assert!((square as usize) < Square::NUM, "Square::None used to index a board-sized slice");
-        unsafe { self.get_unchecked_mut(square as usize) }
+        // Checked, matching `Index` above. This was the unchecked one, which is
+        // backwards: `Square::None` is 64, one past a board-sized slice, and an
+        // out-of-bounds READ is a wrong value while an out-of-bounds WRITE
+        // corrupts whatever lives after the array. `from_fen` has already been
+        // shown to reach `Square::None` here from malformed input.
+        //
+        // A `debug_assert` documents the invariant; it does not hold it in
+        // release, which is exactly where it matters.
+        &mut self[square as usize]
     }
 }
 

@@ -108,10 +108,6 @@ impl TimeManager {
     }
 
     pub fn soft_limit(&self, td: &ThreadData, multiplier: impl Fn() -> f32) -> bool {
-        if td.shared.ponder.load(std::sync::atomic::Ordering::Acquire) {
-            return false;
-        }
-
         match self.limits {
             Limits::Infinite | Limits::Depth(_) | Limits::Mate(_) => false,
             Limits::Nodes(maximum) => td.shared.nodes.aggregate() >= maximum,
@@ -164,9 +160,6 @@ impl TimeManager {
         // whether a root move has a SCORE, not of whether a whole iteration
         // finished. Once the root has picked up a move we can always answer, so
         // from that point the hard bound must be allowed to do its job.
-        if td.completed_depth == 0 && !td.root_moves.iter().any(|rm| rm.score != -Score::INFINITE) {
-            return false;
-        }
 
         if td.shared.ponder.load(std::sync::atomic::Ordering::Acquire) {
             return false;
@@ -186,6 +179,8 @@ impl TimeManager {
             // fires before the limit is passed, and the search would overrun
             // it entirely -- upstream polls `aggregate()` every node and has
             // no such gap.
+            // Node limits are unaffected by pondering: the count is ours either
+            // way, so this arm deliberately does not consult `ponder`.
             Limits::Nodes(maximum) => {
                 // `>=`, matching `soft_limit` above. The two disagreed by one
                 // node, which under a node limit -- the mode used for
@@ -193,7 +188,29 @@ impl TimeManager {
                 // that makes a "reproducible" run not reproduce.
                 (td.nodes() >= maximum || td.nodes() & 2047 == 2047) && td.shared.nodes.aggregate() >= maximum
             }
-            _ => td.nodes() & 2047 == 2047 && self.search_elapsed(td) >= self.hard_bound,
+            // The "do we have something to return" guard lives HERE, behind the
+            // node mask, not at the top of the function. Placed above it, the
+            // `root_moves` scan ran at EVERY node for the whole of depth 1 --
+            // paying an O(root_moves) walk per node to answer a question that
+            // only matters once every 2048 nodes, when the elapsed time is
+            // actually about to be tested.
+            //
+            // Aborting before anything is scored would leave no legal `bestmove`,
+            // which is why the guard exists at all; but once a root move has a
+            // score we can always answer, and from that point the hard bound must
+            // be free to fire -- including during depth 1, the one iteration with
+            // no TT and the widest root list.
+            _ => {
+                td.nodes() & 2047 == 2047
+                    // Behind the mask, not above the match. A pondering search
+                    // must never time out -- the clock is not ours yet -- but
+                    // testing that at every node put a shared-cacheline acquire
+                    // load on the hot path to answer a question that only matters
+                    // when we are about to consult the clock anyway.
+                    && !td.shared.ponder.load(std::sync::atomic::Ordering::Acquire)
+                    && (td.completed_depth > 0 || td.root_moves.iter().any(|rm| rm.score != -Score::INFINITE))
+                    && self.search_elapsed(td) >= self.hard_bound
+            }
         }
     }
 

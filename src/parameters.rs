@@ -245,23 +245,26 @@ define! {
 
     // Most non-checking moves qsearch will SEARCH before breaking out.
     //
-    // RESCALED from 3 to 2 because the quantity it counts changed. The cap used
-    // to be tested against a counter incremented at the top of the loop, so it
-    // counted moves GENERATED -- a node whose first captures were delta-pruned
-    // could hit the break having searched none. Fixing that (the counter now
-    // increments at `make_move`) is right, but it silently made the same number
-    // 3 a looser budget than the one this engine was tuned against: pruned moves
-    // stopped consuming it.
+    // Held at 3, the value both 0.2.0 and every later build shipped.
     //
-    // 0.2.0 shipped `move_count >= 3` on the OLD counting, and measures ~0.45 ply
-    // deeper than HEAD at identical time per move, worst in the endgame where
-    // qsearch dominates. 2 on the new counting is the nearest equivalent of what
-    // it actually did, since one or two of any three generated moves are
-    // typically pruned.
+    // The counter this is tested against changed meaning: it used to increment at
+    // the top of the loop, so it counted moves GENERATED and a node whose first
+    // captures were delta-pruned could break having searched none. It now
+    // increments at `make_move`, so it counts moves SEARCHED.
     //
-    // Checks and recaptures are exempt (see `qs_recapture_exempt`), so the
-    // tighter budget falls on the moves least likely to matter rather than
-    // uniformly -- which is a better shape than the flat cap it replaces.
+    // That looked like it needed a numeric compensation, and it does not. The
+    // change is not uniformly looser -- it is differently shaped. In a clean node
+    // the new form searches more; in a pruning-heavy node the OLD form gave up
+    // after three generated moves having searched almost nothing, while the new
+    // one keeps hunting until it has really looked at three. Cutting the number
+    // to compensate took the second case below what it takes to see a tactic, and
+    // conversion is exactly the job that needs one: an extra ply of defence is
+    // worth little if the engine cannot find the capture that finishes a won
+    // position.
+    //
+    // The depth cost is real (~0.45 ply against 0.2.0, worst in the endgame) and
+    // is the price of the soundness fix. Buy it back with the exemptions below
+    // and with the ordering weights, not by starving the budget.
     //
     // Defaults to the shipped 3 (i.e. at most two non-checking moves), so this
     // is inert until deliberately raised. It is the most aggressive single
@@ -269,7 +272,7 @@ define! {
     // at two moves", and it bought ~1.9 plies -- but plies bought by declining
     // to search are the exact signature this file warns about elsewhere. Exposed
     // so the tradeoff can be measured instead of assumed.
-    i32 qs_move_cap: 2;
+    i32 qs_move_cap: 3;
 
     // Exempt a recapture on the square the opponent just captured on from the
     // qsearch move cap, the way direct checks already are.

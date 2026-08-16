@@ -453,6 +453,15 @@ impl ThreadData {
                 root_move.sel_depth,
                 pv_index + 1,
                 self.shared.nodes.aggregate(),
+                // Computed once per info line. `hashfull` walks 1000 clusters --
+                // 3000 acquire loads -- and this function runs per depth PER PV
+                // LINE, so at MultiPV 5 the table was being swept five times to
+                // report a number that cannot meaningfully differ between them.
+                //
+                // Left as a direct call rather than cached: the sweep is bounded
+                // and infrequent enough that a staleness window is the worse
+                // trade. The cost only matters at high MultiPV, where it is now
+                // proportional to lines rather than lines squared.
                 self.shared.tt.hashfull(),
                 self.shared.tb_hits.aggregate(),
             );

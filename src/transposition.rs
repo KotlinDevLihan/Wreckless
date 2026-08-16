@@ -310,7 +310,22 @@ impl TranspositionTable {
             entry.mv = mv;
         }
 
-        if !force && key == entry_key && depth + 4 + 2 * tt_pv as i32 <= entry.depth() && entry.flags.age() == tt_age {
+        // The age condition is deliberately NOT part of this guard.
+        //
+        // It used to require `entry.flags.age() == tt_age`, and `increment_age()`
+        // runs at the top of every search -- so on the very first write of a new
+        // search, every entry in the table is "wrong age" and this guard could
+        // never fire. A depth-30 entry from the move we just finished analysing
+        // lost its slot to a depth-1 write, and the engine re-derived everything
+        // it already knew about the position in front of it.
+        //
+        // Aging still governs EVICTION, where it belongs: the replacement scan
+        // above scores candidates by `depth - 4 * relative_age`, so a stale entry
+        // is still the first thing thrown out when a slot is needed. What this
+        // guard asks is a different question -- "is what is already here so much
+        // deeper that overwriting it would lose information?" -- and the answer
+        // to that does not depend on which search produced it.
+        if !force && key == entry_key && depth + 4 + 2 * tt_pv as i32 <= entry.depth() {
             // Keep the existing deeper entry's score/depth/flags, but persist
             // the refreshed best move.
             //

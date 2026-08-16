@@ -421,6 +421,31 @@ define! {
     // TT move). Set it to e.g. 4 to also reduce when `tt_depth + 4 < depth`.
     i32 lmr_improvement_lo: -241;
     i32 lmr_improvement_hi: 1155;
+
+    // FDS's own copy of the improvement clamp. Written inline as (-206, 1370)
+    // while its LMR twin used tunables -- two forms of the same bound, one of
+    // them unreachable by SPSA. Defaults are the literals it shipped with, NOT
+    // the LMR values: the two were never the same number and making them so
+    // would be a behaviour change wearing a refactor's clothes.
+    i32 fds_improvement_lo: -206;
+    i32 fds_improvement_hi: 1370;
+
+    // Bound on the RAW improvement signal, applied where it is computed.
+    //
+    // `lmr_improvement_lo/hi` clamps the SCALED term in LMR and was the only
+    // bound on this signal anywhere; RFP, NMP, LMP and FDS all consumed
+    // `eval - stack[ply-2].eval` raw. That difference is unbounded, and a
+    // tactical swing puts `lmp_improvement * improvement / 16` in the tens of
+    // thousands against an `lmp_base` of 2818 -- which does not merely loosen
+    // late move pruning, it switches it off at the node where the eval just
+    // moved most.
+    //
+    // Set wide on purpose. +-2048 is about five pawns of eval swing between two
+    // of our own moves; inside that range nothing changes, so this clips the
+    // pathological tail without retuning the five consumers that were fitted
+    // against the normal range. Narrowing it is a separate, tunable question.
+    i32 improvement_lo: -2048;
+    i32 improvement_hi: 2048;
     i32 iir_depth: 6;
     i32 iir_tt_depth_slack: 0;
 
@@ -965,6 +990,22 @@ define! {
     // `(alpha - eval) / 8 - corr.abs().min(68) - 74`, against 75 and 70 here.
     // Both restored to the 0.1.2 values, so this really is a pure exposure of
     // the previous constants and nothing rides on it silently.
+    // Converts an eval-unit deficit into the material units SEE compares
+    // against, in `(alpha - eval) / qs_see_div`.
+    //
+    // The true ratio is ~2.95: `PieceType::value()` calls a pawn 109 while the
+    // search's own units put one at 321-382. Twenty lines above this consumer,
+    // `qs_delta_piece_scale` (192/64 = 3.0) converts the SAME ratio in the other
+    // direction, deriving 3.0 from exactly that argument -- so the two
+    // conversions in one function disagreed by 2.7x.
+    //
+    // LEFT AT 8 pending measurement. The unit analysis says 3, and dividing by 8
+    // shrinks the allowance 2.7x, making the qsearch SEE threshold far less
+    // negative and pruning captures that would comfortably survive at the correct
+    // scale -- in qsearch, which is most of the tree. But `qs_see_base` (74) was
+    // tuned against the composite, so moving the divisor alone rescales a
+    // threshold two other terms were fitted to. Change it WITH `qs_see_base` as
+    // one SPRT, not on the strength of the derivation.
     i32 qs_see_div: 8;
     i32 qs_see_corr_cap: 68;
     i32 qs_see_base: 74;

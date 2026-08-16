@@ -85,6 +85,18 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     // previous search found a forced line.
     let centre = if td.previous_best_score.abs() < Score::INFINITE { td.previous_best_score } else { Score::ZERO };
     let mut average = vec![centre; td.multi_pv];
+
+    // `average` is seeded with `centre` so that every reader before the first
+    // completed depth has a usable value -- which also made the
+    // `== Score::NONE` test at the update site unreachable, so depth 1's result
+    // was blended with the PREVIOUS search's final score instead of replacing
+    // it. Every window for the rest of the search then centred on a stale value
+    // decaying toward the truth one bit per iteration.
+    //
+    // Tracked explicitly rather than by re-seeding with `Score::NONE`, because
+    // `best_avg` below reads `average` unconditionally and would inherit the
+    // sentinel.
+    let mut average_seeded = vec![false; td.multi_pv];
     let mut last_best_rootmove = RootMove::default();
 
     let mut eval_stability = 0;
@@ -278,7 +290,8 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
                         delta += 60 * delta / 128;
                     }
                     _ => {
-                        average[td.pv_index] = if average[td.pv_index] == Score::NONE {
+                        average[td.pv_index] = if !average_seeded[td.pv_index] {
+                            average_seeded[td.pv_index] = true;
                             score
                         } else {
                             (average[td.pv_index] + score) / 2
@@ -532,8 +545,16 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     }
 
     if matches!(td.time_manager.limits(), Limits::Infinite) {
+        // Sleeps rather than spins. `go infinite` holds every thread here until
+        // the GUI sends `stop`, which under analysis is minutes -- one pinned
+        // core per thread doing nothing, heating the machine and starving
+        // whatever else the user is running.
+        //
+        // A millisecond of latency on `stop` is irrelevant next to the round trip
+        // that produced it, and `status` is polled, not waited on, so there is
+        // nothing to miss.
         while td.shared.status.get() != Status::STOPPED {
-            std::hint::spin_loop();
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
 
@@ -580,7 +601,18 @@ fn search<NODE: NodeType>(
         td.sel_depth = td.sel_depth.max(ply as i32);
     }
 
-    if td.id == 0 && td.time_manager.check_time(td) {
+    // Thread 0 polls the clock; helpers back it up on a coarser interval.
+    //
+    // Gating this on `td.id == 0` alone meant that if the main thread was
+    // descheduled -- routine under the concurrency an SPRT harness runs at --
+    // NOTHING enforced the hard bound until it was scheduled again. The helpers
+    // were searching happily with no way to end the move.
+    //
+    // `nodes & 16383` implies `nodes & 2047` (check_time's own mask), so helpers
+    // reach the elapsed-time test roughly one eighth as often as thread 0: enough
+    // to stop a forfeit, rare enough that N threads are not contending on the
+    // clock mutex.
+    if (td.id == 0 || td.nodes() & 16383 == 16383) && td.time_manager.check_time(td) {
         td.shared.status.set(Status::STOPPED);
         return Score::ZERO;
     }
@@ -843,7 +875,8 @@ fn search<NODE: NodeType>(
         eval - td.stack[ply - 6].eval
     } else {
         0
-    };
+    }
+    .clamp(p::improvement_lo(), p::improvement_hi());
 
     let improving = improvement > 0;
 
@@ -953,10 +986,22 @@ fn search<NODE: NodeType>(
                 - p::razor_corr() * correction_value.abs() / 1024
                 + p::razor_cutoff() * (td.cutoff_count[ply + 1] > 3) as i32
         && alpha < 2048
-        && !tt_move.is_quiet()
+        // `is_noisy()`, not `!is_quiet()`. `is_quiet()` is `is_present() &&
+        // !is_noisy()`, so `!is_quiet()` is TRUE for `Move::NULL` -- the gate
+        // meant to read "the TT move is a capture" also admitted every TT miss,
+        // firing razoring most freely at exactly the nodes with no cached
+        // evidence about the position.
+        && tt_move.is_noisy()
         && tt_bound != Bound::Lower
     {
-        return qsearch::<NonPV>(td, alpha, beta, ply);
+        // Floored at `best_score`. Every other early return in this function
+        // either lerps toward beta or stores what it learned; this one handed the
+        // raw qsearch score straight back. Fail-soft returns are allowed to be
+        // below alpha, but they must not be below what this node already knows,
+        // and `best_score` carries the stand-pat/TB floor established above.
+        let razor_score = qsearch::<NonPV>(td, alpha, beta, ply);
+
+        return razor_score.max(best_score);
     }
 
     // The improving correction, scaled with depth rather than flat.
@@ -1069,7 +1114,13 @@ fn search<NODE: NodeType>(
         && !is_win(estimated_score)
         && !(tt_bound == Bound::Lower
             && tt_move.is_capture()
-            && td.board.piece_on(tt_move.to()).value() >= PieceType::Knight.value())
+            // `capture_sq()`, not `to()`. For an en-passant capture the taken
+            // pawn sits on neither square the move names, so `piece_on(to)`
+            // returned `Piece::None` (value 0) and this guard -- which exists to
+            // stop NMP when the TT move wins a minor or better -- silently passed
+            // on every en-passant capture. Every other capture site in the
+            // codebase already uses `capture_sq()`.
+            && td.board.piece_on(tt_move.capture_sq()).value() >= PieceType::Knight.value())
     {
         debug_assert_ne!(td.stack[ply - 1].mv, Move::NULL);
 
@@ -1078,6 +1129,26 @@ fn search<NODE: NodeType>(
             + p::nmp_r_depth() * depth
             + p::nmp_r_beta() * (estimated_score - beta).clamp(0, p::nmp_r_beta_max()) / 128)
             / 1024;
+
+        // Saved, because everything below this block still needs it.
+        //
+        // Nulling these for the null-move search is correct -- the child must not
+        // credit a previous move that was never played. Leaving them nulled
+        // afterwards was not. Every path after NMP at this node then saw a null
+        // previous move, and the visible casualty is the singular block: `else if
+        // singular_score > tt_score && td.stack[ply].mv != Move::NULL` becomes
+        // unsatisfiable at any node where NMP ran, so control falls through to
+        // the negative extension `extension = -3`.
+        //
+        // That is the same defect already fixed for the singular search a few
+        // hundred lines down, reintroduced by its neighbour. `conthist` and
+        // `contcorrhist` matter too: left pointing at the sentinel, every
+        // continuation update and lookup for the rest of the node writes to and
+        // reads from a shared scratch table instead of the real one.
+        let saved_conthist = td.stack[ply].conthist;
+        let saved_contcorrhist = td.stack[ply].contcorrhist;
+        let saved_piece = td.stack[ply].piece;
+        let saved_mv = td.stack[ply].mv;
 
         td.stack[ply].conthist = td.stack.sentinel().conthist;
         td.stack[ply].contcorrhist = td.stack.sentinel().contcorrhist;
@@ -1097,6 +1168,11 @@ fn search<NODE: NodeType>(
         let score = -search::<NonPV>(td, -bound, -bound + 1, depth - r, false, ply + 1);
 
         td.board.undo_null_move();
+
+        td.stack[ply].conthist = saved_conthist;
+        td.stack[ply].contcorrhist = saved_contcorrhist;
+        td.stack[ply].piece = saved_piece;
+        td.stack[ply].mv = saved_mv;
 
         if td.shared.status.get() == Status::STOPPED {
             return Score::ZERO;
@@ -1135,9 +1211,36 @@ fn search<NODE: NodeType>(
 
             let reduced_depth = depth - r;
 
+            // Restored, not zeroed. A verification search that itself reaches a
+            // verifying NMP node used to clear the guard on its way out, so the
+            // OUTER search resumed with zugzwang verification switched off for
+            // the rest of its subtree -- the failure this mechanism exists to
+            // prevent, caused by the mechanism itself.
+            // The verification search re-enters at `ply`, not `ply + 1`, so it
+            // runs a whole search over this node's own stack slot and overwrites
+            // everything in it. `eval` and `tt_pv` feed the pruning decisions
+            // still to come; `reduction` is read by the child's hindsight
+            // adjustments; `move_count` and `tt_move` are read one ply down by
+            // the TT-cutoff bonus and `update_prior_move_histories`.
+            //
+            // The singular block does exactly this save/restore around its own
+            // same-ply re-entry -- this one was simply missing it.
+            let saved_eval = td.stack[ply].eval;
+            let saved_move_count = td.stack[ply].move_count;
+            let saved_tt_move = td.stack[ply].tt_move;
+            let saved_tt_pv = td.stack[ply].tt_pv;
+            let saved_reduction = td.stack[ply].reduction;
+
+            let saved_nmp_min_ply = td.nmp_min_ply;
             td.nmp_min_ply = ply as i32 + 3 * reduced_depth / 4;
             let verified_score = search::<NonPV>(td, bound - 1, bound, reduced_depth, false, ply);
-            td.nmp_min_ply = 0;
+            td.nmp_min_ply = saved_nmp_min_ply;
+
+            td.stack[ply].eval = saved_eval;
+            td.stack[ply].move_count = saved_move_count;
+            td.stack[ply].tt_move = saved_tt_move;
+            td.stack[ply].tt_pv = saved_tt_pv;
+            td.stack[ply].reduction = saved_reduction;
 
             if td.shared.status.get() == Status::STOPPED {
                 return Score::ZERO;
@@ -1237,7 +1340,10 @@ fn search<NODE: NodeType>(
         && !in_check
         && !is_win(beta)
         && if is_valid(tt_score) { tt_score >= probcut_beta && !is_decisive(tt_score) } else { eval >= beta }
-        && !tt_move.is_quiet()
+        // `is_noisy()`, not `!is_quiet()`; see the razoring gate above. Here the
+        // consequence is worse: ProbCut ran at nodes with no TT move at all,
+        // which is precisely where it has no evidence to verify.
+        && tt_move.is_noisy()
     {
         let mut move_picker = MovePicker::new(Move::NULL, Some(probcut_beta - eval));
 
@@ -1256,6 +1362,23 @@ fn search<NODE: NodeType>(
 
             let base_depth = (depth - 4 - improving as i32).max(0);
             let mut probcut_depth = (base_depth - (score - probcut_beta) / p::probcut_score_div().max(1)).clamp(0, base_depth);
+
+            // Floored at 1 whenever a verification is possible at all.
+            //
+            // The expression above shrinks the verification depth as the draft
+            // gets STRONGER -- and once it reaches 0, `verified` is false and
+            // `probcut_require_verify` refuses the cutoff. So the drafts that beat
+            // `probcut_beta` most convincingly were exactly the ones that could
+            // not cut, while marginal ones could. At depth 5-6 `base_depth` is 1,
+            // so any draft ahead by about a pawn (`probcut_score_div`) fell off
+            // the edge immediately.
+            //
+            // Reducing the depth for a strong draft is the right instinct -- less
+            // verification is needed when the margin is large -- but the floor has
+            // to stay at "verify something", not "verify nothing".
+            if score >= probcut_beta && base_depth > 0 {
+                probcut_depth = probcut_depth.max(1);
+            }
 
             // Only outcomes where a verification search actually ran are
             // evidence about verification. If the qsearch draft never cleared
@@ -1486,7 +1609,15 @@ fn search<NODE: NodeType>(
 
             let de = td.stack[ply].double_extensions;
             extension = 1;
-            if de < p::max_double_extensions() {
+            // `<= 0` means unlimited, not "never extend".
+            //
+            // Read literally, 0 makes `de < 0` unsatisfiable and removes double
+            // and triple extensions from the engine entirely -- the opposite of
+            // what a zero reads as everywhere else in this file, where it
+            // disables the guard. `set_parameter` enforces no range, so a tuner
+            // or a hand edit reaching 0 silently deletes a mechanism the file's
+            // own note measures at 12.7% of bench nodes.
+            if p::max_double_extensions() <= 0 || de < p::max_double_extensions() {
                 extension += (singular_score < singular_beta - double_margin) as i32;
                 extension += (singular_score < singular_beta - triple_margin) as i32;
             }
@@ -1494,9 +1625,28 @@ fn search<NODE: NodeType>(
         // Multi-Cut
         else if singular_score >= beta && !is_decisive(singular_score) {
             update_tt_move_history(td, p::tt_move_history_multicut_base() - p::tt_move_history_multicut_depth() * depth);
-            return lerp(singular_score, beta, 0.4027);
+
+            // Stored, like every other cutoff in this function.
+            //
+            // This arm returns having just paid for a full exclusion search -- the
+            // most expensive way this node can reach a conclusion -- and wrote
+            // nothing, so every revisit re-derived it from scratch. The bound is a
+            // genuine lower bound at `singular_depth`, which is what the exclusion
+            // search actually proved, so that is the depth recorded rather than
+            // the node's own.
+            let multicut_score = lerp(singular_score, beta, 0.4027);
+            td.shared.tt.write(hash, singular_depth, raw_eval, multicut_score, Bound::Lower, tt_move, ply, tt_pv, false);
+
+            return multicut_score;
         } else if singular_score > tt_score && td.stack[ply].mv != Move::NULL {
             tt_move = Move::NULL;
+
+            // The stack copy has to follow. `stack[ply].tt_move` was written
+            // before the singular block and is read one ply down by
+            // `update_prior_move_histories` as `prior_move == stack[ply-1].tt_move`
+            // -- so leaving it set credits the child's prior-move bonus to a move
+            // this node has just decided not to treat as the TT move at all.
+            td.stack[ply].tt_move = Move::NULL;
         }
         // Negative Extensions
         else if tt_score >= beta || cut_node {
@@ -1579,6 +1729,13 @@ fn search<NODE: NodeType>(
     // Two, not six: the sum below reads lags 1 and 2 only. `score_quiet` still
     // uses all six for move ordering and builds its own array there.
     let conthist: [*mut PieceToHistory<i16>; 2] = std::array::from_fn(|i| td.stack[ply - 1 - i as isize].conthist);
+
+    // Hoisted for the same reason as `conthist` directly above, which the comment
+    // there already argues for: the board does not change between iterations --
+    // `make_move` is matched by `undo_move` before the next one -- so the threat
+    // set is identical at the top of every pass, yet it was re-read at both the
+    // quiet and the noisy history lookup on every move.
+    let threats = td.board.all_threats();
 
     while let Some(mv) = move_picker.next::<NODE>(td, skip_quiets, ply) {
         if mv == td.excluded[ply] {
@@ -1668,14 +1825,14 @@ fn search<NODE: NodeType>(
             // still reads all six for move ordering. This is only about the
             // per-move pruning input, where the traffic is multiplied by the
             // move count.
-            td.quiet_history.get(td.board.all_threats(), stm, mv)
+            td.quiet_history.get(threats, stm, mv)
                 + td.continuation_history.get(conthist[0], moved, to)
                 + td.continuation_history.get(conthist[1], moved, to)
         } else {
             let captured_type = td.board.type_on(mv.capture_sq());
             // `moved_piece(mv)` is `mailbox[mv.from()]`, the same lookup as the
             // hoisted `moved` above.
-            td.noisy_history.get(td.board.all_threats(), moved, to, captured_type)
+            td.noisy_history.get(threats, moved, to, captured_type)
         };
 
         if !NODE::ROOT && !is_loss(best_score) {
@@ -1871,12 +2028,6 @@ fn search<NODE: NodeType>(
         let extension_applies = move_count == 1 && (!singular_extension || mv == tt_move);
         let mut new_depth = depth - 1 + if extension_applies { extension } else { 0 };
 
-        // Carry the extension budget down. Only the amount *beyond* the base
-        // single extension counts -- +1 is ordinary singularity and should not
-        // consume budget; the double and triple tiers are what can compound.
-        td.stack[ply + 1].double_extensions =
-            td.stack[ply].double_extensions + if extension_applies { (extension - 1).max(0) } else { 0 };
-
         // Recapture extension: a capture landing on the square the
         // opponent's last move *captured* on, that doesn't lose material
         // itself, gets a full extra ply -- compensating for the horizon
@@ -1892,7 +2043,13 @@ fn search<NODE: NodeType>(
         // otherwise drop straight into qsearch, instead of on every recapture
         // at every depth. It still has to be evaluated before `make_move`,
         // since SEE reads the pre-move board.
-        let is_recapture = new_depth == 0
+        // `!NODE::ROOT` first, matching `bnfp_recapture` above. Reading
+        // `stack[ply - 1]` at ply 0 lands in the pre-root slot; that is inert
+        // today only because the slot defaults to `Move::NULL` and
+        // `is_capture()` is false for it. Relying on the default value of memory
+        // outside the search is not a guard.
+        let is_recapture = !NODE::ROOT
+            && new_depth == 0
             && extension >= 0
             && !is_quiet
             && td.stack[ply - 1].mv.is_capture()
@@ -1914,6 +2071,24 @@ fn search<NODE: NodeType>(
         if is_recapture {
             new_depth = 1;
         }
+
+        // Carry the extension budget down -- AFTER every extension has been
+        // applied, and derived from the depth actually granted.
+        //
+        // This used to be written from the singular `extension` alone, before the
+        // two assignments above ran. Both of those set `new_depth = 1` outright
+        // at a node that would otherwise have dropped into qsearch, so both
+        // extended without consuming budget and without being bounded by it --
+        // and they fire precisely in the forcing lines (recapture chains, deep PV
+        // TT moves) that the budget exists to bound.
+        //
+        // Measuring `new_depth - (depth - 1)` instead of reading `extension`
+        // captures whatever granted the plies. The `- 1` keeps the original
+        // policy: the first ply of extension is ordinary and free, only what
+        // compounds beyond it is charged.
+        let applied_extension = new_depth - (depth - 1);
+        td.stack[ply + 1].double_extensions =
+            td.stack[ply].double_extensions + (applied_extension - 1).max(0);
 
         let mut score = Score::ZERO;
 
@@ -2089,9 +2264,17 @@ fn search<NODE: NodeType>(
             let pv_bonus = 2 * NODE::PV as i32;
             let reduced_depth = (new_depth - reduction / 1024 + pv_bonus).clamp(1, new_depth + 2);
 
+            // Published across the re-search as well, matching the FDS branch.
+            //
+            // Clearing it before the `new_depth` re-search told that child
+            // "your parent did not reduce you" -- when the only reason it exists
+            // is that the parent DID reduce, and the reduced scout came back
+            // above alpha. Three consumers read this field: both hindsight depth
+            // adjustments and `lmr_prev_reduction`/`fds_prev_reduction`, and all
+            // three were reasoning about the re-search as though it were an
+            // ordinary full-depth visit.
             td.stack[ply].reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, true, ply + 1);
-            td.stack[ply].reduction = 0;
             current_search_count += 1;
 
             if score > alpha {
@@ -2105,6 +2288,8 @@ fn search<NODE: NodeType>(
                     current_search_count += 1;
                 }
             }
+
+            td.stack[ply].reduction = 0;
         }
         // Full Depth Search (FDS)
         else if !NODE::PV || move_count >= 2 {
@@ -2116,7 +2301,7 @@ fn search<NODE: NodeType>(
             // Same multiplicative form as the LMR twin above.
             reduction += p::fds_movecount_ilog() * depth.ilog2() as i32 * (move_count as u32).ilog2() as i32 / 16;
 
-            reduction -= (p::fds_improvement() * improvement / 128).clamp(-206, 1370);
+            reduction -= (p::fds_improvement() * improvement / 128).clamp(p::fds_improvement_lo(), p::fds_improvement_hi());
             reduction -= p::fds_corr() * correction_value.abs() / 1024;
 
             if is_quiet {
@@ -2228,7 +2413,16 @@ fn search<NODE: NodeType>(
                 // `mv != tt_move` guard does not help: the TT move is precisely
                 // what the excluded search never tries.
                 if !excluded && !(NODE::ROOT && td.pv_index > 0) && mv != tt_move {
-                    td.shared.tt.write(hash, depth, raw_eval, score, Bound::Lower, mv, ply, true, false);
+                    // `tt_pv`, not a literal `true`. Passing `true` made every
+                    // ordinary cut node that raised alpha mark itself as a PV-line
+                    // node in the table. `tt_pv` gates `lmr_ttpv`,
+                    // `lmr_ttpv_score`, `lmr_ttpv_depth`, `fds_ttpv`,
+                    // `fds_ttpv_depth`, RFP's `!tt_pv` entry condition, the
+                    // singular margin's `tt_pv && !NODE::PV` term and
+                    // `nmp_ttpv` -- so over-setting it disables RFP and
+                    // under-reduces at a share of nodes that grows as the table
+                    // fills with these writes.
+                    td.shared.tt.write(hash, depth, raw_eval, score, Bound::Lower, mv, ply, tt_pv, false);
                 }
             }
         }
@@ -2334,7 +2528,18 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
         td.sel_depth = td.sel_depth.max(ply as i32);
     }
 
-    if td.id == 0 && td.time_manager.check_time(td) {
+    // Thread 0 polls the clock; helpers back it up on a coarser interval.
+    //
+    // Gating this on `td.id == 0` alone meant that if the main thread was
+    // descheduled -- routine under the concurrency an SPRT harness runs at --
+    // NOTHING enforced the hard bound until it was scheduled again. The helpers
+    // were searching happily with no way to end the move.
+    //
+    // `nodes & 16383` implies `nodes & 2047` (check_time's own mask), so helpers
+    // reach the elapsed-time test roughly one eighth as often as thread 0: enough
+    // to stop a forfeit, rare enough that N threads are not contending on the
+    // clock mutex.
+    if (td.id == 0 || td.nodes() & 16383 == 16383) && td.time_manager.check_time(td) {
         td.shared.status.set(Status::STOPPED);
         return Score::ZERO;
     }
@@ -2427,6 +2632,15 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     let mut best_move = Move::NULL;
 
     let mut move_count = 0;
+
+    // Separate from `move_count`, which counts generated moves for the checkmate
+    // test. This one gates `qs_move_cap`; see the note at the break below.
+    let mut searched_count = 0;
+
+    // Set when the move cap cut the node short, so the TT write at the end can
+    // tell "examined everything" from "stopped looking".
+    let mut truncated = false;
+
     // The hash move, first. The TT is probed above and written below, but the
     // stored move was never read, so qsearch -- most of the tree -- ordered
     // every node without the one move most likely to be best.
@@ -2467,7 +2681,22 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             // tree and in practice all checks are ordered first (score_noisy
             // gives them a 200000 bonus), so by move_count 3 no check remains.
             // The +62 build had `break` and searched 1.9 plies deeper.
-            if move_count >= p::qs_move_cap() as u16 && !is_direct_check {
+            // Counts moves that were SEARCHED, not moves that were generated.
+            //
+            // `move_count` increments at the top of the loop, before delta and
+            // SEE pruning, so a node whose first captures were all pruned could
+            // reach this break having searched ZERO moves -- and still return a
+            // stand-pat-derived bound as though it had looked at the position.
+            // With a cap of 3 that is not a rare corner: delta pruning rejects
+            // the cheap captures first, which are exactly the ones the picker
+            // emits last.
+            //
+            // `move_count` itself is deliberately left alone: `in_check &&
+            // move_count == 0` below is the checkmate test, and it must keep
+            // counting generated evasions or a node whose evasions were all
+            // pruned would be scored as mate.
+            if searched_count >= p::qs_move_cap() as u16 && !is_direct_check {
+                truncated = true;
                 break;
             }
 
@@ -2551,6 +2780,8 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             }
         }
 
+        searched_count += 1;
+
         make_move(td, ply, mv);
         let score = -qsearch::<NODE>(td, -beta, -alpha, ply + 1);
         undo_move(td, mv);
@@ -2599,7 +2830,22 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
     }
 
     let bound = if best_score >= beta { Bound::Lower } else { Bound::Upper };
-    td.shared.tt.write(hash, TtDepth::SOME, raw_eval, best_score, bound, best_move, ply, tt_pv, false);
+
+    // A truncated node may not publish an UPPER bound.
+    //
+    // `Bound::Upper` asserts "no move here reached alpha", and a node that
+    // stopped after `qs_move_cap` moves never established that -- it stopped
+    // looking. Written anyway, the claim was indistinguishable from a complete
+    // one, and the qsearch TT cutoff at the top of this function accepts it with
+    // no depth condition at all, so a bound derived from two moves propagated
+    // through the table unchallenged.
+    //
+    // A LOWER bound is unaffected: a move that beat beta beat beta, and not
+    // having looked at the rest cannot undo that. Fail-highs -- the common and
+    // useful qsearch result -- are still cached exactly as before.
+    if !(truncated && bound == Bound::Upper) {
+        td.shared.tt.write(hash, TtDepth::SOME, raw_eval, best_score, bound, best_move, ply, tt_pv, false);
+    }
 
     debug_assert!(alpha < beta);
     debug_assert!(-Score::INFINITE < best_score && best_score < Score::INFINITE);

@@ -2695,7 +2695,16 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
             // move_count == 0` below is the checkmate test, and it must keep
             // counting generated evasions or a node whose evasions were all
             // pruned would be scored as mate.
-            if searched_count >= p::qs_move_cap() as u16 && !is_direct_check {
+            // A recapture on the contested square is exempt, like a check.
+            // See `qs_recapture_exempt`; `!NODE::ROOT` is implicit here because
+            // qsearch is never entered at the root, but `ply > 0` still has to
+            // hold before reading the previous move.
+            let is_recapture = p::qs_recapture_exempt() != 0
+                && ply > 0
+                && td.stack[ply - 1].mv.is_capture()
+                && mv.to() == td.stack[ply - 1].mv.to();
+
+            if searched_count >= p::qs_move_cap() as u16 && !is_direct_check && !is_recapture {
                 truncated = true;
                 break;
             }

@@ -253,6 +253,23 @@ define! {
     // so the tradeoff can be measured instead of assumed.
     i32 qs_move_cap: 3;
 
+    // Exempt a recapture on the square the opponent just captured on from the
+    // qsearch move cap, the way direct checks already are.
+    //
+    // The cap is the engine's most aggressive constant, and it is a cap on move
+    // NUMBER, so it falls on whatever the picker happens to order third -- which
+    // in a busy position can be the recapture that resolves the exchange. Cutting
+    // there returns a stand-pat bound for a position with material hanging, which
+    // is the textbook horizon effect and precisely what qsearch exists to stop.
+    //
+    // Checks are already exempt on the same reasoning: a move that must be
+    // answered cannot be skipped just because it sorted late. A recapture on the
+    // contested square has the same property.
+    //
+    // Cheap to test: the square comparison is two loads already in cache, and it
+    // only runs once the cap would otherwise have fired. 0 disables.
+    i32 qs_recapture_exempt: 1;
+
     // Good captures emitted before the SEE retest is short-circuited.
     //
     // Defaults to the shipped 2. Above this count, with a quiet TT move, every

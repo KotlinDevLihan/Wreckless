@@ -863,7 +863,7 @@ define! {
     // clamp its own correction bonus symmetrically, so the symmetry argument
     // is not baseless. But the asymmetric pair is the one with a measured
     // result attached to it, and that outranks the tidier-looking one.
-    i32 corr_bonus_min: 4678;
+    i32 corr_bonus_min: 2496;
     i32 corr_bonus_max: 2496;
 
     // Six-term correction blend: upstream's pawn, non-pawn x2, continuation x2,
@@ -962,7 +962,7 @@ define! {
     // the first few plies -- and the build where it did that is the build that
     // scored +30. Re-derive it only against a measurement, not against another
     // term's magnitude.
-    i32 lowply_weight: 7052;
+    i32 lowply_weight: 3018;
     // Split point between `Stage::Quiet` and `Stage::BadQuiet`, compared
     // against the whole quiet score.
     //
@@ -1072,8 +1072,8 @@ define! {
     // Depth at which a forced single reply stops the search. 0 disables.
     i32 tm_single_move_depth: 8;
     i32 tm_trend_base: 7426;
-    i32 tm_trend_diff: 480;
-    i32 tm_trend_recent: 230;
+    i32 tm_trend_diff: 56;
+    i32 tm_trend_recent: 27;
     i32 tm_trend_min: 7214;
     i32 tm_trend_max: 14031;
 

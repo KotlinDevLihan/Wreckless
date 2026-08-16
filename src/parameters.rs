@@ -243,7 +243,25 @@ define! {
     // comparable in one SPRT.
     i32 probcut_require_verify: 1;
 
-    // Most non-checking moves qsearch will look at before breaking out.
+    // Most non-checking moves qsearch will SEARCH before breaking out.
+    //
+    // RESCALED from 3 to 2 because the quantity it counts changed. The cap used
+    // to be tested against a counter incremented at the top of the loop, so it
+    // counted moves GENERATED -- a node whose first captures were delta-pruned
+    // could hit the break having searched none. Fixing that (the counter now
+    // increments at `make_move`) is right, but it silently made the same number
+    // 3 a looser budget than the one this engine was tuned against: pruned moves
+    // stopped consuming it.
+    //
+    // 0.2.0 shipped `move_count >= 3` on the OLD counting, and measures ~0.45 ply
+    // deeper than HEAD at identical time per move, worst in the endgame where
+    // qsearch dominates. 2 on the new counting is the nearest equivalent of what
+    // it actually did, since one or two of any three generated moves are
+    // typically pruned.
+    //
+    // Checks and recaptures are exempt (see `qs_recapture_exempt`), so the
+    // tighter budget falls on the moves least likely to matter rather than
+    // uniformly -- which is a better shape than the flat cap it replaces.
     //
     // Defaults to the shipped 3 (i.e. at most two non-checking moves), so this
     // is inert until deliberately raised. It is the most aggressive single
@@ -251,7 +269,7 @@ define! {
     // at two moves", and it bought ~1.9 plies -- but plies bought by declining
     // to search are the exact signature this file warns about elsewhere. Exposed
     // so the tradeoff can be measured instead of assumed.
-    i32 qs_move_cap: 3;
+    i32 qs_move_cap: 2;
 
     // Exempt a recapture on the square the opponent just captured on from the
     // qsearch move cap, the way direct checks already are.

@@ -287,9 +287,21 @@ define! {
     // answered cannot be skipped just because it sorted late. A recapture on the
     // contested square has the same property.
     //
-    // Cheap to test: the square comparison is two loads already in cache, and it
-    // only runs once the cap would otherwise have fired. 0 disables.
-    i32 qs_recapture_exempt: 1;
+    // DEFAULT 0 -- shipped on, then switched off on the depth cost.
+    //
+    // Enabling it closed the defence gap against 0.2.0 from -11.9pp to -4.1pp,
+    // which is what it was designed to do. It also grew the depth deficit from
+    // -0.45 to -0.69 ply at identical time per move, and conversion moved from
+    // -2.0pp to -8.8pp over the same two runs.
+    //
+    // Neither of those conversion figures is significant on its own (1.05 sigma
+    // at n=47), so this is not a verdict -- it is a decision to hold the depth
+    // while the more useful measurement is taken. The clean test is this build
+    // against 2bb0bb0f, which differ by this flag alone.
+    //
+    // Set to 1 to re-enable. The mechanism is sound; what is unproven is whether
+    // the tactical accuracy is worth a quarter-ply.
+    i32 qs_recapture_exempt: 0;
 
     // Good captures emitted before the SEE retest is short-circuited.
     //

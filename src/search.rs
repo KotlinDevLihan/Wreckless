@@ -97,6 +97,10 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
     // `best_avg` below reads `average` unconditionally and would inherit the
     // sentinel.
     let mut average_seeded = vec![false; td.multi_pv];
+
+    // Iterations this thread has actually completed; see the `iter_values` note
+    // below. Not the same as `depth` once a helper starts skipping.
+    let mut iters_done = 0usize;
     let mut last_best_rootmove = RootMove::default();
 
     let mut eval_stability = 0;
@@ -406,14 +410,21 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
             break;
         }
 
-        // Indexed by ABSOLUTE depth, which is only a 4-iteration lookback while
-        // every thread walks every depth. With `lazy_smp_skip` enabled a helper
-        // skips depths, so `depth % 4` lands on a slot written 8 or 12 plies ago
-        // and the trend term silently compares against a much staler score than
-        // it believes. Correct today because the skip schedule ships disabled;
-        // it becomes wrong the moment that is turned on.
-        let iter_value = iter_values[(depth % 4) as usize];
-        iter_values[(depth % 4) as usize] = td.root_moves[0].score;
+        // Indexed by ITERATIONS COMPLETED, not by absolute depth.
+        //
+        // `depth % 4` is a four-iteration lookback only while a thread walks
+        // every depth. Under `lazy_smp_skip` a helper skips depths, so the slot
+        // it lands on was written 8 or 12 plies ago and the score-trend term
+        // compares against a much staler value than it believes -- silently, and
+        // only on helper threads. Counting completed iterations makes the
+        // lookback four *of this thread's own* iterations whatever schedule it
+        // is following.
+        //
+        // Identical behaviour when the skip schedule is off, since the counter
+        // then advances in lockstep with depth.
+        let iter_value = iter_values[iters_done % 4];
+        iter_values[iters_done % 4] = td.root_moves[0].score;
+        iters_done += 1;
 
         let multiplier = || {
             let nodes = {

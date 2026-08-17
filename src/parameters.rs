@@ -699,7 +699,21 @@ define! {
     //
     // The spsa.config range reaches 0, so a tuning run can explore upward from
     // here if the form change deserves another look.
-    i32 lmr_movecount_ilog: 0;
+    // ENABLED at 192. At 0 the reduction had no move-count component at all --
+    // move 3 and move 40 were reduced identically, which is the single most
+    // standard component of late move reduction and the most conspicuous
+    // absence in this engine relative to every reference implementation.
+    //
+    // The evidence for zeroing it was two positive results at 0 and one negative
+    // at 192 across three different harnesses -- gathered on a setup whose A/A
+    // test later scored two identical binaries at -15.8 Elo. That is not
+    // evidence either way.
+    //
+    // Multiplicative form: `coeff * depth.ilog2() * move_count.ilog2() / 16`, so
+    // ~0.23 ply at depth 16 / move 32 -- proportional to the reduction already
+    // being applied, not a flat addition. It also REDUCES nodes, which is the
+    // direction the measured -0.69 ply depth deficit needs.
+    i32 lmr_movecount_ilog: 192;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // Restored to upstream's 1412. Previously hand-offset to 1028
@@ -852,7 +866,8 @@ define! {
     // Same form and reasoning as `lmr_movecount_ilog`, proportioned to this
     // path's smaller base (207 vs 269).
     // Zeroed alongside `lmr_movecount_ilog`; same evidence.
-    i32 fds_movecount_ilog: 0;
+    // ENABLED at 192, matching its LMR twin above; same form, same reasoning.
+    i32 fds_movecount_ilog: 192;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;
@@ -1108,7 +1123,20 @@ define! {
     // deepening loop). 0 restores the previous behaviour, where every helper
     // thread searched every depth. Not a magnitude -- purely on/off, so that a
     // single SPRT can settle whether the schedule helps this engine.
-    i32 lazy_smp_skip: 0;
+    // ENABLED. At 0 the entire depth-differentiation schedule below was dead:
+    // every helper walked thread 0's exact depth sequence, so the only thing
+    // separating threads was LMR/FDS jitter -- which perturbs WHICH lines get
+    // reduced, not when a thread arrives at a depth. Threads reached the same
+    // iteration at the same time and re-derived the same result, which is
+    // precisely the failure the schedule exists to prevent.
+    //
+    // Only observable at Threads > 1, so it is orthogonal to any single-threaded
+    // SPRT and can be tested alongside other changes without confounding them.
+    //
+    // Prerequisite fixed first: `iter_values` was indexed by absolute depth,
+    // which becomes an 8-12 ply lookback on a skipping helper. It now counts
+    // completed iterations.
+    i32 lazy_smp_skip: 1;
 
     // Stop the search once a forced mate this short is proven and has been
     // confirmed for `tm_mate_confirm` plies of extra depth. Set to 0 to retire.

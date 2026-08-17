@@ -442,7 +442,20 @@ define! {
     //
     // 1024 -- one full ply of prior reduction -- keeps the arm meaningful (it is
     // still not free) while bringing it into the same order as its opposite.
-    i32 hindsight_reduction: 1024;
+    // MODERATED to 1536 after 1024 proved too explosive.
+    //
+    // The two hindsight arms had wildly mismatched bars -- 2249 (2.2 plies of
+    // prior reduction) to regain a ply, against any reduction at all to lose one.
+    // Correcting that asymmetry fixed the defence deficit. Taking it all the way
+    // to 1024 also meant the give-back arm fired at nearly every declining node
+    // whose parent reduced by a single ply, which is a very large fraction of a
+    // losing subtree -- and each firing extends, so the tree grew and depth fell
+    // sharply.
+    //
+    // 1536 keeps the arm reachable (it was effectively dormant at 2249) without
+    // making it near-unconditional in exactly the positions that already search
+    // widest.
+    i32 hindsight_reduction: 1536;
     i32 hindsight_eval_delta: 57;
 
     // ---- Prior-move credit (update_prior_move_histories) ----
@@ -748,7 +761,20 @@ define! {
     // ~0.23 ply at depth 16 / move 32 -- proportional to the reduction already
     // being applied, not a flat addition. It also REDUCES nodes, which is the
     // direction the measured -0.69 ply depth deficit needs.
-    i32 lmr_movecount_ilog: 192;
+    // RAISED to 256 to pay for the defensive extensions above.
+    //
+    // `lmr_win_beta` and `hindsight_reduction` both restore search effort in
+    // declining positions, which fixed defence and cost depth. The nodes have to
+    // come back from somewhere, and late moves are the right place: this term
+    // scales with `move_count.ilog2()`, so it bites hardest on the 20th move at a
+    // node and barely at all on the 3rd. A move ordered 20th is not where a
+    // defensive resource hides -- the picker puts checks, captures and
+    // history-favoured quiets first.
+    //
+    // Reducing late moves harder to fund extending critical ones is the trade
+    // late move reduction exists to make; the engine simply was not making it at
+    // all until this term was enabled.
+    i32 lmr_movecount_ilog: 256;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // Restored to upstream's 1412. Previously hand-offset to 1028
@@ -902,7 +928,8 @@ define! {
     // path's smaller base (207 vs 269).
     // Zeroed alongside `lmr_movecount_ilog`; same evidence.
     // ENABLED at 192, matching its LMR twin above; same form, same reasoning.
-    i32 fds_movecount_ilog: 192;
+    // RAISED to 256, matching its LMR twin above; same form, same reasoning.
+    i32 fds_movecount_ilog: 256;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

@@ -377,7 +377,26 @@ define! {
     // longer licenses an RFP cutoff; `asp_widen_num` is the aspiration widening
     // rate (`delta += n * delta / 128`), which sets how fast a failing window
     // gives up and how many re-searches each iteration costs.
-    i32 lmr_win_beta: 1024;
+    // HALVED from 1024 to 512.
+    //
+    // 1024/1024 is a FULL PLY of extra reduction whenever `is_win(beta)`. Note
+    // which side that describes: `beta` is the bound we are trying to prove the
+    // opponent cannot exceed, so `is_win(beta)` means the opponent is winning --
+    // this fires hardest in exactly the lines where we are DEFENDING and need to
+    // establish that a save exists.
+    //
+    // Pooled over three runs (324 pairs) against 0.2.0, defence is the one
+    // sub-metric that clears significance: 25.5% vs 35.3%, -9.8pp, p = 0.020.
+    // Conversion does not (-5.8pp, p = 0.15). And the depth deficit is now only
+    // -0.24 ply after the move-count reduction terms were enabled, so this is no
+    // longer explainable as "we search shallower" -- HEAD is losing saveable
+    // positions at near-equal depth, which points at selectivity.
+    //
+    // Of every reduction term in the engine this is the only one keyed directly
+    // on "someone is winning here", it was never measured, and a full ply is a
+    // large amount to spend on a single boolean. 512 keeps the idea and halves
+    // the dose.
+    i32 lmr_win_beta: 512;
     i32 see_split_div: 47;
     i32 see_split_base: 116;
     i32 rfp_tt_hist_gate: -2048;
@@ -407,7 +426,23 @@ define! {
     i32 research_bonus_cap: 1550;
     i32 lmr_research_up: 57;
     i32 lmr_research_down: 9;
-    i32 hindsight_reduction: 2249;
+    // LOWERED from 2249 to 1024, to balance the two hindsight arms.
+    //
+    // The block has one arm that gives a ply back (parent was heavily reduced AND
+    // the eval declined) and one that takes a ply away (parent was reduced at all
+    // AND the eval improved). Their bars were wildly different: 2249 -- about 2.2
+    // plies of prior reduction -- to regain, against `reduction > 0`, any
+    // reduction whatsoever, to lose. Easy to lose a ply, hard to win one back.
+    //
+    // The give-back arm is also the one gated on `eval_delta < 0`, i.e. it only
+    // fires when the position is DECLINING. That is the defensive case, and
+    // defence is the one sub-metric significantly worse than 0.2.0 across three
+    // pooled runs (25.5% vs 35.3%, p = 0.020) now that the depth deficit is
+    // nearly closed.
+    //
+    // 1024 -- one full ply of prior reduction -- keeps the arm meaningful (it is
+    // still not free) while bringing it into the same order as its opposite.
+    i32 hindsight_reduction: 1024;
     i32 hindsight_eval_delta: 57;
 
     // ---- Prior-move credit (update_prior_move_histories) ----

@@ -98,7 +98,30 @@ define! {
     //
     // Set to a depth to re-enable; if retried, the anchor belongs near the depth
     // where the node count actually is (2-4), not at 8.
-    i32 rfp_improvement_ref: 0;
+    // ENABLED at 6. Third instance of the same pattern: the branch this selects
+    // is the one its own comment argues for, and it shipped switched off.
+    //
+    // The improving discount is SUBTRACTED from the RFP margin, so a bigger
+    // discount means RFP fires more readily -- correct, because a fail-high is
+    // more credible when the position is already trending our way. Stockfish
+    // shapes it the same way. What the flat form gets wrong is the slope: a
+    // constant discount is a meaningful fraction of an 11-unit margin at depth 1
+    // and negligible against a quadratic margin at depth 24, so the term
+    // effectively evaporates exactly where the base is largest.
+    //
+    // That is the flat-term-on-a-scaled-base shape this codebase has been burned
+    // by twice before -- 87 Elo in LMR's move-count term, ~60 in `threat_density`
+    // -- and the fix was written, gated, and defaulted off.
+    //
+    // 6 is the reference depth: at depth 6 the new form reproduces the old
+    // magnitude exactly, so nothing moves there and only the slope across depth
+    // changes. RFP has no explicit depth cap; its quadratic margin makes it rare
+    // at high depth, so it lives at low-to-mid depths and 6 sits inside that band.
+    // Doubles the discount by depth 12, halves it by depth 3.
+    //
+    // Direction: more RFP pruning at depth when improving -> fewer nodes -> more
+    // depth. Same side as the IIR and futility activations.
+    i32 rfp_improvement_ref: 6;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
     i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;
@@ -545,7 +568,25 @@ define! {
     i32 improvement_lo: -2048;
     i32 improvement_hi: 2048;
     i32 iir_depth: 6;
-    i32 iir_tt_depth_slack: 0;
+    // ENABLED at 4 -- IIR was restricted to its rarest trigger.
+    //
+    // At 0 the condition collapses to `tt_move.is_null()`, so internal iterative
+    // reduction only fired when the table had no move at all. The far more common
+    // case -- an entry whose search was much shallower than this one, and so tells
+    // us little more than nothing about which move to try first -- never fired.
+    // Stockfish covers both.
+    //
+    // 4 means "the cached move came from a search at least 4 plies shallower".
+    // That is a real mechanism activation rather than a tuning nudge: IIR is one
+    // of the cheapest ways to buy depth, and this engine was running it on a
+    // fraction of the nodes it was written for.
+    //
+    // Coupled change: `lmr_iir_comp`/`fds_iir_comp` were gated on
+    // `tt_move.is_null() && iir_applied`. That was redundant while IIR implied a
+    // null TT move and would have become wrong here -- the new firings reduce
+    // `depth` identically and need the same compensation. Both now track
+    // `iir_applied` alone.
+    i32 iir_tt_depth_slack: 4;
 
     // ---- TT-cutoff credit, and the per-sibling decay rates ----
     //
@@ -610,7 +651,25 @@ define! {
     // Depth and Elo therefore had DIFFERENT causes: `rfp_improvement_ref` cost
     // the depth, and one of these two cost the strength. Both prune more, which
     // is why neither shows up as lost depth.
-    i32 fp_lmr_depth: 0;
+    // ENABLED. The branch this switch selects IS the fix its own comment argues
+    // for, and it shipped turned off.
+    //
+    // Futility measures how far a move is from raising alpha, and a move about to
+    // be heavily reduced by LMR is effectively searched shallower than `depth`
+    // says. Stockfish computes futility on `lmrDepth` for exactly this reason.
+    // The comment at the branch explains that subtracting `r / 1024` as whole
+    // plies rounds to zero at every depth futility runs at (`depth < 14`) -- so
+    // the naive form is a no-op, and scaling by `(depth * 1024 - r)` is what keeps
+    // the fraction. That corrected form is the `> 0` branch.
+    //
+    // Direction: smaller `fp_scaled_depth` -> smaller `futility_value` -> the
+    // `<= alpha` test passes more often -> more pruning, fewer nodes, more depth.
+    // Same side of the ledger as the IIR activation.
+    //
+    // NOTE this is a boolean wearing an i32. Only `> 0` vs `== 0` reaches the
+    // arithmetic; the magnitude is never read. It should not be given a wide SPSA
+    // range -- the tuner would spend a dimension discovering a single bit.
+    i32 fp_lmr_depth: 1;
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;

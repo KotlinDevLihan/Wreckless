@@ -2199,7 +2199,14 @@ fn search<NODE: NodeType>(
                 // at any depth on any cut node, so an unconditional subtraction
                 // under-reduced late moves at depth 2-5 and on previous-PV
                 // nodes, where there was no double-count to correct.
-                reduction -= p::lmr_iir_comp() * (tt_move.is_null() && iir_applied) as i32;
+                // Gated on `iir_applied` alone. The extra `tt_move.is_null()` was
+                // redundant while IIR could only fire on a null TT move, and
+                // became wrong the moment the shallow-TT-entry arm was enabled:
+                // those firings reduce `depth` exactly the same way, so they need
+                // the same compensation. Leaving the old gate would have let the
+                // new trigger reduce twice -- once via IIR, once via LMR -- with
+                // nothing giving the ply back.
+                reduction -= p::lmr_iir_comp() * iir_applied as i32;
             }
 
             // Capped: `alpha_raises` is bounded only by the move count, so at a
@@ -2330,7 +2337,7 @@ fn search<NODE: NodeType>(
                 reduction += p::fds_cutnode();
                 reduction += p::fds_cutnode_null() * tt_move.is_null() as i32;
                 // Same conditional IIR compensation as the LMR twin above.
-                reduction -= p::fds_iir_comp() * (tt_move.is_null() && iir_applied) as i32;
+                reduction -= p::fds_iir_comp() * iir_applied as i32;
             }
 
             if td.cutoff_count[ply + 1] > 2 {

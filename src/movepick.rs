@@ -238,9 +238,14 @@ impl MovePicker {
             // importantly, it expanded GoodNoisy at every node with a quiet TT
             // move, which is the highest-volume case. The short-circuit is what
             // the PGN depth metric was measuring when it saw +1.9 plies.
-            let threshold = self.threshold.unwrap_or(-entry.score / p::see_split_div() + p::see_split_base());
+            // `.max(1)`, as every other parameter division in the codebase has. This was
+            // the only unguarded one: `set_parameter` enforces no range, so a tuner
+            // or a hand-edited config reaching 0 divides by zero and takes the
+            // process down mid-search. The declared SPSA range cannot reach 0 today,
+            // which is exactly why it would go unnoticed until it did.
+            let threshold = self.threshold.unwrap_or(-entry.score / p::see_split_div().max(1) + p::see_split_base());
 
-            if (self.threshold.is_none() && self.tt_move.is_quiet() && self.noisy_count > p::good_noisy_cap() as usize)
+            if (self.threshold.is_none() && self.tt_move.is_quiet() && self.noisy_count > p::good_noisy_cap().max(0) as usize)
                 || !td.board.see(entry.mv, threshold)
             {
                 self.bad_noisy.push(entry.mv);

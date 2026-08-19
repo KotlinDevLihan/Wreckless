@@ -2722,7 +2722,11 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
                 && td.stack[ply - 1].mv.is_capture()
                 && mv.to() == td.stack[ply - 1].mv.to();
 
-            if searched_count >= p::qs_move_cap() as u16 && !is_direct_check && !is_recapture {
+            // `.max(0)` before the cast. A negative `qs_move_cap` would wrap to
+            // ~65535 as u16 and silently disable the cap entirely -- qsearch would
+            // then search every generated move at every node. Same reason
+            // `good_noisy_cap` is clamped before its `as usize`.
+            if searched_count >= p::qs_move_cap().max(0) as u16 && !is_direct_check && !is_recapture {
                 truncated = true;
                 break;
             }

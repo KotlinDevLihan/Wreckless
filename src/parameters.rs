@@ -1049,7 +1049,22 @@ define! {
     // clamp its own correction bonus symmetrically, so the symmetry argument
     // is not baseless. But the asymmetric pair is the one with a measured
     // result attached to it, and that outranks the tidier-looking one.
-    i32 corr_bonus_min: 2496;
+    // 1.0.0's value, restored after being wrongly reverted to 0.2.0's 2496.
+    //
+    // This and `lowply_weight`, `tm_trend_diff`, `tm_trend_recent` are the ONLY
+    // four tuning values that differ between 0.2.0 and 1.0.0 (`corr_weight_div`
+    // is the fifth and is a normalization fix, not tuning). They were reverted on
+    // the theory that they were unexplained drift since 0.2.0 -- which had the
+    // direction exactly backwards: 1.0.0 measures ~17-20 Elo ABOVE 0.2.0, so
+    // these are its tuning gains, not drift away from a good baseline.
+    //
+    // The symptom that exposed it: reverting them brought HEAD to parity with
+    // 0.2.0 while leaving it ~20 Elo below 1.0.0 -- exactly what removing 1.0.0's
+    // tuning would do.
+    //
+    // 1.0.0 is the strongest build in this lineage and is the baseline worth
+    // testing against.
+    i32 corr_bonus_min: 4678;
     i32 corr_bonus_max: 2496;
 
     // Six-term correction blend: upstream's pawn, non-pawn x2, continuation x2,
@@ -1148,7 +1163,7 @@ define! {
     // the first few plies -- and the build where it did that is the build that
     // scored +30. Re-derive it only against a measurement, not against another
     // term's magnitude.
-    i32 lowply_weight: 3018;
+    i32 lowply_weight: 7052;
     // Split point between `Stage::Quiet` and `Stage::BadQuiet`, compared
     // against the whole quiet score.
     //
@@ -1271,8 +1286,8 @@ define! {
     // Depth at which a forced single reply stops the search. 0 disables.
     i32 tm_single_move_depth: 8;
     i32 tm_trend_base: 7426;
-    i32 tm_trend_diff: 56;
-    i32 tm_trend_recent: 27;
+    i32 tm_trend_diff: 480;
+    i32 tm_trend_recent: 230;
     i32 tm_trend_min: 7214;
     i32 tm_trend_max: 14031;
 

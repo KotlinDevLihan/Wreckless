@@ -464,10 +464,24 @@ pub fn start(td: &mut ThreadData, report: Report, thread_count: usize) {
                 // there is a gradient to tune against. The integer values are
                 // exactly the old floats' digits, so this reintroduces no
                 // rounding of its own.
+                // Bounds ordered before clamping. `i32::clamp` PANICS when
+                // min > max, and these two are independently tuned parameters
+                // whose declared SPSA ranges overlap: `tm_trend_min` reaches
+                // 10821 and `tm_trend_max` starts at 7016. A tuning run that
+                // lands anywhere in [7016, 10821] on both would abort the engine
+                // mid-search -- which in a game means a forfeit, and in a tuning
+                // run means a corrupted result nobody attributes to a crash.
+                //
+                // This is the only clamp in the engine with that exposure: every
+                // other tunable pair is either structurally ordered (an all-negative
+                // `lo` against an all-positive `hi`) or clamps against a literal.
+                let trend_lo = p::tm_trend_min();
+                let trend_hi = p::tm_trend_max().max(trend_lo);
+
                 let trend = (p::tm_trend_base()
                     + p::tm_trend_diff() * difference
                     + p::tm_trend_recent() * recent)
-                    .clamp(p::tm_trend_min(), p::tm_trend_max());
+                    .clamp(trend_lo, trend_hi);
 
                 trend as f32 / 10000.0
             };

@@ -3324,7 +3324,23 @@ fn soft_stop_vote(td: &mut ThreadData, thread_count: usize, voted: &mut bool, mu
             *voted = true;
 
             let votes = td.shared.soft_stop_votes.fetch_add(1, Ordering::AcqRel) + 1;
-            let majority = (thread_count * 65).div_ceil(100);
+
+            // Capped so at least one thread may lag without blocking the stop.
+            //
+            // `(n * 65).div_ceil(100)` alone returns 2 at n = 2 -- unanimity, not
+            // a 65% majority. A vote is only cast at an iteration boundary, so a
+            // single helper still mid-iteration held the whole search open and the
+            // move ran to the HARD bound instead of the soft one. At Threads = 2,
+            // the most common multi-threaded setting, that means spending the
+            // emergency allowance on every move.
+            //
+            // The cap keeps the intended proportion everywhere it is already
+            // achievable (3 of 4, 6 of 8) and only binds at n = 2, where 65% has
+            // no sensible integer reading. `max(1)` keeps the single-threaded case
+            // at 1 rather than 0.
+            let majority = (thread_count * 65)
+                .div_ceil(100)
+                .min(thread_count.saturating_sub(1).max(1));
             if votes >= majority {
                 td.shared.status.set(Status::STOPPED);
             }

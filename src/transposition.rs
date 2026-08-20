@@ -163,13 +163,21 @@ impl Cluster {
     fn write_move(&self, index: usize, entry: InternalEntry) {
         let bits: u64 = unsafe { std::mem::transmute(entry) };
         let mv_bits = bits & 0xFFFF;
-        // Same reasoning as `set_key`: a CAS loop here bought a narrower window on
-        // a race that stays open either way, on the "refresh the move of an entry
-        // we already hold" path -- which is one of the most frequent TT writes
-        // there is, since the TT move is re-stored every time a known position is
-        // re-reached.
-        let old = self.entries[index].load(Ordering::Relaxed);
-        self.entries[index].store((old & !0xFFFFu64) | mv_bits, Ordering::Release);
+        // CAS, restored. The plain load/store form was not merely a narrower
+        // window on an existing race -- it was a LOST UPDATE with a much worse
+        // failure mode.
+        //
+        // `write_entry` may land between our load and our store. The plain form
+        // then writes back the OLD entry with the new move patched in,
+        // resurrecting a stale score, eval, depth and bound into a slot another
+        // thread had just claimed for a different position. That is not a torn
+        // read a legality check catches; it is a fully-formed entry that is wrong.
+        //
+        // The whole point of `write_move` is that it must not clobber the fields
+        // it is not updating, which is precisely what a read-modify-write cannot
+        // promise without the compare-exchange.
+        let _ = self.entries[index]
+            .fetch_update(Ordering::Release, Ordering::Acquire, |old| Some((old & !0xFFFFu64) | mv_bits));
     }
 }
 
@@ -310,22 +318,28 @@ impl TranspositionTable {
             entry.mv = mv;
         }
 
-        // The age condition is deliberately NOT part of this guard.
+        // The age condition is load-bearing in BOTH directions.
         //
-        // It used to require `entry.flags.age() == tt_age`, and `increment_age()`
-        // runs at the top of every search -- so on the very first write of a new
-        // search, every entry in the table is "wrong age" and this guard could
-        // never fire. A depth-30 entry from the move we just finished analysing
-        // lost its slot to a depth-1 write, and the engine re-derived everything
-        // it already knew about the position in front of it.
+        // Dropping it looked like a fix -- `increment_age()` runs at the top of
+        // every search, so on the first write of a new search every entry is the
+        // "wrong" age and a deep entry from the previous move could lose its slot
+        // to a shallow write. But the age term is also what REFRESHES an entry:
+        // when the age differs, this guard falls through and the entry is
+        // rewritten, stamping the current age on it.
         //
-        // Aging still governs EVICTION, where it belongs: the replacement scan
-        // above scores candidates by `depth - 4 * relative_age`, so a stale entry
-        // is still the first thing thrown out when a slot is needed. What this
-        // guard asks is a different question -- "is what is already here so much
-        // deeper that overwriting it would lose information?" -- and the answer
-        // to that does not depend on which search produced it.
-        if !force && key == entry_key && depth + 4 + 2 * tt_pv as i32 <= entry.depth() {
+        // Without it, a deep entry blocks all writes indefinitely AND keeps its
+        // stale age forever -- so `quality = depth - 4 * relative_age` decays on
+        // every `increment_age()` until the replacement scan evicts it, even
+        // though it is hot on the current search path. The entry is preserved
+        // right up until it is thrown away.
+        //
+        // Rewriting once per age is the intended cost, and it is what keeps a
+        // useful entry's age current.
+        if !force
+            && key == entry_key
+            && depth + 4 + 2 * tt_pv as i32 <= entry.depth()
+            && entry.flags.age() == tt_age
+        {
             // Keep the existing deeper entry's score/depth/flags, but persist
             // the refreshed best move.
             //

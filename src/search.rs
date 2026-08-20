@@ -1011,12 +1011,18 @@ fn search<NODE: NodeType>(
                 - p::razor_corr() * correction_value.abs() / 1024
                 + p::razor_cutoff() * (td.cutoff_count[ply + 1] > 3) as i32
         && alpha < 2048
-        // `is_noisy()`, not `!is_quiet()`. `is_quiet()` is `is_present() &&
-        // !is_noisy()`, so `!is_quiet()` is TRUE for `Move::NULL` -- the gate
-        // meant to read "the TT move is a capture" also admitted every TT miss,
-        // firing razoring most freely at exactly the nodes with no cached
-        // evidence about the position.
-        && tt_move.is_noisy()
+        // `!is_quiet()`, which is TRUE for `Move::NULL` -- deliberately.
+        //
+        // This was briefly "fixed" to `is_noisy()` on the theory that admitting
+        // TT misses was a bug. It is not: Stockfish's condition is
+        // `!(ttMove && !ttMove.isCapture())`, which allows a null TT move by
+        // construction, and `!is_quiet()` is exactly that. A TT miss means no
+        // cached move contradicts the static evaluation, which is a reason to
+        // trust the margin, not to distrust it.
+        //
+        // `is_noisy()` requires a capture to ALREADY be in the table, so razoring
+        // fired almost nowhere.
+        && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
     {
         // Floored at `best_score`. Every other early return in this function
@@ -1365,10 +1371,11 @@ fn search<NODE: NodeType>(
         && !in_check
         && !is_win(beta)
         && if is_valid(tt_score) { tt_score >= probcut_beta && !is_decisive(tt_score) } else { eval >= beta }
-        // `is_noisy()`, not `!is_quiet()`; see the razoring gate above. Here the
-        // consequence is worse: ProbCut ran at nodes with no TT move at all,
-        // which is precisely where it has no evidence to verify.
-        && tt_move.is_noisy()
+        // `!is_quiet()`, TRUE for `Move::NULL`; see the razoring gate above.
+        // Same erroneous "fix", same restoration -- ProbCut with `is_noisy()`
+        // only ran when the table already held a capture, which is the case where
+        // it is least needed.
+        && !tt_move.is_quiet()
     {
         let mut move_picker = MovePicker::new(Move::NULL, Some(probcut_beta - eval));
 
@@ -2307,6 +2314,7 @@ fn search<NODE: NodeType>(
             // ordinary full-depth visit.
             td.stack[ply].reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, true, ply + 1);
+            td.stack[ply].reduction = 0;
             current_search_count += 1;
 
             if score > alpha {
@@ -2320,8 +2328,6 @@ fn search<NODE: NodeType>(
                     current_search_count += 1;
                 }
             }
-
-            td.stack[ply].reduction = 0;
         }
         // Full Depth Search (FDS)
         else if !NODE::PV || move_count >= 2 {
@@ -2972,7 +2978,7 @@ fn update_best_move_histories<NODE: NodeType>(
     // At non-PV nodes, scale the bonus up by how many other moves were
     // searched before this one proved best (as in Stockfish).
     let quiet_bonus = (p::hist_quiet_bonus_slope() * depth).min(p::hist_quiet_bonus_cap()) - 72 - p::hist_quiet_bonus_cut() * cut_node as i32
-        + (18 * (move_count as i32 - 1)).min(180) * !NODE::PV as i32;
+        + (p::hist_quiet_late_scale() * (move_count as i32 - 1)).min(p::hist_quiet_late_cap()) * !NODE::PV as i32;
     let quiet_malus = (p::hist_quiet_malus_slope() * depth).min(p::hist_quiet_malus_cap()) - 46 - p::hist_quiet_malus_decay() * quiet_moves.len() as i32;
 
     let cont_bonus = (p::hist_cont_bonus_slope() * depth).min(p::hist_cont_bonus_cap()) - 74 - p::hist_cont_bonus_cut() * cut_node as i32;

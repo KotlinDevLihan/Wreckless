@@ -121,7 +121,7 @@ define! {
     //
     // Direction: more RFP pruning at depth when improving -> fewer nodes -> more
     // depth. Same side as the IIR and futility activations.
-    i32 rfp_improvement_ref: 6;
+    i32 rfp_improvement_ref: 0;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
     i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;
@@ -586,7 +586,7 @@ define! {
     // null TT move and would have become wrong here -- the new firings reduce
     // `depth` identically and need the same compensation. Both now track
     // `iir_applied` alone.
-    i32 iir_tt_depth_slack: 4;
+    i32 iir_tt_depth_slack: 0;
 
     // ---- TT-cutoff credit, and the per-sibling decay rates ----
     //
@@ -607,6 +607,17 @@ define! {
     i32 hist_noisy_bonus_cut: 87;
     i32 hist_noisy_malus_decay: 16;
     i32 hist_quiet_bonus_cut: 42;
+
+    // The non-PV late-move bonus scale and its ceiling.
+    //
+    // `+ (18 * (move_count - 1)).min(180) * !PV` -- a move that proved best after
+    // many others were tried is more informative than one that was tried first,
+    // so at non-PV nodes the bonus scales with how much work preceded it. Sound
+    // idea, taken from Stockfish, and the only term in this function that SPSA
+    // could not reach: every one of its neighbours is a `p::` parameter and these
+    // two were literals.
+    i32 hist_quiet_late_scale: 18;
+    i32 hist_quiet_late_cap: 180;
     i32 hist_quiet_malus_decay: 31;
     i32 hist_cont_bonus_cut: 48;
     i32 hist_cont_malus_decay: 17;
@@ -669,7 +680,7 @@ define! {
     // NOTE this is a boolean wearing an i32. Only `> 0` vs `== 0` reaches the
     // arithmetic; the magnitude is never read. It should not be given a wide SPSA
     // range -- the tuner would spend a dimension discovering a single bit.
-    i32 fp_lmr_depth: 1;
+    i32 fp_lmr_depth: 0;
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;
@@ -833,7 +844,19 @@ define! {
     // Reducing late moves harder to fund extending critical ones is the trade
     // late move reduction exists to make; the engine simply was not making it at
     // all until this term was enabled.
-    i32 lmr_movecount_ilog: 256;
+    // BACK TO 0 -- 1.0.0's value.
+    //
+    // Enabling this adds `coeff * ilog2(depth) * ilog2(move_count) / 16` to a
+    // reduction formula whose dozen other terms were all tuned with this one at
+    // zero. Every reference engine has a move-count term, so the idea is right;
+    // layering one onto a fitted formula without retuning the rest is the
+    // scale-drift failure this codebase keeps paying for.
+    //
+    // The engine currently measures at parity with 1.0.0, and 1.0.0 is the
+    // strongest build in the lineage. The useful experiment now is 1.0.0 PLUS the
+    // proven-correct fixes and nothing else -- if that does not beat 1.0.0, no
+    // amount of layered tuning will. Re-enable as its own SPRT afterwards.
+    i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // Restored to upstream's 1412. Previously hand-offset to 1028
@@ -988,7 +1011,7 @@ define! {
     // Zeroed alongside `lmr_movecount_ilog`; same evidence.
     // ENABLED at 192, matching its LMR twin above; same form, same reasoning.
     // RAISED to 256, matching its LMR twin above; same form, same reasoning.
-    i32 fds_movecount_ilog: 256;
+    i32 fds_movecount_ilog: 0;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

@@ -148,23 +148,15 @@ impl TimeManager {
     }
 
     pub fn check_time(&self, td: &ThreadData) -> bool {
-        // Depth 1 used to be uninterruptible: this returned `false` outright
-        // until an iteration had completed, so the HARD bound -- the one that
-        // exists precisely to stop us forfeiting -- could not fire during the
-        // one iteration that has no TT, no move ordering and the widest root
-        // list. On a pathological position that is exactly where a search can
-        // sit for far longer than its allowance.
+        // No blanket `ponder` guard here. It lives in the time-based arm below,
+        // behind the node mask, so that (a) the acquire load on a shared cache
+        // line is paid once per 2048 nodes rather than at every node, and (b) the
+        // node-limit arm is not silently disabled by it.
         //
-        // The guard is still needed in spirit: aborting before anything is
-        // scored leaves no legal `bestmove` to emit. But that is a question of
-        // whether a root move has a SCORE, not of whether a whole iteration
-        // finished. Once the root has picked up a move we can always answer, so
-        // from that point the hard bound must be allowed to do its job.
-
-        if td.shared.ponder.load(std::sync::atomic::Ordering::Acquire) {
-            return false;
-        }
-
+        // A leftover copy of that guard sat here and returned `false` for EVERY
+        // limit, including `Limits::Nodes` -- so `go ponder` with a node limit
+        // could never terminate, and the per-node load the move was meant to
+        // remove was still being paid on top of the new one.
         match self.limits {
             Limits::Infinite | Limits::Depth(_) | Limits::Mate(_) => false,
             // Gated behind the same periodic mask as the other branches:

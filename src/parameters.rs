@@ -1064,7 +1064,27 @@ define! {
     //
     // 1.0.0 is the strongest build in this lineage and is the baseline worth
     // testing against.
-    i32 corr_bonus_min: 4678;
+    // TEST CONFIGURATION -- 0.2.0 values, not 1.0.0's.
+    //
+    // These four are the only tuning values separating 0.2.0 from 1.0.0
+    // (`corr_weight_div` is the fifth and stays at 76 -- it is a normalization
+    // fix, correct in both lineages, and reverting it would reintroduce a 19%
+    // correction inflation).
+    //
+    //     param              0.2.0    1.0.0
+    //     corr_bonus_min      2496     4678
+    //     lowply_weight       3018     7052
+    //     tm_trend_diff         56      480
+    //     tm_trend_recent       27      230
+    //
+    // 1.0.0 measures ~17-20 Elo above 0.2.0, so these are 1.0.0's tuning gains.
+    // The open question is whether they still transfer: HEAD's search differs
+    // materially from 1.0.0's -- `lmr_win_beta` halved, hindsight rebalanced, and
+    // four mechanisms activated that were dormant then -- and parameters do not
+    // automatically survive a changed search.
+    //
+    // Flip all four back to the 1.0.0 column to restore.
+    i32 corr_bonus_min: 2496;
     i32 corr_bonus_max: 2496;
 
     // Six-term correction blend: upstream's pawn, non-pawn x2, continuation x2,
@@ -1163,7 +1183,7 @@ define! {
     // the first few plies -- and the build where it did that is the build that
     // scored +30. Re-derive it only against a measurement, not against another
     // term's magnitude.
-    i32 lowply_weight: 7052;
+    i32 lowply_weight: 3018;
     // Split point between `Stage::Quiet` and `Stage::BadQuiet`, compared
     // against the whole quiet score.
     //
@@ -1286,8 +1306,8 @@ define! {
     // Depth at which a forced single reply stops the search. 0 disables.
     i32 tm_single_move_depth: 8;
     i32 tm_trend_base: 7426;
-    i32 tm_trend_diff: 480;
-    i32 tm_trend_recent: 230;
+    i32 tm_trend_diff: 56;
+    i32 tm_trend_recent: 27;
     i32 tm_trend_min: 7214;
     i32 tm_trend_max: 14031;
 

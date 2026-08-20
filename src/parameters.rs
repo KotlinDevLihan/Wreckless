@@ -121,7 +121,7 @@ define! {
     //
     // Direction: more RFP pruning at depth when improving -> fewer nodes -> more
     // depth. Same side as the IIR and futility activations.
-    i32 rfp_improvement_ref: 0;
+    i32 rfp_improvement_ref: 6;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
     i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;
@@ -586,7 +586,7 @@ define! {
     // null TT move and would have become wrong here -- the new firings reduce
     // `depth` identically and need the same compensation. Both now track
     // `iir_applied` alone.
-    i32 iir_tt_depth_slack: 0;
+    i32 iir_tt_depth_slack: 4;
 
     // ---- TT-cutoff credit, and the per-sibling decay rates ----
     //
@@ -680,7 +680,7 @@ define! {
     // NOTE this is a boolean wearing an i32. Only `> 0` vs `== 0` reaches the
     // arithmetic; the magnitude is never read. It should not be given a wide SPSA
     // range -- the tuner would spend a dimension discovering a single bit.
-    i32 fp_lmr_depth: 0;
+    i32 fp_lmr_depth: 1;
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;
@@ -844,19 +844,21 @@ define! {
     // Reducing late moves harder to fund extending critical ones is the trade
     // late move reduction exists to make; the engine simply was not making it at
     // all until this term was enabled.
-    // BACK TO 0 -- 1.0.0's value.
+    // RE-ENABLED, together with the four other activations.
     //
-    // Enabling this adds `coeff * ilog2(depth) * ilog2(move_count) / 16` to a
-    // reduction formula whose dozen other terms were all tuned with this one at
-    // zero. Every reference engine has a move-count term, so the idea is right;
-    // layering one onto a fitted formula without retuning the rest is the
-    // scale-drift failure this codebase keeps paying for.
+    // These five were switched off on the argument that they layer new terms onto
+    // a reduction formula tuned with them at zero -- sound reasoning, but it was
+    // reasoning, not a measurement. The build that carried them ON measured
+    // -5.9 +/- 41.0 against 1.0.0; the build with them OFF measured -25.7 +/- 42.3.
+    // That difference is 0.66 sigma, so it proves nothing -- but it is the only
+    // empirical signal either way, and it points at keeping them.
     //
-    // The engine currently measures at parity with 1.0.0, and 1.0.0 is the
-    // strongest build in the lineage. The useful experiment now is 1.0.0 PLUS the
-    // proven-correct fixes and nothing else -- if that does not beat 1.0.0, no
-    // amount of layered tuning will. Re-enable as its own SPRT afterwards.
-    i32 lmr_movecount_ilog: 0;
+    // The code corrections made in the same window (razoring/ProbCut gates, the
+    // reduction publish, `write_move`'s CAS) are NOT reverted with them: those
+    // rest on an argument that does not depend on Elo -- `!is_quiet()` is
+    // literally Stockfish's `!(ttMove && !ttMove.isCapture())`, and a lost-update
+    // on a TT entry is wrong however it measures.
+    i32 lmr_movecount_ilog: 256;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // Restored to upstream's 1412. Previously hand-offset to 1028
@@ -1011,7 +1013,7 @@ define! {
     // Zeroed alongside `lmr_movecount_ilog`; same evidence.
     // ENABLED at 192, matching its LMR twin above; same form, same reasoning.
     // RAISED to 256, matching its LMR twin above; same form, same reasoning.
-    i32 fds_movecount_ilog: 0;
+    i32 fds_movecount_ilog: 256;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

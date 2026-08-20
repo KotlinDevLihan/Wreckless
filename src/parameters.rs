@@ -844,7 +844,23 @@ define! {
     // Reducing late moves harder to fund extending critical ones is the trade
     // late move reduction exists to make; the engine simply was not making it at
     // all until this term was enabled.
-    // RE-ENABLED, together with the four other activations.
+    // RE-ENABLED at 24 -- INSIDE its declared range, which 192 and 256 were not.
+    //
+    // The SPSA range for this parameter is [0, 48]. It was set by whoever added
+    // the parameter, with knowledge of the formula it feeds. 192 and 256 sit four
+    // and five times above the top of it: the default was raised without ever
+    // checking the bounds, and nothing in the codebase enforces that a default
+    // lies inside its own range.
+    //
+    // In plies, at depth 16 / move 32, `coeff * ilog2(d) * ilog2(mc) / 16`:
+    //     48  -> 0.06 ply
+    //     256 -> 0.31 ply
+    // So the shipped value was reducing late moves by five times the intended
+    // maximum -- which is precisely the shape that loses the narrow resources
+    // that hold inferior positions.
+    //
+    // 24 is the middle of the declared range: enabled, and at a magnitude the
+    // parameter was designed for.
     //
     // These five were switched off on the argument that they layer new terms onto
     // a reduction formula tuned with them at zero -- sound reasoning, but it was
@@ -858,7 +874,7 @@ define! {
     // rest on an argument that does not depend on Elo -- `!is_quiet()` is
     // literally Stockfish's `!(ttMove && !ttMove.isCapture())`, and a lost-update
     // on a TT entry is wrong however it measures.
-    i32 lmr_movecount_ilog: 256;
+    i32 lmr_movecount_ilog: 24;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // Restored to upstream's 1412. Previously hand-offset to 1028
@@ -1013,7 +1029,7 @@ define! {
     // Zeroed alongside `lmr_movecount_ilog`; same evidence.
     // ENABLED at 192, matching its LMR twin above; same form, same reasoning.
     // RAISED to 256, matching its LMR twin above; same form, same reasoning.
-    i32 fds_movecount_ilog: 256;
+    i32 fds_movecount_ilog: 18;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

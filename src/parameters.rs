@@ -1087,7 +1087,7 @@ define! {
     //
     // 1.0.0 is the strongest build in this lineage and is the baseline worth
     // testing against.
-    // TEST CONFIGURATION -- 0.2.0 values, not 1.0.0's.
+    // 1.0.0's values -- the strongest baseline in this lineage.
     //
     // These four are the only tuning values separating 0.2.0 from 1.0.0
     // (`corr_weight_div` is the fifth and stays at 76 -- it is a normalization
@@ -1106,8 +1106,8 @@ define! {
     // four mechanisms activated that were dormant then -- and parameters do not
     // automatically survive a changed search.
     //
-    // Flip all four back to the 1.0.0 column to restore.
-    i32 corr_bonus_min: 2496;
+    // Flip all four to the 0.2.0 column to test the transfer question again.
+    i32 corr_bonus_min: 4678;
     i32 corr_bonus_max: 2496;
 
     // Six-term correction blend: upstream's pawn, non-pawn x2, continuation x2,
@@ -1206,7 +1206,7 @@ define! {
     // the first few plies -- and the build where it did that is the build that
     // scored +30. Re-derive it only against a measurement, not against another
     // term's magnitude.
-    i32 lowply_weight: 3018;
+    i32 lowply_weight: 7052;
     // Split point between `Stage::Quiet` and `Stage::BadQuiet`, compared
     // against the whole quiet score.
     //
@@ -1329,8 +1329,8 @@ define! {
     // Depth at which a forced single reply stops the search. 0 disables.
     i32 tm_single_move_depth: 8;
     i32 tm_trend_base: 7426;
-    i32 tm_trend_diff: 56;
-    i32 tm_trend_recent: 27;
+    i32 tm_trend_diff: 480;
+    i32 tm_trend_recent: 230;
     i32 tm_trend_min: 7214;
     i32 tm_trend_max: 14031;
 

@@ -27,8 +27,29 @@ impl<T: Copy, const N: usize> ArrayVec<T, N> {
         unsafe { self.data.get_unchecked(index).assume_init_ref() }
     }
 
+    /// Capacity, so callers can bound themselves against the real number rather
+    /// than a literal that has to be kept in sync by hand.
+    pub const CAPACITY: usize = N;
+
     pub fn push(&mut self, value: T) {
         debug_assert!(self.len < N);
+
+        // Checked in release too, not just debug.
+        //
+        // The write below is `get_unchecked_mut`, so overflowing this is not a
+        // panic -- it is an out-of-bounds write into whatever follows the array,
+        // and `ArrayVec` is a stack local inside `search()`. The callers are
+        // correct today (`move_count < 32` against a capacity of 32, with one
+        // slot of margin), but that is two independent literals in two files
+        // agreeing by hand; change either and the failure is silent memory
+        // corruption rather than a dropped move.
+        //
+        // The branch costs a compare per pushed move -- once per move at a node,
+        // against a `MovePicker` call and a `make_move` -- and buys the guarantee
+        // that being wrong about the bound is survivable.
+        if self.len >= N {
+            return;
+        }
 
         unsafe { self.data.get_unchecked_mut(self.len).write(value) };
         self.len += 1;
@@ -36,6 +57,13 @@ impl<T: Copy, const N: usize> ArrayVec<T, N> {
 
     pub fn maybe_push(&mut self, mask: bool, value: T) {
         debug_assert!(self.len < N);
+
+        // Same guard as `push`. Note this one writes even when `mask` is false --
+        // only the length advance is conditional -- so a full buffer overflows
+        // here on a push that was not even meant to be kept.
+        if self.len >= N {
+            return;
+        }
 
         unsafe { self.data.get_unchecked_mut(self.len).write(value) };
         self.len += mask as usize;

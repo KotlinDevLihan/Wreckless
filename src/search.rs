@@ -1025,11 +1025,14 @@ fn search<NODE: NodeType>(
         && !tt_move.is_quiet()
         && tt_bound != Bound::Lower
     {
-        // Floored at `best_score`. Every other early return in this function
-        // either lerps toward beta or stores what it learned; this one handed the
-        // raw qsearch score straight back. Fail-soft returns are allowed to be
-        // below alpha, but they must not be below what this node already knows,
-        // and `best_score` carries the stand-pat/TB floor established above.
+        // Floored at `best_score` -- a guard, not a gain.
+        //
+        // `best_score` is still `-Score::INFINITE` here unless a tablebase probe
+        // raised it, so the `.max()` almost never binds. It stays because the
+        // alternative -- handing back a raw qsearch score that could sit below
+        // something this node has already proven -- is safe only by accident of
+        // where `best_score` happens to be initialised, and that is the kind of
+        // property that breaks silently when code above it moves.
         let razor_score = qsearch::<NonPV>(td, alpha, beta, ply);
 
         return razor_score.max(best_score);
@@ -2465,7 +2468,10 @@ fn search<NODE: NodeType>(
             }
         }
 
-        if mv != best_move && move_count < 32 {
+        // Bounded by the buffers' own capacity, not a hand-copied literal. The two
+        // must agree or `ArrayVec::push` silently drops moves (it no longer
+        // corrupts memory, but a dropped move is still a missed history update).
+        if mv != best_move && (move_count as usize) < ArrayVec::<Move, 32>::CAPACITY {
             if is_quiet {
                 quiet_moves.push(mv);
             } else {

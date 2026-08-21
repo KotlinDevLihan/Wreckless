@@ -522,7 +522,19 @@ define! {
     i32 asp_delta_floor: 10;
     i32 fds_reduction_t1: 2621;
     i32 fds_reduction_t2: 5579;
-    i32 escape_pawn: 0;
+    // A threatened PAWN now earns something for stepping away.
+    //
+    // The escape table is [pawn, knight, bishop, rook, queen] and every entry but
+    // this one is live: 8854 for a knight, 8170 for a bishop, 14051 for a rook,
+    // 20357 for a queen. At 0 a pawn-saving quiet sorted below essentially every
+    // other quiet in the position, which is not a tuning choice -- it is the one
+    // hole in an otherwise complete table.
+    //
+    // 2400 keeps the table monotone in piece value (pawn < bishop < knight <
+    // rook < queen) rather than guessing: it is roughly the same fraction of a
+    // knight's bonus that a pawn is of a knight's value. The range is wide, so
+    // SPSA can settle it now that it is not pinned at an endpoint.
+    i32 escape_pawn: 2400;
     i32 escape_knight: 8854;
     i32 escape_bishop: 8170;
     i32 escape_rook: 14051;

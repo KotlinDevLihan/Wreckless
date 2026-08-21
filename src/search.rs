@@ -2172,7 +2172,12 @@ fn search<NODE: NodeType>(
             // raise counts by construction, so `lmr_exact` is free to return
             // to upstream's own value (see its definition) and either constant
             // can move independently without the other needing to compensate.
-            reduction += p::lmr_alpha_raise() * (alpha_raises - 1).clamp(0, p::lmr_alpha_raise_cap() - 1);
+            // `.max(1)` on the cap before subtracting. `i32::clamp` PANICS when min > max,
+            // so a cap of 0 makes this `clamp(0, -1)` and aborts the engine mid-search.
+            // `spsa.config` starts the range at 3, but `set_parameter` enforces no range
+            // at all -- the same exposure already guarded for `tm_trend_min/max` and the
+            // four `.max(1)` divisors, missed here.
+            reduction += p::lmr_alpha_raise() * (alpha_raises - 1).clamp(0, p::lmr_alpha_raise_cap().max(1) - 1);
 
             reduction += p::lmr_tt_alpha() * (is_valid(tt_score) && tt_score <= alpha) as i32;
             reduction += p::lmr_tt_depth() * (is_valid(tt_score) && tt_depth < depth) as i32;

@@ -121,7 +121,7 @@ define! {
     //
     // Direction: more RFP pruning at depth when improving -> fewer nodes -> more
     // depth. Same side as the IIR and futility activations.
-    i32 rfp_improvement_ref: 6;
+    i32 rfp_improvement_ref: 0;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
     i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;
@@ -295,7 +295,7 @@ define! {
     // at two moves", and it bought ~1.9 plies -- but plies bought by declining
     // to search are the exact signature this file warns about elsewhere. Exposed
     // so the tradeoff can be measured instead of assumed.
-    i32 qs_move_cap: 3;
+    i32 qs_move_cap: 2;
 
     // Exempt a recapture on the square the opponent just captured on from the
     // qsearch move cap, the way direct checks already are.
@@ -343,7 +343,31 @@ define! {
     // quiet_malus at 6.4. A slope 4x steeper than its own bonus paired with the
     // lowest ceiling in the set looks like a transposed digit, but "looks wrong"
     // is a hypothesis, so the defaults reproduce current behaviour exactly.
-    i32 cont_malus_slope: 414;
+    // 414 -> 97, matching its own bonus twin.
+    //
+    // `(slope * depth).min(cap)` saturates at `cap / slope`. Across the six
+    // bonus/malus terms in `update_best_move_histories`:
+    //
+    //     hist_cont_bonus    97 / 1098  -> depth 11.3
+    //     hist_quiet_bonus  184 / 1742  -> depth  9.5
+    //     hist_noisy_bonus   96 /  885  -> depth  9.2
+    //     hist_noisy_malus  175 / 1252  -> depth  7.2
+    //     hist_quiet_malus  171 / 1099  -> depth  6.4
+    //     cont_malus        414 /  949  -> depth  2.3   <-- outlier
+    //
+    // At every depth >= 3 -- which is every node reaching this function with
+    // meaningful depth -- `cont_malus` is a flat 949 carrying no depth
+    // information at all, while its direct counterpart `cont_bonus` scales to
+    // depth 11. Continuation history therefore learns depth-weighted rewards and
+    // depth-flat punishments.
+    //
+    // The cap is not the problem: 949 sits alongside `cont_bonus`'s 1098. The
+    // slope is 4.3x its own twin (97) and 2.4x the quiet-malus slope (171),
+    // which reads like a transposed digit. 97 restores saturation at depth 9.8.
+    //
+    // PRE-EXISTING in 1.0.0 -- this is not part of the revert-to-1.0.0 control
+    // arm, and testing it alongside that arm costs attribution.
+    i32 cont_malus_slope: 97;
     i32 cont_malus_cap: 949;
 
     // ---- Move-ordering weights (movepick.rs) ----
@@ -419,7 +443,7 @@ define! {
     // on "someone is winning here", it was never measured, and a full ply is a
     // large amount to spend on a single boolean. 512 keeps the idea and halves
     // the dose.
-    i32 lmr_win_beta: 512;
+    i32 lmr_win_beta: 1024;
     i32 see_split_div: 47;
     i32 see_split_base: 116;
     i32 rfp_tt_hist_gate: -2048;
@@ -478,7 +502,7 @@ define! {
     // 1536 keeps the arm reachable (it was effectively dormant at 2249) without
     // making it near-unconditional in exactly the positions that already search
     // widest.
-    i32 hindsight_reduction: 1536;
+    i32 hindsight_reduction: 2249;
     i32 hindsight_eval_delta: 57;
 
     // ---- Prior-move credit (update_prior_move_histories) ----
@@ -534,7 +558,7 @@ define! {
     // rook < queen) rather than guessing: it is roughly the same fraction of a
     // knight's bonus that a pawn is of a knight's value. The range is wide, so
     // SPSA can settle it now that it is not pinned at an endpoint.
-    i32 escape_pawn: 2400;
+    i32 escape_pawn: 0;
     i32 escape_knight: 8854;
     i32 escape_bishop: 8170;
     i32 escape_rook: 14051;
@@ -598,7 +622,7 @@ define! {
     // null TT move and would have become wrong here -- the new firings reduce
     // `depth` identically and need the same compensation. Both now track
     // `iir_applied` alone.
-    i32 iir_tt_depth_slack: 4;
+    i32 iir_tt_depth_slack: 0;
 
     // ---- TT-cutoff credit, and the per-sibling decay rates ----
     //
@@ -692,7 +716,7 @@ define! {
     // NOTE this is a boolean wearing an i32. Only `> 0` vs `== 0` reaches the
     // arithmetic; the magnitude is never read. It should not be given a wide SPSA
     // range -- the tuner would spend a dimension discovering a single bit.
-    i32 fp_lmr_depth: 1;
+    i32 fp_lmr_depth: 0;
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;
@@ -886,7 +910,7 @@ define! {
     // rest on an argument that does not depend on Elo -- `!is_quiet()` is
     // literally Stockfish's `!(ttMove && !ttMove.isCapture())`, and a lost-update
     // on a TT entry is wrong however it measures.
-    i32 lmr_movecount_ilog: 24;
+    i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // Restored to upstream's 1412. Previously hand-offset to 1028
@@ -1041,7 +1065,7 @@ define! {
     // Zeroed alongside `lmr_movecount_ilog`; same evidence.
     // ENABLED at 192, matching its LMR twin above; same form, same reasoning.
     // RAISED to 256, matching its LMR twin above; same form, same reasoning.
-    i32 fds_movecount_ilog: 18;
+    i32 fds_movecount_ilog: 0;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

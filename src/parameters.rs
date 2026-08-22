@@ -443,7 +443,7 @@ define! {
     // on "someone is winning here", it was never measured, and a full ply is a
     // large amount to spend on a single boolean. 512 keeps the idea and halves
     // the dose.
-    i32 lmr_win_beta: 1024;
+    i32 lmr_win_beta: 512;
     i32 see_split_div: 47;
     i32 see_split_base: 116;
     i32 rfp_tt_hist_gate: -2048;

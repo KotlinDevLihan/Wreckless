@@ -121,7 +121,13 @@ define! {
     //
     // Direction: more RFP pruning at depth when improving -> fewer nodes -> more
     // depth. Same side as the IIR and futility activations.
-    i32 rfp_improvement_ref: 14;
+    //
+    // Bumped to 14 in a later commit with no comment and no reasoning added
+    // anywhere -- disagrees with the derivation immediately above, which is
+    // specific about why 6 and not some other depth. Restored to the
+    // documented value; if 14 came from a real result, it needs its own
+    // paragraph the way every other deviation in this file gets one.
+    i32 rfp_improvement_ref: 6;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
     i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;

@@ -10,7 +10,7 @@ use crate::{
     time::{Limits, TimeManager},
     tools,
     transposition::DEFAULT_TT_SIZE,
-    types::{Color, MAX_MOVES, MAX_PLY, Move, Piece, Score, Square, is_decisive, is_loss, is_win},
+    types::{Color, MAX_MOVES, MAX_PLY, Move, Piece, Score, Square, is_loss, is_win},
 };
 
 #[derive(Copy, Clone, PartialEq, Eq)]

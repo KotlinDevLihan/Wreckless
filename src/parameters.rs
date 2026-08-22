@@ -121,7 +121,7 @@ define! {
     //
     // Direction: more RFP pruning at depth when improving -> fewer nodes -> more
     // depth. Same side as the IIR and futility activations.
-    i32 rfp_improvement_ref: 6;
+    i32 rfp_improvement_ref: 0;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
     i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;
@@ -165,7 +165,7 @@ define! {
     // fraction of base" as a principle made things worse because the data said
     // the opposite. The signal itself is still worth testing; this shape of it
     // is not.
-    i32 rfp_threat_density: 14;
+    i32 rfp_threat_density: 0;
     i32 threat_density_cap: 6;
     i32 rfp_base: 19;
     // Widen the RFP margin when the static eval and the TT's search score
@@ -324,7 +324,7 @@ define! {
     //
     // Set to 1 to re-enable. The mechanism is sound; what is unproven is whether
     // the tactical accuracy is worth a quarter-ply.
-    i32 qs_recapture_exempt: 1;
+    i32 qs_recapture_exempt: 0;
 
     // Good captures emitted before the SEE retest is short-circuited.
     //
@@ -558,7 +558,7 @@ define! {
     // rook < queen) rather than guessing: it is roughly the same fraction of a
     // knight's bonus that a pawn is of a knight's value. The range is wide, so
     // SPSA can settle it now that it is not pinned at an endpoint.
-    i32 escape_pawn: 2400;
+    i32 escape_pawn: 0;
     i32 escape_knight: 8854;
     i32 escape_bishop: 8170;
     i32 escape_rook: 14051;
@@ -622,7 +622,7 @@ define! {
     // null TT move and would have become wrong here -- the new firings reduce
     // `depth` identically and need the same compensation. Both now track
     // `iir_applied` alone.
-    i32 iir_tt_depth_slack: 4;
+    i32 iir_tt_depth_slack: 0;
 
     // ---- TT-cutoff credit, and the per-sibling decay rates ----
     //
@@ -675,7 +675,7 @@ define! {
     //
     // 512 reproduces Artemis's halving; 0 disables and restores
     // `lmp_improvement` as the sole improving term.
-    i32 lmp_improving_mult: 512;
+    i32 lmp_improving_mult: 0;
     i32 lmp_base: 2818;
     // Restored to its tuned value: `lmp_improving_mult` is now 0, so this is
     // again the only improving term in the LMP threshold. If that is ever
@@ -716,7 +716,7 @@ define! {
     // NOTE this is a boolean wearing an i32. Only `> 0` vs `== 0` reaches the
     // arithmetic; the magnitude is never read. It should not be given a wide SPSA
     // range -- the tuner would spend a dimension discovering a single bit.
-    i32 fp_lmr_depth: 1;
+    i32 fp_lmr_depth: 0;
     i32 fp_depth: 79;
     i32 fp_history: 55;
     i32 fp_beta_bonus: 77;
@@ -734,7 +734,7 @@ define! {
     // sign. That specific hazard is gone -- the term is proportional now and
     // `threat_scaled` returns a non-positive base untouched -- but it is why the
     // additive form is not coming back.
-    i32 fp_threat_density: 20;
+    i32 fp_threat_density: 0;
     i32 fp_base: 127;
 
     // Bad Noisy Futility Pruning
@@ -910,7 +910,7 @@ define! {
     // rest on an argument that does not depend on Elo -- `!is_quiet()` is
     // literally Stockfish's `!(ttMove && !ttMove.isCapture())`, and a lost-update
     // on a TT entry is wrong however it measures.
-    i32 lmr_movecount_ilog: 24;
+    i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // Restored to upstream's 1412. Previously hand-offset to 1028
@@ -1065,7 +1065,7 @@ define! {
     // Zeroed alongside `lmr_movecount_ilog`; same evidence.
     // ENABLED at 192, matching its LMR twin above; same form, same reasoning.
     // RAISED to 256, matching its LMR twin above; same form, same reasoning.
-    i32 fds_movecount_ilog: 18;
+    i32 fds_movecount_ilog: 0;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;

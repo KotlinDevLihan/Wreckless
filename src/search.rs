@@ -2663,6 +2663,10 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
 
     // Stand Pat
     if best_score >= beta {
+        if !is_decisive(best_score) && !is_decisive(beta) {
+            best_score = lerp(best_score, beta, 0.8256);
+        }
+
         if entry.is_none() {
             td.shared.tt.write(hash, TtDepth::SOME, raw_eval, best_score, Bound::Lower, Move::NULL, ply, tt_pv, false);
         }
@@ -3449,7 +3453,7 @@ fn update_tt_move_history(td: &mut ThreadData, bonus: i32) {
 /// Detects repetitive piece shuffling near the 50-move rule so that singular
 /// extensions can be disabled there, limiting search explosions (Stockfish #6447).
 fn is_shuffling(td: &ThreadData, tt_move: Move, ply: isize) -> bool {
-    if !tt_move.is_quiet() || td.board.fiftymove_clock() < 10 || ply < 4 {
+    if !tt_move.is_quiet() || td.board.fiftymove_clock() < 10 || ply < 20 {
         return false;
     }
 

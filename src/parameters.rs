@@ -558,7 +558,7 @@ define! {
     // rook < queen) rather than guessing: it is roughly the same fraction of a
     // knight's bonus that a pawn is of a knight's value. The range is wide, so
     // SPSA can settle it now that it is not pinned at an endpoint.
-    i32 escape_pawn: 0;
+    i32 escape_pawn: 2400;
     i32 escape_knight: 8854;
     i32 escape_bishop: 8170;
     i32 escape_rook: 14051;

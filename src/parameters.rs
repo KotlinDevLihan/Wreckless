@@ -443,7 +443,7 @@ define! {
     // on "someone is winning here", it was never measured, and a full ply is a
     // large amount to spend on a single boolean. 512 keeps the idea and halves
     // the dose.
-    i32 lmr_win_beta: 1024;
+    i32 lmr_win_beta: 512;
     i32 see_split_div: 47;
     i32 see_split_base: 116;
     i32 rfp_tt_hist_gate: -2048;
@@ -502,7 +502,7 @@ define! {
     // 1536 keeps the arm reachable (it was effectively dormant at 2249) without
     // making it near-unconditional in exactly the positions that already search
     // widest.
-    i32 hindsight_reduction: 2249;
+    i32 hindsight_reduction: 1536;
     i32 hindsight_eval_delta: 57;
 
     // ---- Prior-move credit (update_prior_move_histories) ----
@@ -1162,7 +1162,7 @@ define! {
     //
     // Flip all four to the 0.2.0 column to test the transfer question again.
     i32 corr_bonus_min: 4678;
-    i32 corr_bonus_max: 2496;
+    i32 corr_bonus_max: 4678;
 
     // Six-term correction blend: upstream's pawn, non-pawn x2, continuation x2,
     // plus this fork's material-key table (piece-count-only Zobrist key, no

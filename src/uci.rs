@@ -98,11 +98,26 @@ pub fn message_loop(mut buffer: VecDeque<String>) {
                 Mode::Cli => tools::bench::<false>(args),
             },
             ["speedtest", args @ ..] => tools::speedtest(args),
-            ["perft", depth] => tools::perft(depth.parse().unwrap(), &mut board),
+            // `depth.parse().unwrap()` here would panic the whole process --
+            // including an already-running search on another thread -- on a
+            // single mistyped character (`perft 6.`, `perft 1e6`, a pasted
+            // stray space). Every other malformed-input case in this match
+            // already degrades to a printed usage message instead of a crash;
+            // these three didn't, for no reason tied to what they do.
+            ["perft", depth] => match depth.parse() {
+                Ok(depth) => tools::perft(depth, &mut board),
+                Err(_) => eprintln!("Usage: perft <depth> (expected an integer, got '{depth}')"),
+            },
             ["perft"] => eprintln!("Usage: perft <depth>"),
-            ["simpleperft", depth] => tools::simple_perft(depth.parse().unwrap(), &mut board),
+            ["simpleperft", depth] => match depth.parse() {
+                Ok(depth) => tools::simple_perft(depth, &mut board),
+                Err(_) => eprintln!("Usage: simpleperft <depth> (expected an integer, got '{depth}')"),
+            },
             ["simpleperft"] => eprintln!("Usage: simpleperft <depth>"),
-            ["islegalperft", depth] => tools::is_legal_perft(depth.parse().unwrap(), &mut board),
+            ["islegalperft", depth] => match depth.parse() {
+                Ok(depth) => tools::is_legal_perft(depth, &mut board),
+                Err(_) => eprintln!("Usage: islegalperft <depth> (expected an integer, got '{depth}')"),
+            },
             ["islegalperft"] => eprintln!("Usage: islegalperft <depth>"),
 
             // Ignore empty lines
@@ -413,10 +428,10 @@ fn go(threads: &mut ThreadPool, settings: &Settings, board: &Board, shared: &Arc
                     && best.root_moves[0].score != -Score::INFINITE
                     && is_loss(best.root_moves[0].score)
                 {
-                    return current.root_moves[0].score < best.root_moves[0].score;
+                    return current.root_moves[0].score > best.root_moves[0].score;
                 }
 
-                if current.root_moves[0].score != -Score::INFINITE && is_decisive(current.root_moves[0].score) {
+                if current.root_moves[0].score != -Score::INFINITE && is_win(current.root_moves[0].score) {
                     return true;
                 }
 

@@ -414,23 +414,25 @@ const fn score_from_tt(score: i32, ply: isize, halfmove_clock: u8) -> i32 {
     }
 
     if is_win(score) {
-        if score >= Score::MATE_IN_MAX && Score::MATE - score > 100 - halfmove_clock as i32 {
+        let pos_score = score - ply as i32;
+        if score >= Score::MATE_IN_MAX && Score::MATE - pos_score > 100 - halfmove_clock as i32 {
             return Score::TB_WIN_IN_MAX - 1;
         }
-        if Score::TB_WIN - score > 100 - halfmove_clock as i32 {
+        if Score::TB_WIN - pos_score > 100 - halfmove_clock as i32 {
             return Score::TB_WIN_IN_MAX - 1;
         }
-        return score - ply as i32;
+        return pos_score;
     }
 
     if is_loss(score) {
-        if score <= -Score::MATE_IN_MAX && Score::MATE + score > 100 - halfmove_clock as i32 {
+        let pos_score = score + ply as i32;
+        if score <= -Score::MATE_IN_MAX && Score::MATE + pos_score > 100 - halfmove_clock as i32 {
             return -Score::TB_WIN_IN_MAX + 1;
         }
-        if Score::TB_WIN + score > 100 - halfmove_clock as i32 {
+        if Score::TB_WIN + pos_score > 100 - halfmove_clock as i32 {
             return -Score::TB_WIN_IN_MAX + 1;
         }
-        return score + ply as i32;
+        return pos_score;
     }
 
     score

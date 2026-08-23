@@ -84,7 +84,7 @@ define! {
     // Does NOT replace the joint SPSA run the paragraph above calls for --
     // this is a placeholder to make the mechanism non-dormant, picked with
     // no game behind it. Treat as provisional.
-    i32 razor_cutoff: 42;
+    i32 razor_cutoff: 0;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -134,7 +134,7 @@ define! {
     // specific about why 6 and not some other depth. Restored to the
     // documented value; if 14 came from a real result, it needs its own
     // paragraph the way every other deviation in this file gets one.
-    i32 rfp_improvement_ref: 6;
+    i32 rfp_improvement_ref: 0;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
     //
     // EDUCATED GUESS, NOT MEASURED: set to 24. Same `* depth / 16` shape as
@@ -144,7 +144,7 @@ define! {
     // aggressive value here prunes broadly on a comparatively weak, cheap
     // signal. Picked conservatively low relative to both siblings. No game
     // behind this number; treat as provisional.
-    i32 rfp_tt_miss: 24;
+    i32 rfp_tt_miss: 0;
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
@@ -285,7 +285,7 @@ define! {
     //
     // Set back to 0 to reproduce the unverified behaviour; the two are directly
     // comparable in one SPRT.
-    i32 probcut_require_verify: 1;
+    i32 probcut_require_verify: 0;
 
     // Most non-checking moves qsearch will SEARCH before breaking out.
     //
@@ -345,7 +345,7 @@ define! {
     //
     // Set to 1 to re-enable. The mechanism is sound; what is unproven is whether
     // the tactical accuracy is worth a quarter-ply.
-    i32 qs_recapture_exempt: 1;
+    i32 qs_recapture_exempt: 0;
 
     // Good captures emitted before the SEE retest is short-circuited.
     //
@@ -388,7 +388,7 @@ define! {
     //
     // PRE-EXISTING in 1.0.0 -- this is not part of the revert-to-1.0.0 control
     // arm, and testing it alongside that arm costs attribution.
-    i32 cont_malus_slope: 97;
+    i32 cont_malus_slope: 414;
     i32 cont_malus_cap: 949;
 
     // ---- Move-ordering weights (movepick.rs) ----
@@ -464,7 +464,7 @@ define! {
     // on "someone is winning here", it was never measured, and a full ply is a
     // large amount to spend on a single boolean. 512 keeps the idea and halves
     // the dose.
-    i32 lmr_win_beta: 512;
+    i32 lmr_win_beta: 1024;
     i32 see_split_div: 47;
     i32 see_split_base: 116;
     i32 rfp_tt_hist_gate: -2048;
@@ -523,7 +523,7 @@ define! {
     // 1536 keeps the arm reachable (it was effectively dormant at 2249) without
     // making it near-unconditional in exactly the positions that already search
     // widest.
-    i32 hindsight_reduction: 1536;
+    i32 hindsight_reduction: 2249;
     i32 hindsight_eval_delta: 57;
 
     // ---- Prior-move credit (update_prior_move_histories) ----
@@ -579,7 +579,7 @@ define! {
     // rook < queen) rather than guessing: it is roughly the same fraction of a
     // knight's bonus that a pawn is of a knight's value. The range is wide, so
     // SPSA can settle it now that it is not pinned at an endpoint.
-    i32 escape_pawn: 2400;
+    i32 escape_pawn: 0;
     i32 escape_knight: 8854;
     i32 escape_bishop: 8170;
     i32 escape_rook: 14051;
@@ -643,7 +643,7 @@ define! {
     // null TT move and would have become wrong here -- the new firings reduce
     // `depth` identically and need the same compensation. Both now track
     // `iir_applied` alone.
-    i32 iir_tt_depth_slack: 4;
+    i32 iir_tt_depth_slack: 0;
 
     // ---- TT-cutoff credit, and the per-sibling decay rates ----
     //
@@ -696,7 +696,7 @@ define! {
     //
     // 512 reproduces Artemis's halving; 0 disables and restores
     // `lmp_improvement` as the sole improving term.
-    i32 lmp_improving_mult: 512;
+    i32 lmp_improving_mult: 0;
     i32 lmp_base: 2818;
     // Restored to its tuned value: `lmp_improving_mult` is now 0, so this is
     // again the only improving term in the LMP threshold. If that is ever
@@ -931,7 +931,7 @@ define! {
     // rest on an argument that does not depend on Elo -- `!is_quiet()` is
     // literally Stockfish's `!(ttMove && !ttMove.isCapture())`, and a lost-update
     // on a TT entry is wrong however it measures.
-    i32 lmr_movecount_ilog: 24;
+    i32 lmr_movecount_ilog: 0;
     i32 lmr_improvement: 425;
     i32 lmr_corr: 3417;
     // Restored to upstream's 1412. Previously hand-offset to 1028
@@ -1086,7 +1086,7 @@ define! {
     // Zeroed alongside `lmr_movecount_ilog`; same evidence.
     // ENABLED at 192, matching its LMR twin above; same form, same reasoning.
     // RAISED to 256, matching its LMR twin above; same form, same reasoning.
-    i32 fds_movecount_ilog: 18;
+    i32 fds_movecount_ilog: 0;
     i32 fds_improvement: 366;
     i32 fds_corr: 2255;
     i32 fds_quiet_base: 1468;
@@ -1389,7 +1389,7 @@ define! {
     // Prerequisite fixed first: `iter_values` was indexed by absolute depth,
     // which becomes an 8-12 ply lookback on a skipping helper. It now counts
     // completed iterations.
-    i32 lazy_smp_skip: 1;
+    i32 lazy_smp_skip: 0;
 
     // Stop the search once a forced mate this short is proven and has been
     // confirmed for `tm_mate_confirm` plies of extra depth. Set to 0 to retire.

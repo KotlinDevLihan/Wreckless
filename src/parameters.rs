@@ -84,7 +84,7 @@ define! {
     // Does NOT replace the joint SPSA run the paragraph above calls for --
     // this is a placeholder to make the mechanism non-dormant, picked with
     // no game behind it. Treat as provisional.
-    i32 razor_cutoff: 0;
+    i32 razor_cutoff: 42;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -144,7 +144,7 @@ define! {
     // aggressive value here prunes broadly on a comparatively weak, cheap
     // signal. Picked conservatively low relative to both siblings. No game
     // behind this number; treat as provisional.
-    i32 rfp_tt_miss: 0;
+    i32 rfp_tt_miss: 24;
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;

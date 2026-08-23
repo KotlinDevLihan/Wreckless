@@ -77,7 +77,14 @@ define! {
     // re-tuning, not a code change. Zeroed pending that; the range is left
     // open in spsa.config for a run that includes it alongside its four
     // siblings.
-    i32 razor_cutoff: 0;
+    //
+    // EDUCATED GUESS, NOT MEASURED: set to 42, the midpoint of see_q_cutoff
+    // (48) and see_n_cutoff (37) -- the two siblings closest in both formula
+    // shape (same gate) and output scale to what this term would need to be.
+    // Does NOT replace the joint SPSA run the paragraph above calls for --
+    // this is a placeholder to make the mechanism non-dormant, picked with
+    // no game behind it. Treat as provisional.
+    i32 razor_cutoff: 42;
 
     // Reverse Futility Pruning
     i32 rfp_depth_quad: 1140;
@@ -129,7 +136,15 @@ define! {
     // paragraph the way every other deviation in this file gets one.
     i32 rfp_improvement_ref: 6;
     // Shrinks the RFP margin on a TT miss, proportionally to depth. 0 disables.
-    i32 rfp_tt_miss: 0;
+    //
+    // EDUCATED GUESS, NOT MEASURED: set to 24. Same `* depth / 16` shape as
+    // rfp_improvement (120) and same "binary signal x depth" shape as
+    // rfp_no_threats (54), but a TT miss fires on nearly every unseen node --
+    // far more often than either of those flagged-condition signals -- so an
+    // aggressive value here prunes broadly on a comparatively weak, cheap
+    // signal. Picked conservatively low relative to both siblings. No game
+    // behind this number; treat as provisional.
+    i32 rfp_tt_miss: 24;
     i32 rfp_improvement: 120;
     i32 rfp_depth_lin: 22;
     i32 rfp_corr: 669;
@@ -1314,7 +1329,6 @@ define! {
     i32 qs_see_corr_cap: 68;
     i32 qs_see_base: 74;
 
-    // Converts `PieceType::value()` into the search's own evaluation units for
     // qsearch delta pruning. A pawn is 109 to `value()` but `normalization()`
     // puts it at 321-382 in eval units depending on material -- a stable ~3x --
     // so 192/64 = 3.0. Without this the captured-piece credit was understated

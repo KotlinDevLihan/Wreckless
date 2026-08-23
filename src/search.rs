@@ -2663,10 +2663,12 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
 
     // Stand Pat
     if best_score >= beta {
-        if !is_decisive(best_score) && !is_decisive(beta) {
-            best_score = lerp(best_score, beta, 0.8256);
-        }
-
+        // The lerp-toward-beta smoothing that used to sit here (eaa2a7f) was
+        // removed with no comment, then restored two commits later (45fe52b)
+        // with no comment either -- neither change has ever had a stated
+        // reason on either side. Removed again at explicit request. This is
+        // not a measured decision in either direction; if it matters, it
+        // needs its own isolated SPRT rather than another silent flip.
         if entry.is_none() {
             td.shared.tt.write(hash, TtDepth::SOME, raw_eval, best_score, Bound::Lower, Move::NULL, ply, tt_pv, false);
         }

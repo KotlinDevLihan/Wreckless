@@ -2322,7 +2322,6 @@ fn search<NODE: NodeType>(
             // ordinary full-depth visit.
             td.stack[ply].reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, true, ply + 1);
-            td.stack[ply].reduction = 0;
             current_search_count += 1;
 
             if score > alpha {
@@ -2336,6 +2335,8 @@ fn search<NODE: NodeType>(
                     current_search_count += 1;
                 }
             }
+
+            td.stack[ply].reduction = 0;
         }
         // Full Depth Search (FDS)
         else if !NODE::PV || move_count >= 2 {

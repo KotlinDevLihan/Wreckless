@@ -321,7 +321,7 @@ impl MovePicker {
         let threats = td.board.all_threats();
         let side = td.board.side_to_move();
         let pawn_key = td.board.pawn_key();
-        let pawn_hist = &td.corrhist().pawn_history;
+        let pawn_hist = &td.pawn_history;
 
         // The six continuation-history subtable pointers depend only on `ply`,
         // never on the move being scored, but these used to go through a

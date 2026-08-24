@@ -49,7 +49,25 @@ pub struct StackEntry {
     pub tt_move: Move,
     pub tt_pv: bool,
     pub move_count: u16,
+    /// Reduction applied to this node's child, in LMR units (1024 = one ply).
+    ///
+    /// Read by the child's hindsight depth adjustments and by
+    /// `lmr_prev_reduction`. Both were tuned against upstream's LMR scale, so
+    /// only values on that scale may be published here -- the FDS branch,
+    /// whose raw reduction lives on a different scale entirely, publishes the
+    /// plies it actually applied (`1024 * plies`) rather than its raw counter.
+    /// See `fds_reduction` for why the raw value needs a field of its own.
     pub reduction: i32,
+    /// Raw FDS reduction counter for this node's child, on the FDS scale.
+    ///
+    /// Kept separate from [`Self::reduction`] because the two are not
+    /// comparable: `fds_quiet_base` (1468) / `fds_ilog` (207) run 700-1300
+    /// below `lmr_quiet_base` (2171) / `lmr_ilog` (269) for the same position,
+    /// so a single shared field made `fds_prev_reduction` and
+    /// `lmr_prev_reduction` fire on which branch the parent happened to take
+    /// rather than on how much it reduced. `fds_prev_reduction` reads this one;
+    /// `lmr_prev_reduction` reads `reduction`.
+    pub fds_reduction: i32,
     pub follow_pv: bool,
     /// Double/triple singular extensions accumulated along this line.
     ///
@@ -75,6 +93,7 @@ impl Default for StackEntry {
             tt_pv: false,
             move_count: 0,
             reduction: 0,
+            fds_reduction: 0,
             follow_pv: false,
             double_extensions: 0,
             conthist: std::ptr::null_mut(),

@@ -233,11 +233,33 @@ impl Default for LowPlyHistory {
     }
 }
 
+/// Move-ordering history keyed on the pawn structure. THREAD-LOCAL.
+///
+/// This table briefly lived inside `SharedCorrectionHistory`, as
+/// `PieceToHistory<AtomicI16>` behind an `Arc`, on the reasoning that it sits
+/// next to the correction histories and so could be shared like them. It is not
+/// the same kind of object, and sharing it cost twice:
+///
+///  * NPS. 512 buckets x 13 x 64 `AtomicI16`, read for every quiet move at
+///    every node (`score_quiet` in movepick.rs) and written on every history
+///    update, by N threads at once. Neighbouring entries share cache lines and
+///    the writes are pure store traffic -- textbook false sharing on the single
+///    hottest scoring loop in the engine.
+///  * Lazy-SMP diversity. Shared move-ordering history is precisely what makes
+///    helper threads walk the same tree: they order moves identically, so they
+///    re-derive the same lines and the wider spread of depths and bounds that
+///    Lazy SMP gains from never materialises. This engine spends real effort
+///    elsewhere on desynchronising helpers (the id-seeded reduction jitter, the
+///    skip-phase depth schedule); sharing this table works directly against
+///    both.
+///
+/// The correction histories genuinely are shareable -- they hold an eval
+/// correction that converges toward one value, so every thread wants the same
+/// answer and pooling the samples helps. Move ordering has no such fixed point,
+/// and wanting the threads to disagree is the entire point.
 pub struct PawnHistory {
     // [pawn_key_bucket][piece][to]
-    // Atomic so the table can be shared across search threads (racy-lossy
-    // updates are fine for history data, as with the correction histories).
-    entries: Box<[PieceToHistory<AtomicI16>; Self::SIZE]>,
+    entries: Box<[PieceToHistory<i16>; Self::SIZE]>,
 }
 
 impl PawnHistory {
@@ -247,24 +269,12 @@ impl PawnHistory {
     const MASK: usize = Self::SIZE - 1;
 
     pub fn get(&self, pawn_key: u64, piece: Piece, to: Square) -> i32 {
-        self.entries[pawn_key as usize & Self::MASK][piece][to].load(Ordering::Relaxed) as i32
+        self.entries[pawn_key as usize & Self::MASK][piece][to] as i32
     }
 
-    pub fn update(&self, pawn_key: u64, piece: Piece, to: Square, bonus: i32) {
-        let entry = &self.entries[pawn_key as usize & Self::MASK][piece][to];
-        let bonus = bonus.clamp(-Self::MAX_HISTORY, Self::MAX_HISTORY);
-        let current = entry.load(Ordering::Relaxed) as i32;
-        entry.store((current + bonus - bonus.abs() * current / Self::MAX_HISTORY) as i16, Ordering::Relaxed);
-    }
-
-    pub fn clear(&self) {
-        for bucket in self.entries.iter() {
-            for entries in bucket.iter() {
-                for entry in entries {
-                    entry.store(0, Ordering::Relaxed);
-                }
-            }
-        }
+    pub fn update(&mut self, pawn_key: u64, piece: Piece, to: Square, bonus: i32) {
+        let entry = &mut self.entries[pawn_key as usize & Self::MASK][piece][to];
+        apply_bonus::<{ Self::MAX_HISTORY }>(entry, bonus);
     }
 }
 

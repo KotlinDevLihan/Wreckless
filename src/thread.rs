@@ -180,7 +180,6 @@ pub struct SharedCorrectionHistory {
     pub pawn: CorrectionHistory,
     pub non_pawn: [CorrectionHistory; 2],
     pub material: CorrectionHistory,
-    pub pawn_history: PawnHistory,
 }
 
 impl NumaReplicable for SharedCorrectionHistory {
@@ -298,6 +297,9 @@ pub struct ThreadData {
     pub pv_table: PrincipalVariationTable,
     pub noisy_history: NoisyHistory,
     pub quiet_history: QuietHistory,
+    /// Thread-local, deliberately -- see [`PawnHistory`] for why this one is not
+    /// pooled with the correction histories it used to live beside.
+    pub pawn_history: PawnHistory,
     pub low_ply_history: LowPlyHistory,
     pub continuation_history: ContinuationHistory,
     pub continuation_corrhist: ContinuationCorrectionHistory,
@@ -347,6 +349,7 @@ impl ThreadData {
             pv_table: PrincipalVariationTable::default(),
             noisy_history: NoisyHistory::default(),
             quiet_history: QuietHistory::default(),
+            pawn_history: PawnHistory::default(),
             low_ply_history: LowPlyHistory::default(),
             continuation_history: ContinuationHistory::default(),
             continuation_corrhist: ContinuationCorrectionHistory::default(),

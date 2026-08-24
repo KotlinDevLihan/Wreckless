@@ -829,6 +829,7 @@ fn search<NODE: NodeType>(
     td.stack[ply].tt_move = tt_move;
     td.stack[ply].tt_pv = tt_pv;
     td.stack[ply].reduction = 0;
+    td.stack[ply].fds_reduction = 0;
     td.stack[ply].move_count = 0;
 
     // `cutoff_count[ply]` counts beta cutoffs produced by this node's children.
@@ -1057,17 +1058,28 @@ fn search<NODE: NodeType>(
     };
 
     // Reverse Futility Pruning (RFP)
-    // Restored the TT-move quiet-history guard and the `rfp_worsening` term,
-    // both present in 0.1.2 and both silently dropped since with no comment
-    // justifying the removal. The guard specifically stops RFP from firing
-    // when the TT move is a quiet move already known to be bad
-    // (quiet_history < -2048) -- without it RFP can return early based on a
-    // static margin even when search already has evidence the position's
-    // best-looking move doesn't hold up.
+    //
+    // The `rfp_worsening` term below was present in 0.1.2 and silently dropped
+    // since with no comment justifying the removal; it is restored.
+    //
+    // The TT-move quiet-history guard that used to sit here alongside it is
+    // NOT. It was a fork-only condition with no upstream analogue, and it read
+    // its signal backwards: it disabled RFP entirely whenever the TT move was a
+    // quiet with `quiet_history < rfp_tt_hist_gate` (-2048). But a quiet move
+    // with history that low is a move search has already learned is bad, which
+    // is an argument for pruning this node MORE readily, not for abandoning the
+    // margin test at it. Nothing about a bad TT move makes the static eval less
+    // trustworthy relative to beta, which is the only question RFP asks.
+    //
+    // Its stated justification -- "search already has evidence the position's
+    // best-looking move doesn't hold up" -- confuses history-of-a-move with
+    // evidence-about-a-node. The signal that does belong to the node is
+    // `complexity` (|eval - tt_score|), which is a separate term.
+    //
+    // The `rfp_tt_hist_gate` parameter is removed along with the condition.
     if !tt_pv
         && !in_check
         && !excluded
-        && (!tt_move.is_quiet() || td.quiet_history.get(td.board.all_threats(), stm, tt_move) >= p::rfp_tt_hist_gate())
         && estimated_score
             >= beta
                 + threat_scaled(
@@ -1264,6 +1276,7 @@ fn search<NODE: NodeType>(
             let saved_tt_move = td.stack[ply].tt_move;
             let saved_tt_pv = td.stack[ply].tt_pv;
             let saved_reduction = td.stack[ply].reduction;
+            let saved_fds_reduction = td.stack[ply].fds_reduction;
 
             let saved_nmp_min_ply = td.nmp_min_ply;
             td.nmp_min_ply = ply as i32 + 3 * reduced_depth / 4;
@@ -1275,6 +1288,7 @@ fn search<NODE: NodeType>(
             td.stack[ply].tt_move = saved_tt_move;
             td.stack[ply].tt_pv = saved_tt_pv;
             td.stack[ply].reduction = saved_reduction;
+            td.stack[ply].fds_reduction = saved_fds_reduction;
 
             if td.shared.status.get() == Status::STOPPED {
                 return Score::ZERO;
@@ -1505,8 +1519,17 @@ fn search<NODE: NodeType>(
     // entry satisfies it -- the one thing this cutoff must never trust, since
     // its whole premise is a near-full-depth search. Clamping the floor at 0
     // admits only entries from a real search. Depths 4 and up are unaffected.
+    //
+    // The `.max(0)` alone was not enough, which is why the `depth >= 5` floor
+    // below joins it -- Stockfish carries the same floor. Without it the cutoff
+    // fires at depths 1-4, where `depth - 4` clamps to 0 and *any* entry from a
+    // real search qualifies however shallow it is. That is a `probcut_tt_margin`
+    // (428) unverified fail-high built on a depth-0 entry, returned as a score
+    // nothing searched. The floor makes the required draft depth grow with the
+    // node's own depth, which is the premise the cutoff rests on.
     if !NODE::PV
         && !excluded
+        && depth >= 5
         && matches!(tt_bound, Bound::Lower | Bound::Exact)
         && tt_depth >= (depth - 4).max(0)
         && is_valid(tt_score)
@@ -2311,17 +2334,27 @@ fn search<NODE: NodeType>(
             let pv_bonus = 2 * NODE::PV as i32;
             let reduced_depth = (new_depth - reduction / 1024 + pv_bonus).clamp(1, new_depth + 2);
 
-            // Published across the re-search as well, matching the FDS branch.
+            // Published for the reduced scout ONLY, and cleared before the
+            // verification re-search below -- as upstream and Stockfish both do
+            // (`ss->reduction = 0` immediately after the reduced search).
             //
-            // Clearing it before the `new_depth` re-search told that child
-            // "your parent did not reduce you" -- when the only reason it exists
-            // is that the parent DID reduce, and the reduced scout came back
-            // above alpha. Three consumers read this field: both hindsight depth
-            // adjustments and `lmr_prev_reduction`/`fds_prev_reduction`, and all
-            // three were reasoning about the re-search as though it were an
-            // ordinary full-depth visit.
+            // Publishing it across the re-search as well (the arrangement this
+            // replaces) reasoned that the parent "did" reduce, so the child
+            // should know. But the re-search exists precisely because it is
+            // UNREDUCED: it is the verification that the reduced scout's
+            // fail-high was real. With the field still set, the child applied
+            //
+            //     if !tt_pv && depth >= 2 && reduction > 0 && eval_delta > ...
+            //         { depth -= 1; }
+            //
+            // and reduced the verification search -- which is how a transient
+            // LMR scout error becomes a permanent one, since nothing downstream
+            // ever looks at that line at full depth again. The field describes
+            // "how hard was the search you are inside", not "did your parent
+            // ever reduce", and inside the re-search the honest answer is zero.
             td.stack[ply].reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, true, ply + 1);
+            td.stack[ply].reduction = 0;
             current_search_count += 1;
 
             if score > alpha {
@@ -2335,8 +2368,6 @@ fn search<NODE: NodeType>(
                     current_search_count += 1;
                 }
             }
-
-            td.stack[ply].reduction = 0;
         }
         // Full Depth Search (FDS)
         else if !NODE::PV || move_count >= 2 {
@@ -2384,8 +2415,16 @@ fn search<NODE: NodeType>(
                 reduction -= p::fds_ttmove();
             }
 
-            // Same PlentyChess gating as the LMR twin above.
-            if !opponent_worsening && td.stack[ply - 1].reduction > reduction + 590 {
+            // Same PlentyChess gating as the LMR twin above, but reading the
+            // parent's FDS counter rather than its LMR one.
+            //
+            // `reduction` here is on the FDS scale and the `+ 590` threshold was
+            // set against it; `stack[ply - 1].reduction` is on the LMR scale,
+            // which runs 700-1300 higher for the same position. Comparing the
+            // two made this gate fire mostly on which branch the parent took.
+            // `fds_reduction` is 0 when the parent reduced via LMR, so the gate
+            // simply does not fire there -- no evidence rather than bad evidence.
+            if !opponent_worsening && td.stack[ply - 1].fds_reduction > reduction + 590 {
                 reduction += p::fds_prev_reduction();
             }
 
@@ -2395,17 +2434,41 @@ fn search<NODE: NodeType>(
             // here is +7.5.
             reduction += ((td.nodes() + td.id as u64 * 26) % 128) as i32 - 56;
 
-            let reduced_depth = new_depth - (reduction >= p::fds_reduction_t1()) as i32 - (reduction >= p::fds_reduction_t2()) as i32;
+            let plies_reduced =
+                (reduction >= p::fds_reduction_t1()) as i32 + (reduction >= p::fds_reduction_t2()) as i32;
+            let reduced_depth = new_depth - plies_reduced;
 
-            // Published for the child, exactly as the LMR branch does. Without
-            // this the FDS half of the tree left `stack[ply].reduction` at the
-            // 0 it was reset to, so all three consumers -- the hindsight
-            // depth adjustments, `lmr_prev_reduction` and `fds_prev_reduction`
-            // -- silently saw "parent was not reduced" for every FDS child and
-            // never fired there.
-            td.stack[ply].reduction = reduction;
+            // Two fields, because the raw FDS counter and the LMR `reduction`
+            // are not the same quantity.
+            //
+            // Publishing the raw counter into `stack[ply].reduction` -- the
+            // arrangement this replaces -- broke both of that field's consumers:
+            //
+            //  * Hindsight. FDS only reduces at all once `reduction` clears
+            //    `fds_reduction_t1` (2621), but `hindsight_reduction` is 2249.
+            //    Every FDS child whose reduction landed in [2249, 2621) -- a
+            //    commonly-hit band -- was told "you were heavily reduced" when
+            //    zero plies had been taken off, and answered with a full-ply
+            //    compensating extension. Pure node inflation, on the branch that
+            //    covers most of the tree.
+            //  * `lmr_prev_reduction`, which compares the parent's value against
+            //    an LMR-scale reduction. The two scales differ by 700-1300.
+            //
+            // So `reduction` now carries what FDS actually did, converted into
+            // LMR units (1024 = one ply), which is the scale both consumers were
+            // tuned on and is honest at the [2249, 2621) band: zero plies
+            // reduced publishes zero. `fds_reduction` carries the raw counter
+            // for `fds_prev_reduction`, the one consumer that wants FDS units.
+            //
+            // Note `hindsight_reduction` (2249) still wants a re-tune: it was
+            // set while this field meant something else on the FDS half of the
+            // tree, and 2249 now sits between the 2-ply and 3-ply steps of a
+            // signal that only ever takes the values 0, 1024 and 2048 from here.
+            td.stack[ply].reduction = 1024 * plies_reduced;
+            td.stack[ply].fds_reduction = reduction;
             score = -search::<NonPV>(td, -alpha - 1, -alpha, reduced_depth, !cut_node, ply + 1);
             td.stack[ply].reduction = 0;
+            td.stack[ply].fds_reduction = 0;
             current_search_count += 1;
         }
 
@@ -2664,12 +2727,29 @@ fn qsearch<NODE: NodeType>(td: &mut ThreadData, mut alpha: i32, beta: i32, ply: 
 
     // Stand Pat
     if best_score >= beta {
-        // The lerp-toward-beta smoothing that used to sit here (eaa2a7f) was
-        // removed with no comment, then restored two commits later (45fe52b)
-        // with no comment either -- neither change has ever had a stated
-        // reason on either side. Removed again at explicit request. This is
-        // not a measured decision in either direction; if it matters, it
-        // needs its own isolated SPRT rather than another silent flip.
+        // Damped toward beta, as upstream has it, and as the sibling exit at
+        // the bottom of this function still did.
+        //
+        // This smoothing was removed (eaa2a7f), restored (45fe52b) and removed
+        // again, none of the three with a stated reason and none measured. It
+        // is restored here because the two qsearch fail-high exits must agree:
+        // leaving it on one and not the other meant the score a stand-pat
+        // cutoff produced and the score a searched cutoff produced were on
+        // different scales, from the same function, for the same bound.
+        //
+        // The consequence is not local. A stand-pat fail-high is an enormous
+        // share of all nodes, this score is written to the TT as a Lower bound
+        // just below, and it is read back as `tt_score` by RFP, razoring and the
+        // singular margin -- all of which compare it against a margin sized for
+        // a damped score. Returning raw eval inflates every one of those
+        // comparisons by however far eval overshot beta.
+        //
+        // Guarded on non-decisive scores at both ends, like the sibling: a mate
+        // or TB score must propagate exactly or its distance-to-mate is lost.
+        if !is_decisive(best_score) && !is_decisive(beta) {
+            best_score = lerp(best_score, beta, 0.8256);
+        }
+
         if entry.is_none() {
             td.shared.tt.write(hash, TtDepth::SOME, raw_eval, best_score, Bound::Lower, Move::NULL, ply, tt_pv, false);
         }
@@ -3008,7 +3088,7 @@ fn update_best_move_histories<NODE: NodeType>(
         );
     } else {
         td.quiet_history.update(td.board.all_threats(), stm, best_move, quiet_bonus);
-        td.corrhist().pawn_history.update(
+        td.pawn_history.update(
             td.board.pawn_key(),
             td.board.moved_piece(best_move),
             best_move.to(),
@@ -3035,7 +3115,7 @@ fn update_best_move_histories<NODE: NodeType>(
             if (ply as usize) < LowPlyHistory::MAX_LOW_PLY {
                 td.low_ply_history.update(ply as usize, mv, -quiet_malus * scale / 1024);
             }
-            td.corrhist().pawn_history.update(
+            td.pawn_history.update(
                 td.board.pawn_key(),
                 td.board.moved_piece(mv),
                 mv.to(),
@@ -3359,22 +3439,23 @@ fn soft_stop_vote(td: &mut ThreadData, thread_count: usize, voted: &mut bool, mu
 
             let votes = td.shared.soft_stop_votes.fetch_add(1, Ordering::AcqRel) + 1;
 
-            // Capped so at least one thread may lag without blocking the stop.
+            // A plain 65% majority, as upstream has it.
             //
-            // `(n * 65).div_ceil(100)` alone returns 2 at n = 2 -- unanimity, not
-            // a 65% majority. A vote is only cast at an iteration boundary, so a
-            // single helper still mid-iteration held the whole search open and the
-            // move ran to the HARD bound instead of the soft one. At Threads = 2,
-            // the most common multi-threaded setting, that means spending the
-            // emergency allowance on every move.
+            // A `.min(thread_count - 1)` cap used to sit here, on the argument
+            // that `(n * 65).div_ceil(100)` returns 2 at n = 2 -- unanimity
+            // rather than a majority -- so one lagging helper could hold the
+            // search open to the hard bound. But the cap only ever binds at
+            // exactly n = 2, and there it does not soften the rule, it inverts
+            // it: `min(2, 1)` is 1, so a SINGLE thread hitting its soft limit
+            // ends the search for both.
             //
-            // The cap keeps the intended proportion everywhere it is already
-            // achievable (3 of 4, 6 of 8) and only binds at n = 2, where 65% has
-            // no sensible integer reading. `max(1)` keeps the single-threaded case
-            // at 1 rather than 0.
-            let majority = (thread_count * 65)
-                .div_ceil(100)
-                .min(thread_count.saturating_sub(1).max(1));
+            // That is a different time manager, not a rounding fix. It stops
+            // earlier than every other thread count -- and n = 2 is a common
+            // SPRT configuration, so it silently measures a policy the engine
+            // does not ship at 8. If unanimity at n = 2 is genuinely too strict,
+            // that is a case for changing the ratio at every n, with a test,
+            // rather than special-casing the one value the test runs at.
+            let majority = (thread_count * 65).div_ceil(100).max(1);
             if votes >= majority {
                 td.shared.status.set(Status::STOPPED);
             }

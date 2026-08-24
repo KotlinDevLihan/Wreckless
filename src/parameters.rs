@@ -208,10 +208,22 @@ define! {
     // The *magnitude* is mine and unmeasured: sized so a 100-unit disagreement
     // moves the margin by ~20, comparable to `rfp_base` itself. Their divisors
     // (/262144) are on a different scale from this file's /1024, so the value
-    // could not be transferred -- only the idea. No structural bug found here
-    // (this is the only RFP consumer of `complexity`), unlike `razor_cutoff`;
-    // left non-zero rather than zeroed pending measurement.
-    i32 rfp_complexity: 200;
+    // could not be transferred -- only the idea.
+    //
+    // ZEROED. The magnitude was wrong by roughly the size of the base it
+    // modifies. `complexity` is capped at `complexity_cap` (1024), so this term
+    // reaches +200 -- against a whole upstream RFP margin of ~211 at depth 4
+    // (1140*16/128 + 22*4 - 19). One unmeasured term could more than double the
+    // margin, and `complexity = |eval - tt_score|` is non-zero at most TT-hit
+    // nodes, so it was not a rare case either.
+    //
+    // This is the flat-term-on-a-scaled-base failure `threat_scaled` in
+    // search.rs was written about, running the other way: the margin grows with
+    // depth and this addend does not, so it suppressed RFP hardest at shallow
+    // depth -- where most of the nodes are. Reintroduce scaled by depth (as the
+    // `rfp_tt_miss` term above is) and SPRT it, rather than restoring the flat
+    // form at a smaller constant.
+    i32 rfp_complexity: 0;
 
     // Null Move Pruning
     i32 nmp_depth: 9;
@@ -441,10 +453,13 @@ define! {
     // the line that decides which captures reach the verified path at all, and so
     // which ones `good_noisy_cap` above can rescue.
     //
-    // `rfp_tt_hist_gate` is the history floor below which a quiet TT move no
-    // longer licenses an RFP cutoff; `asp_widen_num` is the aspiration widening
-    // rate (`delta += n * delta / 128`), which sets how fast a failing window
-    // gives up and how many re-searches each iteration costs.
+    // `asp_widen_num` is the aspiration widening rate
+    // (`delta += n * delta / 128`), which sets how fast a failing window gives
+    // up and how many re-searches each iteration costs.
+    //
+    // `rfp_tt_hist_gate` was listed here too, as the history floor below which a
+    // quiet TT move no longer licensed an RFP cutoff. That condition has been
+    // removed from RFP (see search.rs) and the parameter with it.
     // HALVED from 1024 to 512.
     //
     // 1024/1024 is a FULL PLY of extra reduction whenever `is_win(beta)`. Note
@@ -467,7 +482,6 @@ define! {
     i32 lmr_win_beta: 1024;
     i32 see_split_div: 47;
     i32 see_split_base: 116;
-    i32 rfp_tt_hist_gate: -2048;
     i32 asp_widen_num: 26;
     i32 bnfp_recapture: 96;
     i32 qs_noisy_bonus: 100;
@@ -1048,9 +1062,14 @@ define! {
     // to correction history: this term *decreases* reduction, and the term one
     // line above increases it, so an oversized value here would silently cancel
     // the `alpha_raise` term rather than act independently. Unmeasured, like
-    // its RFP twin -- no structural bug found, left non-zero pending
-    // measurement rather than zeroed.
-    i32 lmr_complexity: 500;
+    // its RFP twin.
+    //
+    // ZEROED alongside that twin, and for the same shape reason. At the
+    // `complexity_cap` of 1024 this is 500/1024 -- very nearly half a ply of
+    // reduction removed, flat, from an unmeasured signal that is live at most
+    // TT-hit nodes. Restore it scaled (by depth, or by the reduction it is
+    // modifying) and measure it on its own.
+    i32 lmr_complexity: 0;
     // Ceiling on |eval - tt_score| before it is scaled by the two complexity
     // terms. `eval` is clamped to +/-(TB_WIN_IN_MAX - 1) and a non-decisive
     // `tt_score` can sit just below TB_WIN_IN_MAX, so the raw difference can

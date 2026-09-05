@@ -995,6 +995,22 @@ define! {
     i32 lmr_noisy_hist: 130;
     i32 lmr_pv_base: 519;
     i32 lmr_pv_delta: 437;
+    // Non-PV counterpart of the two above -- upstream applies one or the
+    // other, never both (`if PV {..} else {..}`). Ported back from upstream
+    // Reckless's `search.rs` alongside the `laterality` field in stack.rs,
+    // which this fork had dropped with no field, no consumer, and no note in
+    // the README's "Removed, and why" section, unlike every deliberate
+    // removal this file documents -- the signature of an accidental drop
+    // during a rework, not a tested decision. Values (96, 32) are upstream's
+    // own current, shipped constants, not a guess: this is a mechanism
+    // restoration, not a new tune, and it should be measured as one SPRT
+    // (rework in, nothing else) rather than assumed correct because it
+    // matches upstream -- this engine's LMR base/PV/cutnode terms have all
+    // drifted from upstream's own values elsewhere in this file, so parity
+    // with upstream is not by itself evidence of correctness here, only the
+    // best starting point for a mechanism this fork never had.
+    i32 lmr_nonpv_base: 96;
+    i32 lmr_nonpv_laterality: 32;
     i32 lmr_ttpv: 333;
     i32 lmr_ttpv_score: 611;
     i32 lmr_ttpv_depth: 685;

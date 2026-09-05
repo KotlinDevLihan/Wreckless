@@ -401,18 +401,27 @@ define! {
     // PRE-EXISTING in 1.0.0 -- this is not part of the revert-to-1.0.0 control
     // arm, and testing it alongside that arm costs attribution.
     //
-    // APPLIED: 414 -> 97, per the derivation immediately above. This was the
-    // one case in this file where the analysis reached a specific number
-    // ("97, matching its own bonus twin") and the constant was left at the
-    // un-derived value anyway, with no confound flagged against changing it
-    // alone (contrast `qs_see_div`, `lmr_complexity`, `nmp_material`, all of
-    // which have an explicit "don't touch without X" attached). cont_bonus
-    // and cont_malus share one consumer and one gravity mechanism differing
-    // only in sign, so there is no structural reason for their saturation
-    // depths to differ by 5x, and the isolated change is exactly what SPRT
-    // needs: one variable moved, nothing else touched. Still wants that SPRT
-    // like anything else in this file -- treat as PENDING, not verified.
-    i32 cont_malus_slope: 97;
+    // CORRECTED BACK TO 414. A previous edit here changed this to 97 on the
+    // strength of the "transposed digit" hypothesis in the paragraph above --
+    // without checking it against anything. Diffed against upstream Reckless
+    // (`codedeliveryservice/Reckless`, current `src/search.rs`,
+    // `update_best_move_histories`): upstream's own shipped, currently-live
+    // line is `let cont_malus = (414 * depth).min(949) - 49 - 17 *
+    // quiet_moves.len() as i32;`, next to `let cont_bonus = (97 *
+    // depth).min(1098) - 74 - 48 * cut_node as i32;` -- i.e. upstream tunes
+    // bonus and malus to genuinely different saturation depths (11.3 vs 2.3)
+    // and 414 is not a typo of 97, it is the value SPSA actually converged
+    // to on real games. The "every sibling saturates 6-11 plies deep, so
+    // this one should too" argument is a symmetry assumption, not a
+    // constraint the mechanism obeys -- a malus that bites fast (fully
+    // active by depth 2-3) versus a bonus that keeps growing through depth
+    // 11 is a defensible asymmetry (punish confirmed-bad continuations
+    // quickly, reward good ones on a longer curve), and upstream's own
+    // tuning run picked exactly that shape. This file's every other
+    // "restored to upstream" note exists for the same reason: prefer the
+    // value that was actually measured over a plausible-looking guess. This
+    // one should be no different, and hadn't been checked before.
+    i32 cont_malus_slope: 414;
     i32 cont_malus_cap: 949;
 
     // ---- Move-ordering weights (movepick.rs) ----

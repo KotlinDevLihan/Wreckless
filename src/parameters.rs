@@ -400,7 +400,19 @@ define! {
     //
     // PRE-EXISTING in 1.0.0 -- this is not part of the revert-to-1.0.0 control
     // arm, and testing it alongside that arm costs attribution.
-    i32 cont_malus_slope: 414;
+    //
+    // APPLIED: 414 -> 97, per the derivation immediately above. This was the
+    // one case in this file where the analysis reached a specific number
+    // ("97, matching its own bonus twin") and the constant was left at the
+    // un-derived value anyway, with no confound flagged against changing it
+    // alone (contrast `qs_see_div`, `lmr_complexity`, `nmp_material`, all of
+    // which have an explicit "don't touch without X" attached). cont_bonus
+    // and cont_malus share one consumer and one gravity mechanism differing
+    // only in sign, so there is no structural reason for their saturation
+    // depths to differ by 5x, and the isolated change is exactly what SPRT
+    // needs: one variable moved, nothing else touched. Still wants that SPRT
+    // like anything else in this file -- treat as PENDING, not verified.
+    i32 cont_malus_slope: 97;
     i32 cont_malus_cap: 949;
 
     // ---- Move-ordering weights (movepick.rs) ----

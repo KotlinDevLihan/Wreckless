@@ -23,6 +23,24 @@ use crate::{
 #[allow(unused_imports)]
 use crate::misc::{dbg_hit, dbg_stats};
 
+/// Records whether `condition` held, under the `instrument` feature only, and
+/// returns `condition` unchanged either way. Used to measure how often two
+/// documented-as-confounded reduction terms (`lmr_prev_reduction` and
+/// `lmr_cutnode_null`) actually fire, without adding an atomic increment to
+/// the per-node hot path of the default build -- the one that SPRT actually
+/// runs. See the `instrument` feature in Cargo.toml.
+#[cfg(feature = "instrument")]
+#[inline(always)]
+fn instrumented(condition: bool, slot: usize) -> bool {
+    dbg_hit(condition, slot)
+}
+
+#[cfg(not(feature = "instrument"))]
+#[inline(always)]
+fn instrumented(condition: bool, _slot: usize) -> bool {
+    condition
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Report {
     None,
@@ -2274,7 +2292,7 @@ fn search<NODE: NodeType>(
                 // Instrumented (slot 1) -- see the `lmr_prev_reduction` note
                 // at slot 0 above; these two terms are documented as
                 // confounded in any joint SPRT.
-                reduction += p::lmr_cutnode_null() * dbg_hit(tt_move.is_null(), 1) as i32;
+                reduction += p::lmr_cutnode_null() * instrumented(tt_move.is_null(), 1) as i32;
                 // Compensation for IIR having already penalised the same
                 // "no TT move" signal, applied only where IIR actually fired.
                 // It needs depth >= 6 and a non-PV-line node; this bonus fires
@@ -2345,7 +2363,7 @@ fn search<NODE: NodeType>(
             // the joint test result is mostly attributable to the other by
             // construction, whatever the two coefficients are individually
             // set to.
-            if dbg_hit(!NODE::PV && !opponent_worsening && td.stack[ply - 1].reduction > reduction + 414, 0) {
+            if instrumented(!NODE::PV && !opponent_worsening && td.stack[ply - 1].reduction > reduction + 414, 0) {
                 reduction += p::lmr_prev_reduction();
             }
 

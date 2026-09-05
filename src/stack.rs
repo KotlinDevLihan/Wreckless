@@ -77,6 +77,25 @@ pub struct StackEntry {
     /// Berserk both carry an equivalent counter (`ss->doubleExtensions`,
     /// `ss->de`) and gate their upper extension tiers on it.
     pub double_extensions: i32,
+    /// Accumulated "how many wide, late-move branches has this line taken"
+    /// counter, ported from upstream Reckless (`stack.rs`/`search.rs`
+    /// there), which this fork had silently dropped -- no field, no
+    /// consumer, no note in the README's "Removed, and why" section, unlike
+    /// every other deliberate removal this codebase documents. Restored
+    /// rather than left missing.
+    ///
+    /// Propagated from the parent and bumped in `make_move` by
+    /// `(move_count.ilog2() - 1).max(0)`, so it only grows once move_count
+    /// passes 4 and grows slowly (one unit per doubling) after that; reset to
+    /// 0 across a null move, matching upstream, since a null move restarts
+    /// the "how many alternatives did we already reject to get here" count.
+    /// Read by the non-PV branch of the LMR reduction formula (see
+    /// `lmr_nonpv_base`/`lmr_nonpv_laterality` in parameters.rs): a line that
+    /// is cumulatively "later" -- has already passed through many
+    /// higher-move-count nodes to get here -- gets reduced somewhat harder,
+    /// on the same logic a single node's own move_count already reduces
+    /// harder for.
+    pub laterality: i32,
     pub conthist: *mut [[i16; 64]; 13],
     pub contcorrhist: *mut [[i16; 64]; 13],
 }

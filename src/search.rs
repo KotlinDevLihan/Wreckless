@@ -2315,8 +2315,9 @@ fn search<NODE: NodeType>(
 
             if is_valid(tt_move_score) && is_valid(singular_score) {
                 let margin = tt_move_score - singular_score;
+                // /1024, not /128 -- see `lmr_singular` in parameters.rs.
                 reduction +=
-                    (p::lmr_singular() * (margin - p::lmr_singular_margin()) / 128).clamp(0, p::lmr_singular_max());
+                    (p::lmr_singular() * (margin - p::lmr_singular_margin()) / 1024).clamp(0, p::lmr_singular_max());
             }
 
             // Extra reduction when the parent was heavily reduced, gated on the
@@ -2447,8 +2448,9 @@ fn search<NODE: NodeType>(
 
             if is_valid(tt_move_score) && is_valid(singular_score) {
                 let margin = tt_move_score - singular_score;
+                // /1024, not /128 -- see `fds_singular` in parameters.rs.
                 reduction +=
-                    (p::fds_singular() * (margin - p::fds_singular_margin()) / 128).clamp(0, p::fds_singular_max());
+                    (p::fds_singular() * (margin - p::fds_singular_margin()) / 1024).clamp(0, p::fds_singular_max());
             }
 
             if mv == tt_move {

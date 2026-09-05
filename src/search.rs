@@ -2271,7 +2271,10 @@ fn search<NODE: NodeType>(
                 reduction -= p::lmr_ttpv_depth() * (is_valid(tt_score) && tt_depth >= depth) as i32;
             } else if cut_node {
                 reduction += p::lmr_cutnode();
-                reduction += p::lmr_cutnode_null() * tt_move.is_null() as i32;
+                // Instrumented (slot 1) -- see the `lmr_prev_reduction` note
+                // at slot 0 above; these two terms are documented as
+                // confounded in any joint SPRT.
+                reduction += p::lmr_cutnode_null() * dbg_hit(tt_move.is_null(), 1) as i32;
                 // Compensation for IIR having already penalised the same
                 // "no TT move" signal, applied only where IIR actually fired.
                 // It needs depth >= 6 and a non-PV-line node; this bonus fires
@@ -2331,7 +2334,17 @@ fn search<NODE: NodeType>(
             // Untested. Note this and the `lmr_cutnode_null` correction both
             // move total reduction, so one SPRT covering both cannot attribute
             // a result to either.
-            if !NODE::PV && !opponent_worsening && td.stack[ply - 1].reduction > reduction + 414 {
+            // Instrumented (slot 0), alongside `lmr_cutnode_null` at slot 1
+            // below: the two are documented as moving total reduction
+            // together, so a single SPRT covering both cannot say which one
+            // (or whether both) actually gained. These hit-rate counters let
+            // `bench`/self-play runs show how often each condition actually
+            // fires independently of the other, which is a precondition for
+            // reading a joint SPRT result correctly -- if one rarely fires,
+            // the joint test result is mostly attributable to the other by
+            // construction, whatever the two coefficients are individually
+            // set to.
+            if dbg_hit(!NODE::PV && !opponent_worsening && td.stack[ply - 1].reduction > reduction + 414, 0) {
                 reduction += p::lmr_prev_reduction();
             }
 

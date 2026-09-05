@@ -1406,6 +1406,14 @@ fn search<NODE: NodeType>(
                 continue;
             }
 
+            // Inherited, not incremented (matches upstream's `make_move(td, ply,
+            // mv, 0)` here): this is a ProbCut draft, not a move from the main
+            // loop's move_count sequence, so there is no move-count signal to
+            // fold in. Needed because the verification search below can reach
+            // ply+1's own non-PV LMR branch, which reads this field -- without
+            // setting it here that read would see whatever an unrelated earlier
+            // node left in this ply's stack slot.
+            td.stack[ply].laterality = if ply > 0 { td.stack[ply - 1].laterality } else { 0 };
             make_move(td, ply, mv);
 
             let mut score = -qsearch::<NonPV>(td, -probcut_beta, -probcut_beta + 1, ply + 1);

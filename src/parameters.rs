@@ -1080,6 +1080,22 @@ define! {
     // the tree substantially. The SPSA range floor is 4 for this reason;
     // `set_parameter` enforces nothing, so a typed 0 would still land.
     i32 max_double_extensions: 8;
+    // Flat offset on the double-extension margin, matching the constant term
+    // Stockfish's own formula has (`-2 + 204 * PvNode - ...`) and this one has
+    // never carried. Not a magnitude transplant like the reverted 152/188 --
+    // see the comment at the double/triple margin computation in search.rs for
+    // why that failed. This is the one piece of that formula's *shape* that is
+    // still simply missing here: a small additive term independent of PV/TT/
+    // history, applied before the existing 195/48/-16/-16/-38 terms.
+    //
+    // Defaulted to 0 -- Stockfish's own -2 is on that engine's scale, not
+    // necessarily this one, and this file's policy is to introduce new knobs
+    // inert and let SPRT/SPSA place them rather than guess a transferred
+    // magnitude. Sweep both directions; the triple-margin twin below already
+    // carries a nonzero stand-in (`+ 36`) for the analogous `+70` Stockfish
+    // has, so a nonzero value here would not be inventing a new mechanism, only
+    // completing one already half-applied.
+    i32 de_double_base: 0;
     // Reduce less when the static eval and the TT's search score disagree --
     // the same `complexity` signal as `rfp_complexity`, applied to reductions
     // rather than to a pruning margin. A disputed position is where a reduced
@@ -1118,7 +1134,16 @@ define! {
     i32 lmr_check: 955;
     i32 lmr_cutoff: 1151;
     i32 lmr_cutoff_node: 400;
-    i32 lmr_singular: 496;
+    // Divides by 1024 at the call site, matching every other coefficient that
+    // feeds `reduction` in this function (`lmr_corr`, `lmr_complexity`,
+    // `lmr_alpha_raise`, ...). It previously divided by 128 -- the one term in
+    // this stack without a stated reason for its scale, unlike `corr_weight_div`
+    // and friends, which this file otherwise insists on justifying whenever two
+    // constants must move together. Rescaled by the matching 8x here (248 * 8 =
+    // 1984 -> 496 * 8 = 3968) so the shipped value is numerically the same
+    // reduction as before, just expressed on the shared /1024 scale; this is a
+    // unit change, not a retune.
+    i32 lmr_singular: 3968;
     i32 lmr_singular_margin: 185;
     i32 lmr_singular_max: 2021;
     i32 lmr_prev_reduction: 136;
@@ -1159,7 +1184,9 @@ define! {
     i32 fds_iir_comp: 1024;
     i32 fds_cutoff: 1394;
     i32 fds_cutoff_node: 258;
-    i32 fds_singular: 351;
+    // Same /128 -> /1024 unit fix as `lmr_singular`'s twin, same 8x rescale
+    // (351 * 8 = 2808) to keep the shipped value numerically unchanged.
+    i32 fds_singular: 2808;
     i32 fds_singular_margin: 188;
     i32 fds_singular_max: 2167;
     i32 fds_ttmove: 3002;

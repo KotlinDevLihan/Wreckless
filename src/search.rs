@@ -1649,7 +1649,12 @@ fn search<NODE: NodeType>(
             // upstream's `+81 * ttPv`. Two coefficients lifted out of a
             // differently shaped formula are not the same formula, and the
             // surrounding constants were tuned against 16/19.
-            let double_margin = (195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
+            //
+            // `de_double_base` completes the one piece of that shape genuinely
+            // missing rather than mismatched -- see its definition in
+            // parameters.rs. Shipped inert (0); this is a knob for SPSA/SPRT,
+            // not an assertion that a nonzero value gains anything.
+            let double_margin = (p::de_double_base() + 195 * NODE::PV as i32 + 48 * (NODE::PV && !tt_was_pv) as i32
                 - 16 * tt_move.is_quiet() as i32
                 - 16 * correction_value.abs() / 128
                 - 1175 * td.tt_move_history / 114178

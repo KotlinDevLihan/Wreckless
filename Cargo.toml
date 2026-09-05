@@ -1,6 +1,6 @@
 [package]
 name = "wreckless"
-version = "2.0.1"
+version = "2.0.2"
 edition = "2024"
 build = "build/build.rs"
 publish = false
@@ -12,6 +12,15 @@ crate-type = ["cdylib", "rlib"]
 default = ["syzygy"]
 syzygy = []
 spsa = []
+# Opt-in hit-rate counters for `lmr_prev_reduction` / `lmr_cutnode_null` (see
+# search.rs). NOT part of default: it exists to answer "how often does each
+# condition fire" for interpreting a joint SPRT of the two, not to ship in the
+# binary that SPRT actually runs -- an unconditional atomic increment on a
+# per-node branch is exactly the kind of overhead this file elsewhere goes out
+# of its way to avoid (see check_time's node-mask gating). Build with
+# `--features instrument`, run `bench` or a short self-play, read the counts
+# via `dbg_print`, then go back to testing the plain default build.
+instrument = []
 
 [profile.dev]
 opt-level = 3

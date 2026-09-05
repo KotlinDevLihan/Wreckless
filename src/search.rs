@@ -1200,6 +1200,7 @@ fn search<NODE: NodeType>(
         td.stack[ply].contcorrhist = td.stack.sentinel().contcorrhist;
         td.stack[ply].piece = Piece::None;
         td.stack[ply].mv = Move::NULL;
+        td.stack[ply].laterality = 0;
         td.stack[ply + 1].follow_pv = false;
 
         td.board.make_null_move();
@@ -1808,6 +1809,12 @@ fn search<NODE: NodeType>(
 
         move_count += 1;
         td.stack[ply].move_count = move_count;
+        // See `laterality` in stack.rs. Ported from upstream's `make_move`,
+        // computed here instead since this fork's `make_move` doesn't take
+        // `move_count` as a parameter -- `move_count` is already known and
+        // assigned to the stack the line above, so there is nothing to pass.
+        td.stack[ply].laterality =
+            (if ply > 0 { td.stack[ply - 1].laterality } else { 0 }) + (move_count.ilog2() as i32 - 1).max(0);
 
         let is_quiet = mv.is_quiet();
 
@@ -2236,6 +2243,13 @@ fn search<NODE: NodeType>(
                 // it just stops the one arrangement that would divide by zero
                 // from being a crash instead of a no-op.
                 reduction -= p::lmr_pv_base() + p::lmr_pv_delta() * (beta - alpha) / td.root_delta.max(1);
+            } else {
+                // Restored from upstream (see `laterality` in stack.rs): a line
+                // that has already passed through many wide, late-move nodes to
+                // reach this one is reduced somewhat harder here, non-PV only --
+                // a PV line by definition hasn't taken that kind of branch, so
+                // `laterality` is always 0 there and this term would be a no-op.
+                reduction -= p::lmr_nonpv_base() - p::lmr_nonpv_laterality() * td.stack[ply].laterality;
             }
 
             if tt_pv {

@@ -115,6 +115,7 @@ impl Default for StackEntry {
             fds_reduction: 0,
             follow_pv: false,
             double_extensions: 0,
+            laterality: 0,
             conthist: std::ptr::null_mut(),
             contcorrhist: std::ptr::null_mut(),
         }

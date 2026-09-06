@@ -41,33 +41,33 @@ use crate::{
 };
 
 /// Per-lag weights for the continuation-history component of the quiet score,
-/// for lags 1 through 6 in order.
+/// for lags 1, 2, 4 and 6 -- upstream Reckless's set, and upstream's values
+/// unchanged.
 ///
-/// **Their total is load-bearing.** `good_quiet_threshold` splits quiets into
-/// [`Stage::Quiet`] and [`Stage::BadQuiet`] by comparing against this score, so
-/// it is calibrated against the resulting distribution. Redistributing weight
-/// between lags is safe; changing the total silently rescales the split, which
-/// is the same class of defect that a widened `history` sum caused in `search()`
-/// -- there it quietly rescaled seven separately tuned pruning coefficients at
-/// once.
+/// REVERTED from a six-lag set (1, 2, 3, 4, 5, 6) that added lags 3 and 5 on
+/// top of these. That version was magnitude-safe -- its six weights were
+/// rebalanced to the same total as these four, so `good_quiet_threshold`'s
+/// split was not rescaled -- but magnitude was never the problem.
 ///
-/// Upstream uses four lags (1614 + 1066 + 1086 + 1051); this six-lag set must
-/// come to the same total, and the assertion below makes that a build error
-/// rather than a comment nobody rechecks.
-const CONTHIST_WEIGHTS: [i32; 6] = [1479, 977, 277, 995, 126, 963];
-
-const CONTHIST_WEIGHT_TOTAL: i32 = 1614 + 1066 + 1086 + 1051;
-
-const _: () = assert!(
-    CONTHIST_WEIGHTS[0]
-        + CONTHIST_WEIGHTS[1]
-        + CONTHIST_WEIGHTS[2]
-        + CONTHIST_WEIGHTS[3]
-        + CONTHIST_WEIGHTS[4]
-        + CONTHIST_WEIGHTS[5]
-        == CONTHIST_WEIGHT_TOTAL,
-    "continuation-history quiet weights must preserve upstream's total, or good_quiet_threshold is rescaled"
-);
+/// This is the highest-traffic per-move loop in the engine: it runs for every
+/// quiet move at every node that generates quiets, and each `get` is a random
+/// read into a multi-megabyte continuation-history table. `search()`'s
+/// pruning-input `history` sum already went through exactly this mistake and
+/// was reverted from six lags back to upstream's two for the same reason,
+/// documented at that site: reading four extra lags per move tripled the
+/// random memory traffic on this loop, and the cost is invisible single-
+/// threaded but severe under concurrency -- 16.4 ply reached at concurrency 1
+/// against 14.5 at concurrency 8, while the unmodified baseline held 14.5 in
+/// both. That fix never reached this function, which is a separate, larger
+/// consumer of the same table on the same loop: `search()`'s pruning sum reads
+/// 2 lags, this reads 6, and this one runs on every generated quiet rather
+/// than only the ones pruning actually inspects.
+///
+/// Back to 2 lookups saved per quiet move (4 instead of 6), and to upstream's
+/// exact values -- not a rebalanced four-of-six -- since the extra lags this
+/// was carrying were never independently measured to earn their keep against
+/// this cost.
+const CONTHIST_WEIGHTS: [i32; 4] = [1614, 1066, 1086, 1051];
 
 /// Which pool the most recently returned move came from.
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Debug)]
@@ -323,14 +323,17 @@ impl MovePicker {
         let pawn_key = td.board.pawn_key();
         let pawn_hist = &td.pawn_history;
 
-        // The six continuation-history subtable pointers depend only on `ply`,
-        // never on the move being scored, but these used to go through a
-        // per-lag helper that re-read `stack[ply - n].conthist` on every call:
-        // six strided loads into a large array per move, where six for the
-        // whole list will do. The raw-pointer read stops the optimiser from
-        // hoisting them itself.
-        let conthist: [*mut PieceToHistory<i16>; 6] =
-            std::array::from_fn(|i| td.stack[ply - 1 - i as isize].conthist);
+        // The four continuation-history subtable pointers depend only on
+        // `ply`, never on the move being scored, but these used to go through
+        // a per-lag helper that re-read `stack[ply - n].conthist` on every
+        // call: four strided loads into a large array per move, where four for
+        // the whole list will do. The raw-pointer read stops the optimiser
+        // from hoisting them itself.
+        //
+        // Lags 1, 2, 4 and 6 -- matching CONTHIST_WEIGHTS -- not a contiguous
+        // 1..=4 range.
+        const LAGS: [isize; 4] = [1, 2, 4, 6];
+        let conthist: [*mut PieceToHistory<i16>; 4] = std::array::from_fn(|i| td.stack[ply - LAGS[i]].conthist);
 
         // The low-ply term's bound test and its `1024 * (1 + 2 * ply)` divisor are
         // both loop-invariant; only the table lookup varies per move. Same
@@ -366,13 +369,11 @@ impl MovePicker {
             entry.score = p::mp_quiet_hist_w() * td.quiet_history.get(threats, side, mv) / 1024
                 + p::mp_pawn_hist_w() * pawn_hist.get(pawn_key, moved, to) / 1024
                 + low_ply_term
-                // All six continuation lags; see CONTHIST_WEIGHTS.
+                // Lags 1, 2, 4 and 6 only; see CONTHIST_WEIGHTS.
                 + CONTHIST_WEIGHTS[0] * td.continuation_history.get(conthist[0], moved, to) / 1024
                 + CONTHIST_WEIGHTS[1] * td.continuation_history.get(conthist[1], moved, to) / 1024
                 + CONTHIST_WEIGHTS[2] * td.continuation_history.get(conthist[2], moved, to) / 1024
                 + CONTHIST_WEIGHTS[3] * td.continuation_history.get(conthist[3], moved, to) / 1024
-                + CONTHIST_WEIGHTS[4] * td.continuation_history.get(conthist[4], moved, to) / 1024
-                + CONTHIST_WEIGHTS[5] * td.continuation_history.get(conthist[5], moved, to) / 1024
                 // Positional shaping: reward stepping a threatened piece to
                 // safety, giving check, or attacking something; penalise moving
                 // into a threat or breaking up the pawns shielding our king.

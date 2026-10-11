@@ -414,25 +414,26 @@ const fn score_from_tt(score: i32, ply: isize, halfmove_clock: u8) -> i32 {
     }
 
     if is_win(score) {
-        let pos_score = score - ply as i32;
-        if score >= Score::MATE_IN_MAX && Score::MATE - pos_score > 100 - halfmove_clock as i32 {
+        // Distance to mate/TB is measured from THIS node (the stored score is
+        // node-relative), not from the root: using the root-relative value
+        // over-counted by `ply` and discarded valid deep mates.
+        if score >= Score::MATE_IN_MAX && Score::MATE - score > 100 - halfmove_clock as i32 {
             return Score::TB_WIN_IN_MAX - 1;
         }
-        if Score::TB_WIN - pos_score > 100 - halfmove_clock as i32 {
+        if Score::TB_WIN - score > 100 - halfmove_clock as i32 {
             return Score::TB_WIN_IN_MAX - 1;
         }
-        return pos_score;
+        return score - ply as i32;
     }
 
     if is_loss(score) {
-        let pos_score = score + ply as i32;
-        if score <= -Score::MATE_IN_MAX && Score::MATE + pos_score > 100 - halfmove_clock as i32 {
+        if score <= -Score::MATE_IN_MAX && Score::MATE + score > 100 - halfmove_clock as i32 {
             return -Score::TB_WIN_IN_MAX + 1;
         }
-        if Score::TB_WIN + pos_score > 100 - halfmove_clock as i32 {
+        if Score::TB_WIN + score > 100 - halfmove_clock as i32 {
             return -Score::TB_WIN_IN_MAX + 1;
         }
-        return pos_score;
+        return score + ply as i32;
     }
 
     score

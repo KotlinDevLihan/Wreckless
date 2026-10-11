@@ -1304,14 +1304,12 @@ define! {
     // shift. The change bought no speed and silently scaled every
     // continuation-history bonus up by ~6.9%.
     i32 conthist_div: 70000;
-    // Per-lag weights, previously hardcoded consts with no SPSA exposure at
-    // all. Defaults unchanged (lags 1/2/4/6 at the original 700, lags 3/5 at
-    // Stockfish's relative ratio) -- this doesn't guess new values, it just
-    // lets SPSA actually explore around them instead of leaving them frozen
-    // forever as unverified literals.
+    // Per-lag write weights for the four lags anything actually reads (1, 2, 4
+    // and 6 -- see `CONTHIST_WEIGHTS` in movepick.rs). Defaults unchanged at
+    // the original 700. Lags 3 and 5 are gone: their `conthist_lag3` (195) and
+    // `conthist_lag5` (89) weights fed writes that nothing ever read back.
     i32 conthist_lag1: 700;
     i32 conthist_lag2: 700;
-    i32 conthist_lag3: 195;
     i32 conthist_lag4: 700;
     // 700. A halving to 350 was tried, on the argument that the write should
     // mirror `search()`'s 1/2 read weight. That argument does not survive
@@ -1322,22 +1320,25 @@ define! {
     // independent scalings, not a correspondence. Reverted to the measured
     // value; the comment in search.rs claiming the two mirror each other is the
     // thing that was wrong, not this number.
-    i32 conthist_lag5: 89;
     i32 conthist_lag6: 700;
-    // Positive-consistency multipliers, indexed by how many of the (up to 6)
-    // continuation entries for this move are already positive -- counted
+    // Positive-consistency multipliers, indexed by how many of the four
+    // written lags (1, 2, 4, 6) for this move are already positive -- counted
     // across all of them before any bonus is applied, so every lag is scaled
-    // alike. (This used to index a running count taken mid-loop, which
-    // structurally damped the nearest lags regardless of the position; see
-    // `update_continuation_histories_in_check`.) Same reasoning as the lag
-    // weights above: exposed, not re-guessed.
+    // alike, and normalised by the number of lags considered so the in-check
+    // path (lags 1-2 only) lands on the same scale. (This used to index a
+    // running count taken mid-loop, which structurally damped the nearest lags
+    // regardless of the position; see `update_continuation_histories_in_check`.)
+    //
+    // `conthist_mult5`/`conthist_mult6` (126/121) are removed: with six lags
+    // they were the "5 or 6 of 6 agree" slots, which cannot occur with four.
+    // The remaining five keep their tuned values, but note their meaning shifted
+    // slightly -- they were tuned against a 0..=6 count over six lags, and are
+    // now indexed 0..=4 over four. Worth an SPSA pass.
     i32 conthist_mult0: 94;
     i32 conthist_mult1: 103;
     i32 conthist_mult2: 110;
     i32 conthist_mult3: 106;
     i32 conthist_mult4: 119;
-    i32 conthist_mult5: 126;
-    i32 conthist_mult6: 121;
 
     // Move ordering
     // Weight of the low-ply-history term in `score_quiet`.

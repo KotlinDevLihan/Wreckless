@@ -1884,7 +1884,7 @@ fn search<NODE: NodeType>(
             // `corr_weight_div` documents for the correction blend.
             // Both continuation lags, held at upstream's scale. This sum is
             // upstream's two (lags 1 and 2) and is a different consumer from
-            // movepick's `CONTHIST_WEIGHTS`, which reads six.
+            // movepick's `CONTHIST_WEIGHTS`, which reads lags 1, 2, 4 and 6.
             //
             // Two problems were stacked here. First, lags 3 and 5 were being
             // *written* by update_continuation_histories_in_check but read by
@@ -1917,10 +1917,10 @@ fn search<NODE: NodeType>(
             // concurrency 8 -- while base, which never added the reads, sat at
             // 14.5 in both. Roughly two ply of search, spent on cache misses.
             //
-            // The extra lags are still WRITTEN by the update, and `score_quiet`
-            // still reads all six for move ordering. This is only about the
-            // per-move pruning input, where the traffic is multiplied by the
-            // move count.
+            // `score_quiet` reads lags 1, 2, 4 and 6 for move ordering, and the
+            // update writes exactly those four -- lags 3 and 5 are neither read
+            // nor written any more. This is only about the per-move pruning
+            // input, where the traffic is multiplied by the move count.
             td.quiet_history.get(threats, stm, mv)
                 + td.continuation_history.get(conthist[0], moved, to)
                 + td.continuation_history.get(conthist[1], moved, to)
@@ -2666,7 +2666,21 @@ fn search<NODE: NodeType>(
         td.shared.tt.write(hash, depth, raw_eval, best_score, bound, best_move, ply, tt_pv, NODE::PV);
     }
 
-    if !(in_check
+    // `!excluded`: a singular verification search runs this same node with the
+    // TT move removed, so its `best_score` is the best of the REMAINING moves at
+    // reduced depth -- biased low against `eval`, which is this node's own
+    // corrected static eval. Feeding `best_score - eval` into correction history
+    // from there records a systematic pessimism for exactly the positions that
+    // have a strong TT move, into the very slots real searches read back.
+    //
+    // Same reasoning that got the multicut correction update rejected (see the
+    // README's "Removed, and why"): a sub-search that suppresses the best move is
+    // not a statistically comparable sample of `(search result - static eval)`.
+    // Correction history feeds every RFP/FP/LMR/NMP margin, so it is a
+    // high-leverage place for a skewed sample. The TT write just above already
+    // carries the same guard.
+    if !(excluded
+        || in_check
         || best_move.is_noisy()
         || (bound == Bound::Upper && best_score >= eval)
         || (bound == Bound::Lower && best_score <= eval))
@@ -3393,35 +3407,36 @@ fn update_continuation_histories_in_check(
     td: &mut ThreadData, ply: isize, piece: Piece, sq: Square, bonus: i32, in_check: bool,
 ) {
     // Per-lag weights and positive-consistency multipliers, as in Stockfish:
-    // all six lags are updated, and the more continuation entries for this
-    // move are already positive, the stronger the update. Lags 1/2/4/6 are
-    // weighted equally (matching the already-tuned baseline, which treated those
-    // four lags at full and equal strength); lags 3/5 are fork additions kept at
-    // Stockfish's relative ratio to the primary weight. All SPSA-tunable.
+    // the more continuation entries for this move are already positive, the
+    // stronger the update. Only lags 1, 2, 4 and 6 are written, because those
+    // are the only lags anything READS: `score_quiet` in movepick.rs takes
+    // exactly lags 1/2/4/6 (`CONTHIST_WEIGHTS`) and the pruning `history` sum in
+    // `search()` takes lags 1/2.
     //
-    // Dropping 3 and 5 was tried and reverted. Both tables do weight them far
-    // below the rest -- 195 and 89 here against 700, and 277 and 126 in movepick
-    // against ~1000-1600 -- and redistributing movepick's share of that weight
-    // proportionally reproduces upstream's four-lag set to the unit. Suggestive,
-    // but not a measurement, and it shipped untested inside a batch that cost
-    // ~60 Elo. Retest it alone if at all: it changes move ordering at every
-    // node.
-    let conthist_bonuses: [(isize, i32); 6] = [
+    // Lags 3 and 5 used to be written here as well. They had already been found
+    // write-only once -- read by nothing, a third of every update spent on dead
+    // memory traffic -- and were "fixed" by having `score_quiet` read them. When
+    // `score_quiet` went back to upstream's four lags that fix was undone and
+    // the two lags became write-only again, on the hottest update path in the
+    // engine (this runs once per cutoff and once per searched quiet in the
+    // malus loop). Nothing consumed the entries, so dropping the writes cannot
+    // change what any table is read as, only how much it costs to maintain.
+    //
+    // The consistency count below also stops including two lags whose agreement
+    // never influenced a move's score, and the multiplier table shrinks to the
+    // five reachable positions (0..=4 of 4 lags agreeing). All SPSA-tunable.
+    let conthist_bonuses: [(isize, i32); 4] = [
         (1, p::conthist_lag1()),
         (2, p::conthist_lag2()),
-        (3, p::conthist_lag3()),
         (4, p::conthist_lag4()),
-        (5, p::conthist_lag5()),
         (6, p::conthist_lag6()),
     ];
-    let multipliers: [i32; 7] = [
+    let multipliers: [i32; 5] = [
         p::conthist_mult0(),
         p::conthist_mult1(),
         p::conthist_mult2(),
         p::conthist_mult3(),
         p::conthist_mult4(),
-        p::conthist_mult5(),
-        p::conthist_mult6(),
     ];
 
     // "How many of this move's continuation entries already favour it" is a
@@ -3440,7 +3455,7 @@ fn update_continuation_histories_in_check(
     // which this function -- called on every cutoff -- should not pay for. So
     // the first pass caches each eligible entry's subtable pointer and the
     // second reuses them, leaving exactly one stack traversal as before.
-    let mut targets = [(std::ptr::null_mut::<[[i16; 64]; 13]>(), 0i32, 0isize); 6];
+    let mut targets = [(std::ptr::null_mut::<[[i16; 64]; 13]>(), 0i32, 0isize); 4];
     let mut len = 0;
     let mut positive_count = 0;
 
@@ -3463,13 +3478,14 @@ fn update_continuation_histories_in_check(
 
     // Indexed by how many of the lags *considered* agreed, not by the raw
     // count. In check the loop stops after lag 2, so a raw count can never
-    // exceed 2 and the multipliers tuned for indices 3-6 are unreachable there
-    // -- an in-check node with both lags positive got index 2 where an
-    // out-of-check node with all six positive got index 6, for the same
-    // "everything agrees" state. Scaling by `len` puts both on the same
-    // footing. `len` is 0 only when no lag had a move, and index 0 is the
-    // no-agreement multiplier, which is the right answer for that case.
-    let multiplier = multipliers[if len == 0 { 0 } else { positive_count * 6 / len }];
+    // exceed 2 and the upper multipliers are unreachable there -- an in-check
+    // node with both lags positive would get index 2 where an out-of-check node
+    // with all four positive gets index 4, for the same "everything agrees"
+    // state. Scaling by `len` puts both on the same footing: with all four
+    // lags present the index is the raw count, and with two it is 0, 2 or 4.
+    // `len` is 0 only when no lag had a move, and index 0 is the no-agreement
+    // multiplier, which is the right answer for that case.
+    let multiplier = multipliers[if len == 0 { 0 } else { positive_count * 4 / len }];
 
     for &(conthist, weight, offset) in &targets[..len] {
         // Overall scale stays SPSA-tunable.

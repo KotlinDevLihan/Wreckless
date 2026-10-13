@@ -366,7 +366,9 @@ impl TranspositionTable {
 
         entry.offset_depth = TtDepth::to_tt(depth);
         entry.score = score as i16;
-        entry.raw_eval = raw_eval as i16;
+        // Saturate instead of wrapping: an out-of-range raw eval would otherwise
+        // wrap to a wildly wrong value of the opposite sign.
+        entry.raw_eval = raw_eval.clamp(i16::MIN as i32 + 1, i16::MAX as i32) as i16;
         entry.flags = Flags::new(bound, tt_pv, tt_age);
         
         cluster.write_entry(replacement_index, entry);
